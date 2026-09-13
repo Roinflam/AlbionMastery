@@ -1,0 +1,23 @@
+{
+  "required": true,
+  "minVersion": "0.8.5",
+  "package": "com.flameforge.albionmastery.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "albionmastery.refmap.json",
+  "mixins": [
+    "ForgeEventFactoryMixin",
+    "GunAmmoAndReloadMixin",
+    "GunCanReloadMixin",
+    "ItemStackDurabilityMixin",
+    "MeleeAttackSpeedMixin"
+  ],
+  "client": [
+    "ClientGunTooltipMixin",
+    "GunHudAmmoMixin",
+    "ObjectAnimationRunnerMixin"
+  ],
+  "server": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

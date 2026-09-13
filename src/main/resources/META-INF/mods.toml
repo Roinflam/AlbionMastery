@@ -1,0 +1,54 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="${mod_authors}"
+description='''
+${mod_description}
+'''
+
+[[dependencies.${mod_id}]]
+    modId="forge"
+    mandatory=true
+    versionRange="${forge_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+# TACZ 是本模组当前阶段的硬依赖：伤害注入与枪械枚举都依赖其 API
+[[dependencies.${mod_id}]]
+    modId="tacz"
+    mandatory=true
+    versionRange="[1.1,)"
+    ordering="AFTER"
+    side="BOTH"
+
+# lrtactical（近战附属）是可选依赖：装了就自动接入刀包，没装也不影响枪械部分
+[[dependencies.${mod_id}]]
+    modId="lrtactical"
+    mandatory=false
+    versionRange="[0.4,)"
+    ordering="AFTER"
+    side="BOTH"
+
+# 拔刀剑是可选依赖：装了就自动接入全部刀包，没装也不影响枪械与近战部分
+[[dependencies.${mod_id}]]
+    modId="slashblade"
+    mandatory=false
+    versionRange="[1.9,)"
+    ordering="AFTER"
+    side="BOTH"
+
+# 本模组的 Mixin，配置文件为空，供后续拔刀剑 / 近战附属阶段直接使用
+[[mixins]]
+config="${mod_id}.mixins.json"
