@@ -37,14 +37,16 @@ public final class SpecializationManager {
         OK,
         /** 功能被配置关闭。 */
         DISABLED,
-        /** 总体专精还没满级。 */
+        /** 这个槽还没解锁（本类型进度不够）。 */
         LOCKED,
         /** 还在冷却里。 */
         COOLDOWN,
         /** 流派不存在，或者和来源对不上。 */
         INVALID,
         /** 已经就是这个流派了。 */
-        UNCHANGED
+        UNCHANGED,
+        /** 另一个槽已经选了同一个流派。 */
+        DUPLICATE
     }
 
     /**
@@ -56,9 +58,28 @@ public final class SpecializationManager {
      * @return 切换结果
      */
     public static Result select(ServerPlayer player, String typeKey, Specialization spec) {
+        return select(player, typeKey, 1, spec);
+    }
+
+    /**
+     * 给某个类型的某个槽位选流派。
+     *
+     * <p>两个槽不能选同一个流派（叠两份同样的东西没意义，还会把倍率翻倍）。
+     * 选「制式」等于把这个槽清空。冷却按槽位各记各的。
+     *
+     * @param player  玩家
+     * @param typeKey 类型键
+     * @param slot    槽位，1 或 2
+     * @param spec    流派
+     * @return 结果
+     */
+    public static Result select(ServerPlayer player, String typeKey, int slot, Specialization spec) {
         MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
         if (!snapshot.enableSpecialization) {
             return Result.DISABLED;
+        }
+        if (slot < 1 || slot > WeaponKeys.SPEC_SLOTS) {
+            return Result.INVALID;
         }
         // 流派必须属于这个类型所在的来源：枪械的流派不能安到近战武器头上
         if (!WeaponKeys.isValidTypeKey(typeKey)
@@ -69,23 +90,31 @@ public final class SpecializationManager {
         if (data == null) {
             return Result.INVALID;
         }
-        if (!SpecializationEffects.isUnlocked(data, typeKey, snapshot)) {
+        if (!SpecializationEffects.isSlotUnlocked(data, typeKey, slot, snapshot)) {
             return Result.LOCKED;
         }
-        if (spec.key().equals(data.getSpecialization(typeKey))) {
+        String current = data.getSpecialization(typeKey, slot);
+        if (spec.key().equals(current) || (current == null && spec.isStandard())) {
             return Result.UNCHANGED;
         }
-        if (remainingCooldownSeconds(player, typeKey, snapshot) > 0L) {
+        // 另一个槽已经选了同一个流派：不许重复
+        for (int other = 1; other <= WeaponKeys.SPEC_SLOTS; other++) {
+            if (other != slot && !spec.isStandard()
+                    && spec.key().equals(data.getSpecialization(typeKey, other))) {
+                return Result.DUPLICATE;
+            }
+        }
+        if (remainingCooldownSeconds(player, typeKey, slot, snapshot) > 0L) {
             return Result.COOLDOWN;
         }
 
-        data.setSpecialization(typeKey, spec.key());
+        data.setSpecialization(typeKey, slot, spec.isStandard() ? null : spec.key());
         LAST_SWITCH.computeIfAbsent(player.getUUID(), uuid -> new HashMap<>())
-                .put(typeKey, System.currentTimeMillis());
+                .put(WeaponKeys.specSlotKey(typeKey, slot), System.currentTimeMillis());
         // 移速是挂在玩家属性上的，切了流派要立刻重算，不能等到下次换武器
         SpecMoveSpeed.refresh(player);
-        AlbionMastery.LOGGER.debug("玩家 {} 将类型 {} 的特化切换为 {}",
-                player.getGameProfile().getName(), typeKey, spec.key());
+        AlbionMastery.LOGGER.debug("玩家 {} 将类型 {} 槽位 {} 的特化切换为 {}",
+                player.getGameProfile().getName(), typeKey, slot, spec.key());
         return Result.OK;
     }
 
@@ -99,11 +128,25 @@ public final class SpecializationManager {
      */
     public static long remainingCooldownSeconds(ServerPlayer player, String typeKey,
                                                 MasteryConfig.Snapshot snapshot) {
+        return remainingCooldownSeconds(player, typeKey, 1, snapshot);
+    }
+
+    /**
+     * 某个类型某个槽位的切换冷却还剩几秒。
+     *
+     * @param player   玩家
+     * @param typeKey  类型键
+     * @param slot     槽位
+     * @param snapshot 配置快照
+     * @return 剩余秒数，0 表示可以切
+     */
+    public static long remainingCooldownSeconds(ServerPlayer player, String typeKey, int slot,
+                                                MasteryConfig.Snapshot snapshot) {
         Map<String, Long> perType = LAST_SWITCH.get(player.getUUID());
         if (perType == null) {
             return 0L;
         }
-        Long last = perType.get(typeKey);
+        Long last = perType.get(WeaponKeys.specSlotKey(typeKey, slot));
         if (last == null) {
             return 0L;
         }

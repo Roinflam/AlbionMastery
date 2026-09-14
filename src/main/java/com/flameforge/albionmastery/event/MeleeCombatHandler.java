@@ -85,6 +85,11 @@ public final class MeleeCombatHandler {
         if (WeaponKeys.PROVIDER_SLASHBLADE.equals(weapon.providerId())) {
             return;
         }
+        // 拿着法术书 / 法杖抡人不是施法，法术的专精不该算在这一下上
+        if (WeaponKeys.PROVIDER_IRONS_SPELLS.equals(weapon.providerId())
+                || WeaponKeys.PROVIDER_ARS_NOUVEAU.equals(weapon.providerId())) {
+            return;
+        }
 
         MasteryData data = MasteryHelper.get(player);
         if (data == null) {
@@ -101,7 +106,7 @@ public final class MeleeCombatHandler {
         }
 
         MasteryHelper.Bonus bonus = MasteryHelper.computeBonus(data, weapon, snapshot);
-        SpecializationValues spec = SpecializationEffects.forData(data, weapon.typeKey(), snapshot);
+        SpecializationValues spec = SpecializationEffects.forData(data, weapon, snapshot);
 
         // 特化的伤害倍率独立于专精加成之外再乘一层：专精是练出来的，特化是换来的。
         // 「看情况」的那些条件（有没有护甲、目标残不残血、自己血多少）统一由

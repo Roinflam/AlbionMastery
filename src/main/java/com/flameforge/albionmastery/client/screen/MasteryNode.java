@@ -65,6 +65,17 @@ public final class MasteryNode {
     /** 悬停缩放插值，每帧向目标值逼近。 */
     public float hoverAnim;
 
+    /**
+     * 本帧缓存的等级，配合 {@link #cachedLevelStamp} 用。
+     *
+     * <p>一帧里连线、节点底板、光环、铭牌会各问一次这个节点的等级，每次都是一次
+     * 字符串键的哈希查表；几千个节点全在视野里时这就是几万次查表。缓存到帧结束，一帧只查一次。
+     */
+    public int cachedLevel;
+
+    /** {@link #cachedLevel} 属于哪一帧；和界面的帧号对不上就重新算。初始 -1 表示还没算过。 */
+    public int cachedLevelStamp = -1;
+
     /** 子图标轮换的间隔（毫秒）。 */
     private static final long ICON_CYCLE_MS = 1600L;
 
@@ -145,13 +156,27 @@ public final class MasteryNode {
      * @return 图标物品堆，没有可用图标时返回 {@link ItemStack#EMPTY}
      */
     public ItemStack iconAt(long timeMs) {
+        WeaponEntry entry = iconEntryAt(timeMs);
+        return entry == null ? ItemStack.EMPTY : entry.icon();
+    }
+
+    /**
+     * 此刻该显示的图标来自哪件武器。
+     *
+     * <p>画图标的地方要看这件武器是贴图图标还是物品图标，所以给整个条目而不只是物品。
+     *
+     * @param timeMs 当前时刻
+     * @return 武器条目；没有可显示的返回 null
+     */
+    @Nullable
+    public WeaponEntry iconEntryAt(long timeMs) {
         return switch (this.type) {
-            case WEAPON -> this.weapon == null ? ItemStack.EMPTY : this.weapon.icon();
+            case WEAPON -> this.weapon;
             case TYPE -> this.typeGroup == null
-                    ? ItemStack.EMPTY : cycle(this.typeGroup.weapons(), timeMs, this.typeGroup.key());
+                    ? null : cycle(this.typeGroup.weapons(), timeMs, this.typeGroup.key());
             case SOURCE -> this.source == null
-                    ? ItemStack.EMPTY : cycle(this.source.allWeapons(), timeMs, this.source.id());
-            default -> ItemStack.EMPTY;
+                    ? null : cycle(this.source.allWeapons(), timeMs, this.source.id());
+            default -> null;
         };
     }
 
@@ -163,12 +188,13 @@ public final class MasteryNode {
      * @param seed    相位种子，让不同节点错开跳动
      * @return 当前应显示的图标
      */
-    private static ItemStack cycle(List<WeaponEntry> weapons, long timeMs, String seed) {
+    @Nullable
+    private static WeaponEntry cycle(List<WeaponEntry> weapons, long timeMs, String seed) {
         if (weapons.isEmpty()) {
-            return ItemStack.EMPTY;
+            return null;
         }
         long step = timeMs / ICON_CYCLE_MS + Math.abs((long) seed.hashCode());
-        return weapons.get((int) Math.floorMod(step, weapons.size())).icon();
+        return weapons.get((int) Math.floorMod(step, weapons.size()));
     }
 
     /**

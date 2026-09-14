@@ -4,9 +4,14 @@ import com.flameforge.albionmastery.AlbionMastery;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.weapon.ResolvedWeapon;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
+import com.flameforge.albionmastery.weapon.compat.IronsSpellsSupport;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
+import javax.annotation.Nullable;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
@@ -49,6 +54,9 @@ public final class MasteryExperienceHook {
     /** 待发放的击杀奖励，键是被杀生物的实体 ID。 */
     private static final Map<Integer, Pending> PENDING = new HashMap<>();
 
+    /** CustomNPCs 的 modid，只用来比命名空间。 */
+    private static final String CUSTOM_NPCS_MOD_ID = "customnpcs";
+
     private MasteryExperienceHook() {
     }
 
@@ -59,11 +67,11 @@ public final class MasteryExperienceHook {
      * @param player         击杀者
      * @param droppedExperience 该监听器看到的掉落经验（不保证是最终值）
      */
-    public static void record(int entityId, Player player, int droppedExperience) {
+    public static void record(int entityId, Player player, int originalExperience, int droppedExperience) {
         if (mixinActive || !(player instanceof ServerPlayer)) {
             return;
         }
-        PENDING.put(entityId, new Pending(player, droppedExperience));
+        PENDING.put(entityId, new Pending(player, originalExperience, droppedExperience));
     }
 
     /**
@@ -73,10 +81,10 @@ public final class MasteryExperienceHook {
      * @param player            击杀者
      * @param droppedExperience 最终掉落经验
      */
-    public static void commitFinal(int entityId, Player player, int droppedExperience) {
+    public static void commitFinal(int entityId, Player player, int originalExperience, int droppedExperience) {
         mixinActive = true;
         PENDING.remove(entityId);
-        award(player, droppedExperience);
+        award(player, originalExperience, droppedExperience);
     }
 
     /**
@@ -91,7 +99,7 @@ public final class MasteryExperienceHook {
         List<Pending> pending = new ArrayList<>(PENDING.values());
         PENDING.clear();
         for (Pending entry : pending) {
-            award(entry.player, entry.droppedExperience);
+            award(entry.player, entry.originalExperience, entry.droppedExperience);
         }
     }
 
@@ -121,11 +129,50 @@ public final class MasteryExperienceHook {
      * @param killer            造成击杀的玩家，用来确定维度和位置
      * @param droppedExperience 怪物掉落的原版经验
      */
-    private static void award(Player killer, int droppedExperience) {
+    /**
+     * 被杀的是不是自定义 NPC（CustomNPCs）。
+     *
+     * <p>按实体类型的命名空间认，不引用它的任何类，没装也能编译、能跑。
+     *
+     * @param entity 实体
+     * @return 是 NPC 返回 true
+     */
+    public static boolean isCustomNpc(@Nullable Entity entity) {
+        if (entity == null) {
+            return false;
+        }
+        ResourceLocation typeId = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
+        return typeId != null && CUSTOM_NPCS_MOD_ID.equals(typeId.getNamespace());
+    }
+
+    /**
+     * 杀 NPC：按 NPC 编辑页里设的掉落经验（min / max 平均）折算；读不到或设的是 0 时用配置的兜底值。
+     *
+     * <p>走 {@code LivingDeathEvent}，因为 NPC 掉经验是它自己生成经验球，不走原版那条路，
+     * 掉落经验事件根本不会触发。
+     *
+     * @param killer 击杀者
+     * @param npc    被杀的 NPC
+     */
+    public static void awardNpcKill(Player killer, LivingEntity npc) {
+        int experience = NpcExperienceReader.read(npc).orElse(0);
+        if (experience <= 0) {
+            experience = MasteryConfig.COMMON.npcFallbackMobExperience.get();
+        }
+        if (experience <= 0) {
+            return;
+        }
+        award(killer, experience, experience);
+    }
+
+    private static void award(Player killer, int originalExperience, int droppedExperience) {
         if (!(killer instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel level)) {
             return;
         }
-        int dropped = Math.max(0, droppedExperience);
+        // 默认按原版数值算：恶意、金龟这类模组把掉落经验放大多少倍，专精经验都不跟着涨；
+        // 怪最终不掉经验（掉落值 0，比如被取消了）时也不给
+        boolean useOriginal = MasteryConfig.COMMON.xpFromOriginalMobExperience.get();
+        int dropped = Math.max(0, useOriginal && droppedExperience > 0 ? originalExperience : droppedExperience);
 
         double base = MasteryConfig.COMMON.xpPerKill.get()
                 + dropped * MasteryConfig.COMMON.xpPerMobExperience.get();
@@ -198,18 +245,63 @@ public final class MasteryExperienceHook {
         if (data == null) {
             return false;
         }
-        for (InteractionHand hand : InteractionHand.values()) {
-            ResolvedWeapon weapon = WeaponResolver.resolve(player.getItemInHand(hand));
-            if (weapon == null) {
-                continue;
-            }
-            if (data.getWeaponLevel(weapon.weaponKey()) < snapshot.maxLevel
-                    || data.getTypeLevel(weapon.typeKey()) < snapshot.maxLevel
-                    || data.getOverallLevel(weapon.overallKey()) < snapshot.maxLevel) {
-                return true;
+        for (XpGroup group : xpGroups(player)) {
+            for (ResolvedWeapon weapon : group.weapons()) {
+                if (data.getWeaponLevel(weapon.weaponKey()) < snapshot.maxLevel
+                        || data.getTypeLevel(weapon.typeKey()) < snapshot.maxLevel
+                        || data.getOverallLevel(weapon.overallKey()) < snapshot.maxLevel) {
+                    return true;
+                }
             }
         }
         return false;
+    }
+
+    /**
+     * 一组要拿击杀经验的武器，以及这组按几折发。
+     *
+     * @param weapons 武器
+     * @param ratio   经验比例（主手 1.0，副手按配置打折）
+     */
+    private record XpGroup(List<ResolvedWeapon> weapons, double ratio) {
+    }
+
+    /**
+     * 这次击杀该给哪些武器发经验。
+     *
+     * <p>主手、副手各一组：一件物品可能是一串武器（新生魔艺法术书里当前法术用到的每个符文），
+     * 组内每件都拿；铁魔法的卷轴算，魔法书不算。铁魔法单独一组：饰品栏里的书只给法术栏里
+     * <b>当前选中</b>的那一个法术——只给选中的，才不会拿一本满书随便杀点东西就十来个法术一起涨。
+     *
+     * @param player 玩家
+     * @return 分组列表，可能含空组
+     */
+    private static List<XpGroup> xpGroups(ServerPlayer player) {
+        List<XpGroup> groups = new ArrayList<>(3);
+        double offhandRatio = MasteryConfig.COMMON.offhandXpRatio.get();
+        groups.add(new XpGroup(handWeapons(player.getMainHandItem()), 1.0D));
+        groups.add(new XpGroup(handWeapons(player.getOffhandItem()), offhandRatio));
+        if (WeaponResolver.isIronsLoaded()) {
+            ResolvedWeapon selected = IronsSpellsSupport.selectedSpell(player);
+            groups.add(new XpGroup(selected == null ? List.of() : List.of(selected), 1.0D));
+        }
+        return groups;
+    }
+
+    /**
+     * 手里一件物品对应的武器。
+     *
+     * <p>铁魔法的<b>魔法书</b>在这里不算：书只能装在饰品栏里用，拿在手上什么都放不出来，
+     * 它那份走「当前选中的法术」那一组。<b>卷轴</b>和附魔进武器里的法术照算——那是真拿在手上用的。
+     *
+     * @param stack 物品
+     * @return 武器列表
+     */
+    private static List<ResolvedWeapon> handWeapons(ItemStack stack) {
+        if (WeaponResolver.isIronsLoaded() && IronsSpellsSupport.isSpellbook(stack)) {
+            return List.of();
+        }
+        return WeaponResolver.resolveAll(stack);
     }
 
     private static void awardTo(ServerPlayer player, long amount) {
@@ -217,24 +309,31 @@ public final class MasteryExperienceHook {
         if (data == null) {
             return;
         }
-        double offhandRatio = MasteryConfig.COMMON.offhandXpRatio.get();
-        Set<String> awarded = new HashSet<>(2);
+        Set<String> awarded = new HashSet<>(4);
+        double multiRatio = MasteryConfig.COMMON.multiWeaponXpRatio.get();
 
-        for (InteractionHand hand : InteractionHand.values()) {
-            ItemStack stack = player.getItemInHand(hand);
-            ResolvedWeapon weapon = WeaponResolver.resolve(stack);
-            if (weapon == null || !awarded.add(weapon.weaponKey())) {
+        for (XpGroup group : xpGroups(player)) {
+            List<ResolvedWeapon> weapons = group.weapons();
+            if (weapons.isEmpty()) {
                 continue;
             }
-            long give = hand == InteractionHand.MAIN_HAND
-                    ? amount : Math.round(amount * offhandRatio);
+            long give = Math.round(amount * group.ratio());
+            // 一组里好几件（一个法术的好几个符文）时按配置打折
+            if (weapons.size() > 1) {
+                give = Math.round(give * multiRatio);
+            }
             if (give <= 0L) {
                 continue;
             }
-            try {
-                MasteryHelper.awardXp(data, weapon, give, MasteryConfig.serverSnapshot());
-            } catch (Exception exception) {
-                AlbionMastery.LOGGER.error("发放击杀专精经验失败: {}", weapon.weaponKey(), exception);
+            for (ResolvedWeapon weapon : weapons) {
+                if (!awarded.add(weapon.weaponKey())) {
+                    continue;
+                }
+                try {
+                    MasteryHelper.awardXp(data, weapon, give, MasteryConfig.serverSnapshot());
+                } catch (Exception exception) {
+                    AlbionMastery.LOGGER.error("发放击杀专精经验失败: {}", weapon.weaponKey(), exception);
+                }
             }
         }
     }
@@ -245,6 +344,6 @@ public final class MasteryExperienceHook {
      * @param player            击杀者
      * @param droppedExperience 掉落经验
      */
-    private record Pending(Player player, int droppedExperience) {
+    private record Pending(Player player, int originalExperience, int droppedExperience) {
     }
 }

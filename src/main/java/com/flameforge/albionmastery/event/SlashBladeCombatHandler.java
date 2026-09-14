@@ -1,6 +1,5 @@
 package com.flameforge.albionmastery.event;
 
-import com.flameforge.albionmastery.AlbionMastery;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.config.SpecializationValues;
@@ -20,7 +19,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.registries.ForgeRegistries;
 
 /**
@@ -39,8 +37,10 @@ import net.minecraftforge.registries.ForgeRegistries;
  *
  * <p>本类直接引用拔刀剑的类型，靠 {@code mods.toml} 里的可选依赖 + 事件类不存在时
  * Forge 不会注册该监听来保证缺模组时不报错。
+ *
+ * <p>方法签名里有拔刀剑的事件类，没装拔刀剑时不能让事件总线去反射它，所以不用
+ * {@code @Mod.EventBusSubscriber}，由主类判断装了才手动注册。
  */
-@Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID)
 public final class SlashBladeCombatHandler {
 
     private SlashBladeCombatHandler() {
@@ -171,7 +171,7 @@ public final class SlashBladeCombatHandler {
         if (data == null) {
             return;
         }
-        SpecializationValues spec = SpecializationEffects.forData(data, blade.typeKey(), snapshot);
+        SpecializationValues spec = SpecializationEffects.forData(data, blade, snapshot);
         if (!spec.hasCombo()) {
             return;
         }

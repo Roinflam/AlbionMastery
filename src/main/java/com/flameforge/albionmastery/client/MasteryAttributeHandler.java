@@ -60,7 +60,8 @@ public final class MasteryAttributeHandler {
         if (WeaponKeys.PROVIDER_SLASHBLADE.equals(weapon.providerId())) {
             return values.directDamage();
         }
-        if (WeaponKeys.PROVIDER_LRTACTICAL_MELEE.equals(weapon.providerId())) {
+        if (WeaponKeys.PROVIDER_LRTACTICAL_MELEE.equals(weapon.providerId())
+                || WeaponKeys.PROVIDER_VANILLA_MELEE.equals(weapon.providerId())) {
             return values.damage();
         }
         return 1.0D;

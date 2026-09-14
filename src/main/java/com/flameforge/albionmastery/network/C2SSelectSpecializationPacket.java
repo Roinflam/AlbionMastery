@@ -5,6 +5,7 @@ import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.spec.Specialization;
 import com.flameforge.albionmastery.mastery.spec.SpecializationManager;
+import com.flameforge.albionmastery.weapon.WeaponKeys;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -31,15 +32,30 @@ public class C2SSelectSpecializationPacket {
     /** 流派的完整键。 */
     private final String specKey;
 
+    /** 槽位，1 或 2。 */
+    private final int slot;
+
     /**
-     * 构造网络包。
+     * 构造网络包（第一槽）。
      *
      * @param typeKey 目标武器类型的键
      * @param specKey 流派的完整键
      */
     public C2SSelectSpecializationPacket(String typeKey, String specKey) {
+        this(typeKey, specKey, 1);
+    }
+
+    /**
+     * 构造网络包。
+     *
+     * @param typeKey 目标武器类型的键
+     * @param specKey 流派的完整键
+     * @param slot    槽位，1 或 2
+     */
+    public C2SSelectSpecializationPacket(String typeKey, String specKey, int slot) {
         this.typeKey = typeKey;
         this.specKey = specKey;
+        this.slot = slot;
     }
 
     /**
@@ -50,6 +66,7 @@ public class C2SSelectSpecializationPacket {
     public void encode(FriendlyByteBuf buf) {
         buf.writeUtf(this.typeKey, 128);
         buf.writeUtf(this.specKey, 128);
+        buf.writeVarInt(this.slot);
     }
 
     /**
@@ -59,7 +76,8 @@ public class C2SSelectSpecializationPacket {
      * @return 网络包
      */
     public static C2SSelectSpecializationPacket decode(FriendlyByteBuf buf) {
-        return new C2SSelectSpecializationPacket(buf.readUtf(128), buf.readUtf(128));
+        return new C2SSelectSpecializationPacket(buf.readUtf(128), buf.readUtf(128),
+                Math.max(1, Math.min(WeaponKeys.SPEC_SLOTS, buf.readVarInt())));
     }
 
     /**
@@ -80,8 +98,8 @@ public class C2SSelectSpecializationPacket {
                 return;
             }
             SpecializationManager.Result result =
-                    SpecializationManager.select(player, this.typeKey, spec);
-            Component feedback = describe(result, player, spec, this.typeKey);
+                    SpecializationManager.select(player, this.typeKey, this.slot, spec);
+            Component feedback = describe(result, player, spec, this.typeKey, this.slot);
             if (feedback != null) {
                 player.displayClientMessage(feedback, true);
             }
@@ -131,17 +149,19 @@ public class C2SSelectSpecializationPacket {
      */
     @Nullable
     private static Component describe(SpecializationManager.Result result, ServerPlayer player,
-                                      Specialization spec, String typeKey) {
+                                      Specialization spec, String typeKey, int slot) {
         return switch (result) {
-            case OK -> Component.translatable("msg.albionmastery.spec_selected",
+            case OK -> Component.translatable("msg.albionmastery.spec_selected_slot", slot,
                     Component.translatable(spec.nameKey())).withStyle(ChatFormatting.GOLD);
+            case DUPLICATE -> Component.translatable("msg.albionmastery.spec_duplicate")
+                    .withStyle(ChatFormatting.RED);
             case DISABLED -> Component.translatable("msg.albionmastery.spec_disabled")
                     .withStyle(ChatFormatting.RED);
             case LOCKED -> Component.translatable("msg.albionmastery.spec_locked")
                     .withStyle(ChatFormatting.RED);
             case COOLDOWN -> Component.translatable("msg.albionmastery.spec_cooldown",
                             formatDuration(SpecializationManager.remainingCooldownSeconds(
-                                    player, typeKey, MasteryConfig.serverSnapshot())))
+                                    player, typeKey, slot, MasteryConfig.serverSnapshot())))
                     .withStyle(ChatFormatting.RED);
             // 键非法或者压根没变，不用打扰玩家
             case INVALID, UNCHANGED -> null;

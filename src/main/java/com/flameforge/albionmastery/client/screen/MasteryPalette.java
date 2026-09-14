@@ -56,6 +56,9 @@ public final class MasteryPalette {
     /** 警告色。 */
     public static final int WARN = 0xFFE08A3C;
 
+    /** 白金：比亮金再白一档，只给「整条链路都满级」的节点用，是这套金色里的最高一档。 */
+    public static final int GOLD_WHITE = 0xFFFFF7DE;
+
     private MasteryPalette() {
     }
 }

@@ -51,6 +51,15 @@ import java.util.function.ToDoubleFunction;
  * @param comboStep            连续命中同一目标时每层增加的伤害比例（0.05 = 每层 +5%）
  * @param comboMax             连击最多叠几层，0 表示这个流派没有连击
  * @param durability           武器耐久消耗倍率，小于 1 更耐用
+ * @param manaCost             法术法力消耗倍率，小于 1 更省
+ * @param spellCooldown        法术冷却时间倍率，小于 1 更快
+ * @param spellLevel           法术等级加成，整数，0 表示不加
+ * @param gunVolume            枪声音量倍率（消音器之类），小于 1 更安静
+ * @param bulletSpeed          子弹初速倍率
+ * @param recoil               后座倍率，小于 1 更稳
+ * @param castTime             法术施法时间（前摇）倍率，小于 1 更快
+ * @param drawSpeed            拉弓蓄力速度倍率，大于 1 拉满更快
+ * @param doubleCast           法术双重施法概率，0 到 1：施放后自动免费再放一次
  */
 public record SpecializationValues(double magazine,
                                    double reloadTime,
@@ -78,7 +87,16 @@ public record SpecializationValues(double magazine,
                                    double killRefill,
                                    double comboStep,
                                    double comboMax,
-                                   double durability) {
+                                   double durability,
+                                   double manaCost,
+                                   double spellCooldown,
+                                   double spellLevel,
+                                   double gunVolume,
+                                   double bulletSpeed,
+                                   double recoil,
+                                   double castTime,
+                                   double drawSpeed,
+                                   double doubleCast) {
 
     /** 全部维度的项名，同时也是网络传输的顺序。改动顺序会破坏兼容性，新项只能追加在末尾。 */
     public static final List<String> KEYS = List.of(
@@ -90,7 +108,9 @@ public record SpecializationValues(double magazine,
             "executeDamage", "executeThreshold",
             "freshDamage", "desperationDamage", "desperationThreshold", "desperationFloor",
             "critChance", "critDamage", "lifeSteal", "moveSpeed", "xpGain",
-            "killRefill", "comboStep", "comboMax", "durability");
+            "killRefill", "comboStep", "comboMax", "durability",
+            "manaCost", "spellCooldown", "spellLevel",
+            "gunVolume", "bulletSpeed", "recoil", "castTime", "drawSpeed", "doubleCast");
 
     /** 什么都不改的中性值，用于「制式」以及查不到数值时的兜底。 */
     public static final SpecializationValues NEUTRAL = of(SpecializationValues::defaultOf);
@@ -109,7 +129,7 @@ public record SpecializationValues(double magazine,
             case "executeThreshold" -> 0.3D;
             case "desperationThreshold" -> 0.5D;
             case "desperationFloor" -> 0.3D;
-            case "critChance", "lifeSteal", "killRefill", "comboStep", "comboMax" -> 0.0D;
+            case "critChance", "lifeSteal", "killRefill", "comboStep", "comboMax", "spellLevel", "doubleCast" -> 0.0D;
             case "critDamage" -> 1.5D;
             default -> 1.0D;
         };
@@ -150,6 +170,15 @@ public record SpecializationValues(double magazine,
             case "comboStep" -> this.comboStep;
             case "comboMax" -> this.comboMax;
             case "durability" -> this.durability;
+            case "manaCost" -> this.manaCost;
+            case "spellCooldown" -> this.spellCooldown;
+            case "spellLevel" -> this.spellLevel;
+            case "gunVolume" -> this.gunVolume;
+            case "bulletSpeed" -> this.bulletSpeed;
+            case "recoil" -> this.recoil;
+            case "castTime" -> this.castTime;
+            case "drawSpeed" -> this.drawSpeed;
+            case "doubleCast" -> this.doubleCast;
             default -> defaultOf(key);
         };
     }
@@ -188,7 +217,16 @@ public record SpecializationValues(double magazine,
                 lookup.applyAsDouble("killRefill"),
                 lookup.applyAsDouble("comboStep"),
                 lookup.applyAsDouble("comboMax"),
-                lookup.applyAsDouble("durability"));
+                lookup.applyAsDouble("durability"),
+                lookup.applyAsDouble("manaCost"),
+                lookup.applyAsDouble("spellCooldown"),
+                lookup.applyAsDouble("spellLevel"),
+                lookup.applyAsDouble("gunVolume"),
+                lookup.applyAsDouble("bulletSpeed"),
+                lookup.applyAsDouble("recoil"),
+                lookup.applyAsDouble("castTime"),
+                lookup.applyAsDouble("drawSpeed"),
+                lookup.applyAsDouble("doubleCast"));
     }
 
     /**
@@ -228,7 +266,9 @@ public record SpecializationValues(double magazine,
     public static double minOf(String key) {
         return switch (key) {
             // 时间类和容量不能是 0，否则「间隔为零」会变成无限连击、容量 0 会永远装不满
-            case "reloadTime", "attackInterval", "magazine" -> 0.05D;
+            case "reloadTime", "attackInterval", "magazine", "manaCost", "spellCooldown", "castTime" -> 0.05D;
+            // 弹速夹得紧：太快子弹一 tick 飞穿好几个区块，碰撞会漏
+            case "bulletSpeed" -> 0.2D;
             // 移速倍率再低也得能走，否则玩家被钉在原地
             case "moveSpeed" -> 0.2D;
             // 暴击倍率低于 1 就不叫暴击了
@@ -247,9 +287,12 @@ public record SpecializationValues(double magazine,
         return switch (key) {
             // 血量比例、概率、回血比例、补弹比例都是 0~1
             case "executeThreshold", "desperationThreshold", "desperationFloor",
-                    "critChance", "lifeSteal", "killRefill" -> 1.0D;
-            case "reloadTime", "attackInterval", "magazine", "durability", "critDamage" -> 20.0D;
-            case "moveSpeed" -> 5.0D;
+                    "critChance", "lifeSteal", "killRefill", "doubleCast" -> 1.0D;
+            case "reloadTime", "attackInterval", "magazine", "durability", "critDamage",
+                    "manaCost", "spellCooldown" -> 20.0D;
+            case "spellLevel" -> 10.0D;
+            case "moveSpeed", "gunVolume", "recoil", "castTime" -> 5.0D;
+            case "bulletSpeed" -> 2.5D;
             case "comboStep" -> 10.0D;
             default -> 100.0D;
         };
@@ -267,6 +310,35 @@ public record SpecializationValues(double magazine,
             return defaultOf(key);
         }
         return Math.max(minOf(key), Math.min(maxOf(key), value));
+    }
+
+    /**
+     * 两个槽位的流派叠在一起。
+     *
+     * <p>规则按项的性质定：倍率类相乘（伤害 1.4 × 1.1 = 1.54）；概率、比例、每层加成相加
+     * （暴击率 15% + 10% = 25%）；层数上限、法术等级加成、暴击倍率和各种阈值取大的——
+     * 这些相加或相乘都没道理（两个流派各给 +1 级不该变 +2 级？其实该。所以法术等级相加；
+     * 暴击倍率相乘会爆炸，取大）。
+     *
+     * @param first  第一槽
+     * @param second 第二槽
+     * @return 叠加后的数值
+     */
+    public static SpecializationValues combine(SpecializationValues first, SpecializationValues second) {
+        return of(key -> {
+            double a = first.value(key);
+            double b = second.value(key);
+            return switch (key) {
+                // 概率、比例、每层加成：相加
+                case "critChance", "lifeSteal", "killRefill", "comboStep", "spellLevel", "doubleCast" ->
+                        clampOf(key, a + b);
+                // 上限、阈值、暴击倍率：取大
+                case "comboMax", "critDamage", "executeThreshold", "desperationThreshold", "desperationFloor" ->
+                        Math.max(a, b);
+                // 其余全是倍率：相乘
+                default -> clampOf(key, a * b);
+            };
+        });
     }
 
     /**

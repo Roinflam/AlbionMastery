@@ -62,7 +62,7 @@ public abstract class ItemStackDurabilityMixin {
         if (data == null) {
             return amount;
         }
-        SpecializationValues values = SpecializationEffects.forData(data, weapon.typeKey(), snapshot);
+        SpecializationValues values = SpecializationEffects.forData(data, weapon, snapshot);
         double factor = values.durability();
         if (factor == 1.0D) {
             return amount;

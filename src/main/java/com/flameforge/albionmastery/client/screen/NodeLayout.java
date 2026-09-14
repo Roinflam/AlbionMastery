@@ -1,5 +1,6 @@
 package com.flameforge.albionmastery.client.screen;
 
+import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.client.weapon.WeaponEntry;
 import com.flameforge.albionmastery.client.weapon.WeaponSource;
 import com.flameforge.albionmastery.client.weapon.WeaponTypeGroup;
@@ -104,13 +105,22 @@ public final class NodeLayout {
     private static final double MAX_SOURCE_WEDGE_DEG = 125.0D;
 
     /** 单个来源扇形的角度下限（度）：保证相邻的来源节点不会在内圈上撞在一起。 */
-    private static final double MIN_SOURCE_WEDGE_DEG = 14.0D;
+    private static final double MIN_SOURCE_WEDGE_DEG = 26.0D;
 
     /** 相邻两片扇形之间的空隙上限（度）。 */
     private static final double MAX_SOURCE_GAP_DEG = 46.0D;
 
     /** 相邻两片扇形之间的空隙下限（度）：算总角度预算时按这个值预留。 */
     private static final double MIN_SOURCE_GAP_DEG = 10.0D;
+
+    /** 平分模式下，来源之间的空隙占每个来源那一份角度的比例。 */
+    private static final double EQUAL_GAP_SHARE = 0.18D;
+
+    /** 平分模式下空隙的最小角度。 */
+    private static final double EQUAL_GAP_MIN_DEG = 8.0D;
+
+    /** 平分模式下空隙的最大角度。 */
+    private static final double EQUAL_GAP_MAX_DEG = 30.0D;
 
     /** 类型与类型之间额外插入的空隙，单位是「一件武器的角度」。 */
     private static final double GROUP_GAP_UNITS = 1.4D;
@@ -192,7 +202,8 @@ public final class NodeLayout {
         double maxWedge = Math.toRadians(MAX_SOURCE_WEDGE_DEG);
         double minWedge = Math.toRadians(MIN_SOURCE_WEDGE_DEG);
         double minGap = Math.toRadians(MIN_SOURCE_GAP_DEG);
-        int gapCount = Math.max(0, count - 1);
+        // 一圈有 count 个空隙（最后一片和第一片之间也有一个），只有一片时没有空隙
+        int gapCount = count > 1 ? count : 0;
 
         // 一整圈刨掉片间最小空隙之后，能分给所有扇形的总角度
         double arcBudget = Math.max(Math.toRadians(30.0D), Math.PI * 2.0D - minGap * gapCount);
@@ -230,9 +241,35 @@ public final class NodeLayout {
         }
         float indexDelay = Math.min(INDEX_DELAY_MS, TOTAL_STAGGER_MS / Math.max(1, totalWeapons));
 
-        // 每片扇形的角度：按各自的单位数换算，太窄的按下限撑开
         double[] wedges = new double[count];
         double usedArc = 0.0D;
+        if (count > 1 && MasteryConfig.CLIENT.equalSourceWedges.get()) {
+            // ------------------------------------------------------------------
+            // 平分模式：每个来源占的角度一样大，来源之间的空隙一样宽。
+            // 剑这种把全部模组的剑都收进来的来源武器特别多，按数量分会把整圈的大半吃掉，
+            // 挤得别的来源贴在一起；平分之后各家边界清楚，武器多的自己在片里排密一点。
+            // 半径按最大的那片重新算：让它在等分的角度里尽量还能按理想间距排开。
+            // ------------------------------------------------------------------
+            double share = Math.PI * 2.0D / count;
+            double equalGap = Math.max(Math.toRadians(EQUAL_GAP_MIN_DEG),
+                    Math.min(Math.toRadians(EQUAL_GAP_MAX_DEG), share * EQUAL_GAP_SHARE));
+            double equalWedge = share - equalGap;
+            ring = Math.min(WEAPON_RING_MAX,
+                    Math.max(WEAPON_RING_MIN, maxUnits * desiredSpacing / equalWedge));
+            spacing = Math.min(desiredSpacing, equalWedge * ring / maxUnits);
+            weaponRadius = Math.max(WEAPON_RADIUS_MIN,
+                    Math.min(WEAPON_RADIUS_MAX, spacing / (2.0D * WEAPON_GAP_FACTOR)));
+            typeRing = Math.max(TYPE_RING_MIN, Math.min(ring - TYPE_RING_MARGIN, ring * TYPE_RING_RATIO));
+            unitAngle = spacing / ring;
+            for (int i = 0; i < count; i++) {
+                wedges[i] = equalWedge;
+            }
+            usedArc = equalWedge * count + equalGap * (count - 1);
+            return placeSources(nodes, active, info, wedges, equalGap, usedArc, units, unitAngle,
+                    ring, weaponRadius, typeRing, indexDelay);
+        }
+
+        // 每片扇形的角度：按各自的单位数换算，太窄的按下限撑开
         for (int i = 0; i < count; i++) {
             wedges[i] = Math.max(minWedge, Math.min(maxWedge, units[i] * unitAngle));
             usedArc += wedges[i];
@@ -240,7 +277,11 @@ public final class NodeLayout {
 
         // 下限撑开之后总角度有可能超过一圈（来源特别多、又都很小），等比压回去。
         // 片内的武器仍按 unitAngle 排，实在排不下时才跟着这片一起缩（见 layoutTypes）。
-        double arcLimit = Math.PI * 2.0D - minGap * gapCount;
+        //
+        // 空隙的个数是 count 而不是 count - 1：这是一圈不是一条线，最后一片和第一片之间
+        // 也隔着一个空隙。之前按 count - 1 算，一圈被扇形塞满时，最后一片（剑）就直接
+        // 贴到第一片（枪械）上，别的片之间却都还有空隙。
+        double arcLimit = Math.PI * 2.0D - minGap * count;
         if (usedArc > arcLimit) {
             double shrink = arcLimit / usedArc;
             for (int i = 0; i < count; i++) {
@@ -253,14 +294,41 @@ public final class NodeLayout {
         if (count > 1) {
             gap = Math.min(Math.toRadians(MAX_SOURCE_GAP_DEG),
                     Math.max(minGap, (Math.PI * 2.0D - usedArc) / count));
+            // 摆放时只用到 count - 1 个空隙，第 count 个就是最后一片到第一片之间
+            // 自然剩下的那段；空隙被上限压住时剩下的会更宽，落在正下方，不会更窄
             usedArc += gap * (count - 1);
         }
 
-        // 整组扇形以正上方为中心摆开
+        return placeSources(nodes, active, info, wedges, gap, usedArc, units, unitAngle,
+                ring, weaponRadius, typeRing, indexDelay);
+    }
+
+    /**
+     * 按算好的扇形角度把各来源摆到圈上。整组扇形以正上方为中心摆开。
+     *
+     * @param nodes        节点列表（追加进去）
+     * @param active       有武器的来源
+     * @param info         中心说明节点
+     * @param wedges       每个来源的扇形角度
+     * @param gap          来源之间的空隙角度
+     * @param usedArc      扇形加空隙的总角度
+     * @param units        每个来源的单位数
+     * @param unitAngle    一件武器占的角度
+     * @param ring         外圈半径
+     * @param weaponRadius 武器节点半径
+     * @param typeRing     类型圈半径
+     * @param indexDelay   出场动画的逐件延迟
+     * @return 节点列表
+     */
+    private static List<MasteryNode> placeSources(List<MasteryNode> nodes, List<WeaponSource> active,
+                                                  MasteryNode info, double[] wedges, double gap,
+                                                  double usedArc, double[] units, double unitAngle,
+                                                  double ring, double weaponRadius, double typeRing,
+                                                  float indexDelay) {
         double cursor = -Math.PI / 2.0D - usedArc / 2.0D;
         int weaponIndex = 0;
 
-        for (int s = 0; s < count; s++) {
+        for (int s = 0; s < active.size(); s++) {
             WeaponSource source = active.get(s);
             double wedge = wedges[s];
             double center = cursor + wedge / 2.0D;

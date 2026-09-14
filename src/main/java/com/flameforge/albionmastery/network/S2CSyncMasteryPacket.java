@@ -39,6 +39,9 @@ public class S2CSyncMasteryPacket {
     /** 来源 ID -> 已选特化的完整键。 */
     private final Map<String, String> specializations;
 
+    /** 特化选择表最多接受多少条，只用来挡异常包。 */
+    private static final int MAX_SPECIALIZATION_ENTRIES = 4096;
+
     /** 学习点倍率。 */
     private final double studyMultiplier;
 
@@ -142,15 +145,21 @@ public class S2CSyncMasteryPacket {
         Map<String, Long> types = readMap(buf, true);
         Map<String, Long> overalls = readMap(buf, false);
 
-        // 条数按枚举总量封顶：正常情况下最多每个来源一条，异常包不至于让客户端撑爆
-        int specCount = Math.max(0, Math.min(Specialization.values().length, buf.readVarInt()));
+        // 特化选择是按「类型键」存的（type|tacz_gun|rifle 这种），一个来源底下有多少类型就可能有多少条，
+        // 所以上限不能按流派枚举的数量封——那样枪械类型一多就会把后面的条目直接截掉
+        int specCount = Math.max(0, Math.min(MAX_SPECIALIZATION_ENTRIES, buf.readVarInt()));
         Map<String, String> specializations = new HashMap<>();
         for (int i = 0; i < specCount; i++) {
-            String sourceId = buf.readUtf(128);
+            String typeKey = buf.readUtf(128);
             String specKey = buf.readUtf(128);
             Specialization spec = Specialization.byKey(specKey);
-            if (spec != null && spec.sourceId().equals(sourceId)) {
-                specializations.put(sourceId, specKey);
+            // 校验和存档读取那边一致：键得是合法类型键，流派得属于这个类型所在的来源。
+            // 早先这里误把类型键当来源 ID 去和流派比，永远对不上，
+            // 结果服务端切换成功了、客户端却一条都收不到，看起来就是「切不了」
+            String baseKey = WeaponKeys.specBaseKey(typeKey);
+            if (spec != null && WeaponKeys.isValidTypeKey(baseKey)
+                    && spec.sourceId().equals(WeaponKeys.providerOf(baseKey))) {
+                specializations.put(typeKey, specKey);
             }
         }
         double study = buf.readDouble();

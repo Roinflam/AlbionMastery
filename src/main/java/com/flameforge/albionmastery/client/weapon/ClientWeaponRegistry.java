@@ -34,14 +34,25 @@ public final class ClientWeaponRegistry {
     private static final List<IWeaponProvider> PROVIDERS = new ArrayList<>();
 
     static {
-        PROVIDERS.add(TaczGunProvider.INSTANCE);
-        // lrtactical 是可选依赖，模组缺失时不能触碰它的 Provider，否则会在类加载阶段报错
+        // 四个来源全是可选依赖，模组缺失时不能触碰它的 Provider，否则会在类加载阶段报错
+        if (WeaponResolver.isTaczLoaded()) {
+            PROVIDERS.add(TaczGunProvider.INSTANCE);
+        }
         if (WeaponResolver.isLrTacticalLoaded()) {
             PROVIDERS.add(LrTacticalMeleeProvider.INSTANCE);
         }
         if (WeaponResolver.isSlashBladeLoaded()) {
             PROVIDERS.add(SlashBladeProvider.INSTANCE);
         }
+        if (WeaponResolver.isIronsLoaded()) {
+            PROVIDERS.add(IronsSpellsProvider.INSTANCE);
+        }
+        if (WeaponResolver.isArsLoaded()) {
+            PROVIDERS.add(ArsNouveauProvider.INSTANCE);
+        }
+        // 通用剑类只用原版类，永远可用；排最后，和解析器里的顺序一致
+        PROVIDERS.add(VanillaMeleeProvider.INSTANCE);
+        PROVIDERS.add(BowProvider.INSTANCE);
     }
 
     /** 上一次构建出来的来源列表。 */

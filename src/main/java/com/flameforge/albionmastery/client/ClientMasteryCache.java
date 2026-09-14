@@ -262,7 +262,13 @@ public final class ClientMasteryCache {
                 }
             }
         }
-        MasteryToastManager.push(title, tierName, oldLevel, newLevel, icons);
+        // 外圈（武器）最先显示，其次中圈（类型），内圈（来源）最后
+        int priority = switch (tier) {
+            case WEAPON -> 0;
+            case TYPE -> 1;
+            default -> 2;
+        };
+        MasteryToastManager.push(priority, title, tierName, oldLevel, newLevel, icons);
     }
 
     /**

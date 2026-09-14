@@ -166,10 +166,34 @@ public class MasteryData {
      * @param specKey 特化的完整键，传 null 表示清除
      */
     public void setSpecialization(String typeKey, @Nullable String specKey) {
+        setSpecialization(typeKey, 1, specKey);
+    }
+
+    /**
+     * 某个类型某个槽位选的流派。
+     *
+     * @param typeKey 类型键
+     * @param slot    槽位，1 或 2
+     * @return 流派键；没选返回 null
+     */
+    @Nullable
+    public String getSpecialization(String typeKey, int slot) {
+        return this.specializations.get(WeaponKeys.specSlotKey(typeKey, slot));
+    }
+
+    /**
+     * 设置某个类型某个槽位的流派。
+     *
+     * @param typeKey 类型键
+     * @param slot    槽位，1 或 2
+     * @param specKey 流派键；null 表示清掉
+     */
+    public void setSpecialization(String typeKey, int slot, @Nullable String specKey) {
+        String key = WeaponKeys.specSlotKey(typeKey, slot);
         if (specKey == null) {
-            this.specializations.remove(typeKey);
+            this.specializations.remove(key);
         } else {
-            this.specializations.put(typeKey, specKey);
+            this.specializations.put(key, specKey);
         }
         // 特化影响一整类武器，改动很少但影响面大，直接要求一次全量同步
         this.needFullSync = true;
@@ -608,9 +632,11 @@ public class MasteryData {
             String value = tag.getString("V");
             // 两种脏数据都要挡：流派可能在版本更新里被删掉；
             // 早期版本是按「来源」存的，那些键在这里对不上来源，一并丢弃
+            // 第二槽的键带后缀，校验时先去掉
+            String baseKey = WeaponKeys.specBaseKey(typeKey);
             Specialization spec = Specialization.byKey(value);
-            if (spec != null && WeaponKeys.isValidTypeKey(typeKey)
-                    && spec.sourceId().equals(WeaponKeys.providerOf(typeKey))) {
+            if (spec != null && WeaponKeys.isValidTypeKey(baseKey)
+                    && spec.sourceId().equals(WeaponKeys.providerOf(baseKey))) {
                 this.specializations.put(typeKey, value);
             }
         }

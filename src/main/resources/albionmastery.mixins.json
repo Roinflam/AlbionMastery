@@ -2,18 +2,24 @@
   "required": true,
   "minVersion": "0.8.5",
   "package": "com.flameforge.albionmastery.mixin",
+  "plugin": "com.flameforge.albionmastery.mixin.AlbionMixinPlugin",
   "compatibilityLevel": "JAVA_17",
   "refmap": "albionmastery.refmap.json",
   "mixins": [
+    "AbstractSpellPowerMixin",
     "ForgeEventFactoryMixin",
     "GunAmmoAndReloadMixin",
+    "GunBulletSpeedMixin",
     "GunCanReloadMixin",
     "ItemStackDurabilityMixin",
-    "MeleeAttackSpeedMixin"
+    "MeleeAttackSpeedMixin",
+    "SpellCastTimeMixin"
   ],
   "client": [
     "ClientGunTooltipMixin",
     "GunHudAmmoMixin",
+    "GunRecoilMixin",
+    "GunSoundMixin",
     "ObjectAnimationRunnerMixin"
   ],
   "server": [],

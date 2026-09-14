@@ -1,13 +1,18 @@
 package com.flameforge.albionmastery.weapon;
 
 import com.flameforge.albionmastery.config.MasteryConfig;
+import com.flameforge.albionmastery.weapon.compat.ArsNouveauSupport;
+import com.flameforge.albionmastery.weapon.compat.BowSupport;
+import com.flameforge.albionmastery.weapon.compat.IronsSpellsSupport;
 import com.flameforge.albionmastery.weapon.compat.LrTacticalSupport;
 import com.flameforge.albionmastery.weapon.compat.SlashBladeSupport;
+import com.flameforge.albionmastery.weapon.compat.VanillaMeleeSupport;
 import com.flameforge.albionmastery.weapon.compat.TaczSupport;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
+import java.util.List;
 
 /**
  * 物品堆 -&gt; 专精定位的统一入口（双端可用）。
@@ -27,11 +32,26 @@ public final class WeaponResolver {
     /** 拔刀剑的模组 ID。 */
     public static final String SLASHBLADE_MOD_ID = "slashblade";
 
+    /** 铁魔法的 modid。 */
+    public static final String IRONS_MOD_ID = "irons_spellbooks";
+
+    /** TACZ 的 modid。 */
+    public static final String TACZ_MOD_ID = "tacz";
+
+    /** 新生魔艺的 modid。 */
+    public static final String ARS_MOD_ID = "ars_nouveau";
+
     /** lrtactical 是否已安装，首次查询后缓存。 */
     private static Boolean lrTacticalLoaded;
 
     /** 拔刀剑是否已安装，首次查询后缓存。 */
     private static Boolean slashBladeLoaded;
+
+    private static Boolean ironsLoaded;
+
+    private static Boolean taczLoaded;
+
+    private static Boolean arsLoaded;
 
     private WeaponResolver() {
     }
@@ -66,6 +86,76 @@ public final class WeaponResolver {
      * @param stack 物品堆
      * @return 定位结果；不属于任何已接入体系时返回 null
      */
+    /**
+     * 新生魔艺是否已加载。
+     *
+     * @return 已加载返回 true
+     */
+    public static boolean isArsLoaded() {
+        if (arsLoaded == null) {
+            arsLoaded = ModList.get().isLoaded(ARS_MOD_ID);
+        }
+        return arsLoaded;
+    }
+
+    /**
+     * TACZ 是否已加载。五个来源全是可选的，没装哪个就不碰哪个的类。
+     *
+     * @return 已加载返回 true
+     */
+    public static boolean isTaczLoaded() {
+        if (taczLoaded == null) {
+            taczLoaded = ModList.get().isLoaded(TACZ_MOD_ID);
+        }
+        return taczLoaded;
+    }
+
+    /**
+     * 铁魔法是否已加载。结果缓存，和上面两个一样。
+     *
+     * @return 已加载返回 true
+     */
+    public static boolean isIronsLoaded() {
+        if (ironsLoaded == null) {
+            ironsLoaded = ModList.get().isLoaded(IRONS_MOD_ID);
+        }
+        return ironsLoaded;
+    }
+
+    /**
+     * 「一件物品 → 一串武器」，服务端路径。
+     *
+     * <p>绝大多数物品就是一件武器，只有铁魔法的法术容器（魔法书、卷轴）里可能装好几个法术。
+     * 击杀经验按这个发：拿着书，书里每个法术都拿。
+     *
+     * @param stack 物品
+     * @return 武器列表；认不出来返回空表
+     */
+    public static List<ResolvedWeapon> resolveAll(ItemStack stack) {
+        return resolveAll(stack, MasteryConfig.serverSnapshot().splitMeleeByPack);
+    }
+
+    /**
+     * 「一件物品 → 一串武器」。
+     *
+     * @param stack            物品
+     * @param splitMeleeByPack 近战是否按附属包拆分
+     * @return 武器列表；认不出来返回空表
+     */
+    public static List<ResolvedWeapon> resolveAll(ItemStack stack, boolean splitMeleeByPack) {
+        if (stack.isEmpty()) {
+            return List.of();
+        }
+        if (isIronsLoaded() && IronsSpellsSupport.isContainer(stack)) {
+            return IronsSpellsSupport.resolveAll(stack);
+        }
+        if (isArsLoaded() && ArsNouveauSupport.isCaster(stack)) {
+            return ArsNouveauSupport.resolveAll(stack);
+        }
+        ResolvedWeapon single = resolve(stack, splitMeleeByPack);
+        return single == null ? List.of() : List.of(single);
+    }
+
     @Nullable
     public static ResolvedWeapon resolve(ItemStack stack) {
         // 服务端路径：直接用本地生效的配置
@@ -88,9 +178,12 @@ public final class WeaponResolver {
             return null;
         }
 
-        ResolvedWeapon resolved = TaczSupport.resolve(stack);
-        if (resolved != null) {
-            return resolved;
+        ResolvedWeapon resolved = null;
+        if (isTaczLoaded()) {
+            resolved = TaczSupport.resolve(stack);
+            if (resolved != null) {
+                return resolved;
+            }
         }
 
         if (isLrTacticalLoaded()) {
@@ -107,6 +200,26 @@ public final class WeaponResolver {
             }
         }
 
-        return null;
+        if (isIronsLoaded()) {
+            // 法术容器只认第一个法术；要全部的走 resolveAll
+            resolved = IronsSpellsSupport.resolve(stack);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+
+        if (isArsLoaded()) {
+            resolved = ArsNouveauSupport.resolve(stack);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+
+        // 兜底：谁都没认的剑归通用剑类、弓弩归通用弓弩。必须排最后，拔刀剑的刀也是 SwordItem
+        resolved = VanillaMeleeSupport.resolve(stack);
+        if (resolved != null) {
+            return resolved;
+        }
+        return BowSupport.resolve(stack);
     }
 }

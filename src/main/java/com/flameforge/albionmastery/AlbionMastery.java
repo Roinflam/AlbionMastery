@@ -1,8 +1,14 @@
 package com.flameforge.albionmastery;
 
 import com.flameforge.albionmastery.config.MasteryConfig;
+import com.flameforge.albionmastery.event.ArsCombatHandler;
+import com.flameforge.albionmastery.event.GunCombatHandler;
+import com.flameforge.albionmastery.event.SlashBladeCombatHandler;
+import com.flameforge.albionmastery.event.SpellCombatHandler;
 import com.flameforge.albionmastery.mastery.DimensionXpBonus;
 import com.flameforge.albionmastery.network.NetworkHandler;
+import com.flameforge.albionmastery.weapon.WeaponResolver;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
@@ -48,6 +54,21 @@ public class AlbionMastery {
         modBus.addListener(this::onConfigReloading);
 
         NetworkHandler.register();
+        // 四个来源全是可选依赖。这几个处理器的方法签名里有对应模组的事件类，
+        // 没装时不能让事件总线去反射它们，所以逐个判断装了才注册；
+        // 没装的来源，它的节点不会出现在树上，相关功能也一概不启用
+        if (WeaponResolver.isTaczLoaded()) {
+            MinecraftForge.EVENT_BUS.register(GunCombatHandler.class);
+        }
+        if (WeaponResolver.isSlashBladeLoaded()) {
+            MinecraftForge.EVENT_BUS.register(SlashBladeCombatHandler.class);
+        }
+        if (WeaponResolver.isIronsLoaded()) {
+            MinecraftForge.EVENT_BUS.register(SpellCombatHandler.class);
+        }
+        if (WeaponResolver.isArsLoaded()) {
+            MinecraftForge.EVENT_BUS.register(ArsCombatHandler.class);
+        }
     }
 
     /**

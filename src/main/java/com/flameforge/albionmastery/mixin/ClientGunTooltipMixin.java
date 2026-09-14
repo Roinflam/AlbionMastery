@@ -1,7 +1,8 @@
 package com.flameforge.albionmastery.mixin;
 
+import com.flameforge.albionmastery.client.ClientMasteryCache;
 import com.flameforge.albionmastery.client.MasteryClientBonus;
-import com.flameforge.albionmastery.client.screen.MasteryScreen;
+import com.flameforge.albionmastery.client.MasteryFlair;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.config.SpecializationValues;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
@@ -16,7 +17,6 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.network.chat.TextColor;
 import net.minecraft.world.item.ItemStack;
 import org.joml.Matrix4f;
 import org.objectweb.asm.Opcodes;
@@ -78,15 +78,6 @@ public abstract class ClientGunTooltipMixin {
 
     /** TACZ 画提示文字用的光照值（0xF000F0，也就是 GUI 满亮）。 */
     private static final int ALBIONMASTERY$FULL_BRIGHT = 15728880;
-
-    /** 等级色，和另一处提示共用同一套配色。 */
-    private static final int ALBIONMASTERY$COLOR_VALUE = 0xFFE9A8;
-
-    /** 加成数值色。 */
-    private static final int ALBIONMASTERY$COLOR_BONUS = 0xE8C25A;
-
-    /** 标签与分隔符色。 */
-    private static final int ALBIONMASTERY$COLOR_LABEL = 0x9C8E70;
 
     @Shadow
     @Final
@@ -176,13 +167,8 @@ public abstract class ClientGunTooltipMixin {
             return;
         }
 
-        MutableComponent line = Component.translatable("tooltip.albionmastery.title")
-                .withStyle(style -> style.withColor(TextColor.fromRgb(ALBIONMASTERY$COLOR_LABEL)))
-                .append(Component.literal(" Lv." + bonus.weaponLevel()).withStyle(
-                        style -> style.withColor(TextColor.fromRgb(ALBIONMASTERY$COLOR_VALUE))))
-                .append(Component.literal("  " + MasteryScreen.formatPercent(bonus.total()))
-                        .withStyle(style -> style.withColor(
-                                TextColor.fromRgb(ALBIONMASTERY$COLOR_BONUS))));
+        // 和普通武器的提示同一个格式、同一套满级特效
+        MutableComponent line = MasteryFlair.titleLine(bonus, ClientMasteryCache.snapshot().maxLevel);
         this.albionmastery$masteryLine = line;
 
         // 宽度是在 getText 里量好存起来的，新加的行更长就得把它顶上去，

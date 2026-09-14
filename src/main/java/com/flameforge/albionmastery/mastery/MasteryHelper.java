@@ -116,7 +116,7 @@ public final class MasteryHelper {
         }
         if (applyStudy) {
             // 流派的经验倍率和管理员设的学习倍率是两回事，分别乘：前者是玩家自己选的，后者是管理员给的
-            double specGain = SpecializationEffects.forData(data, weapon.typeKey(), snapshot).xpGain();
+            double specGain = SpecializationEffects.forData(data, weapon, snapshot).xpGain();
             if (specGain != 1.0D) {
                 amount = Math.max(1L, (long) Math.floor(amount * specGain));
             }

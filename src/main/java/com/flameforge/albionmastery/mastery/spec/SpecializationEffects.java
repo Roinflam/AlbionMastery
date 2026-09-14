@@ -54,7 +54,7 @@ public final class SpecializationEffects {
             return SpecializationValues.NEUTRAL;
         }
         MasteryData data = client ? clientData() : MasteryHelper.get(player);
-        return forData(data, weapon.typeKey(), snapshot);
+        return forData(data, weapon, snapshot);
     }
 
     /**
@@ -62,6 +62,49 @@ public final class SpecializationEffects {
      *
      * @return 客户端数据；不在客户端时返回 null
      */
+    /**
+     * 按已经解析好的武器取当前生效的数值，两端通用。
+     *
+     * <p>法术不是物品：施法、冷却、法术等级这些事件里只有法术本身，没有物品堆可解析，
+     * 走这个入口。取数据的方式和 {@link #forStack} 一样，客户端读缓存、服务端读 Capability。
+     *
+     * @param entity 玩家
+     * @param weapon 武器
+     * @return 数值；不是玩家或没数据时是中性值
+     */
+    public static SpecializationValues forWeapon(@Nullable LivingEntity entity,
+                                                 @Nullable ResolvedWeapon weapon) {
+        if (!(entity instanceof Player player) || weapon == null) {
+            return SpecializationValues.NEUTRAL;
+        }
+        boolean client = player.level().isClientSide();
+        MasteryConfig.Snapshot snapshot = client ? clientSnapshot() : MasteryConfig.serverSnapshot();
+        MasteryData data = client ? clientData() : MasteryHelper.get(player);
+        return forData(data, weapon, snapshot);
+    }
+
+    /**
+     * 按已经解析好的武器算专精加成明细，两端通用。
+     *
+     * @param entity 玩家
+     * @param weapon 武器
+     * @return 加成明细；不是玩家或没数据时返回 null
+     */
+    @Nullable
+    public static MasteryHelper.Bonus bonusFor(@Nullable LivingEntity entity,
+                                               @Nullable ResolvedWeapon weapon) {
+        if (!(entity instanceof Player player) || weapon == null) {
+            return null;
+        }
+        boolean client = player.level().isClientSide();
+        MasteryConfig.Snapshot snapshot = client ? clientSnapshot() : MasteryConfig.serverSnapshot();
+        MasteryData data = client ? clientData() : MasteryHelper.get(player);
+        if (data == null) {
+            return null;
+        }
+        return MasteryHelper.computeBonus(data, weapon, snapshot);
+    }
+
     @Nullable
     private static MasteryData clientData() {
         return DistExecutor.unsafeCallWhenOn(Dist.CLIENT,
@@ -92,17 +135,95 @@ public final class SpecializationEffects {
      */
     public static SpecializationValues forData(@Nullable MasteryData data, String typeKey,
                                                MasteryConfig.Snapshot snapshot) {
+        return forData(data, typeKey, null, snapshot);
+    }
+
+    /**
+     * 按武器算当前生效的数值（门槛看武器所属的类型和来源）。
+     *
+     * @param data     玩家数据
+     * @param weapon   武器
+     * @param snapshot 配置快照
+     * @return 两个槽叠加后的数值
+     */
+    public static SpecializationValues forData(@Nullable MasteryData data, ResolvedWeapon weapon,
+                                               MasteryConfig.Snapshot snapshot) {
+        return forData(data, weapon.typeKey(), weapon.weaponKey(), snapshot);
+    }
+
+    /**
+     * 两个槽位各自看门槛，过了的叠在一起。
+     *
+     * <p>门槛只看中圈（类型）和内圈（来源），{@code weaponKey} 目前不参与判断，留着是为了以后要按武器限制时不用改调用点。
+     *
+     * @param data      玩家数据
+     * @param typeKey   类型键
+     * @param weaponKey 武器键，可为 null
+     * @param snapshot  配置快照
+     * @return 叠加后的数值
+     */
+    public static SpecializationValues forData(@Nullable MasteryData data, String typeKey,
+                                               @Nullable String weaponKey,
+                                               MasteryConfig.Snapshot snapshot) {
         if (data == null || !snapshot.enableSpecialization) {
             return SpecializationValues.NEUTRAL;
         }
-        Specialization spec = Specialization.byKey(data.getSpecialization(typeKey));
-        // 流派归属的来源必须和这个类型键的来源对得上，
-        // 否则就是存档里留下的脏数据（比如类型被重新分过组）
-        if (spec == null || spec.isStandard()
-                || !spec.sourceId().equals(WeaponKeys.providerOf(typeKey))) {
-            return SpecializationValues.NEUTRAL;
+        SpecializationValues result = null;
+        for (int slot = 1; slot <= WeaponKeys.SPEC_SLOTS; slot++) {
+            if (!isSlotActive(data, typeKey, weaponKey, slot, snapshot)) {
+                continue;
+            }
+            Specialization spec = Specialization.byKey(data.getSpecialization(typeKey, slot));
+            // 流派归属的来源必须和这个类型键的来源对得上，
+            // 否则就是存档里留下的脏数据（比如类型被重新分过组）
+            if (spec == null || spec.isStandard()
+                    || !spec.sourceId().equals(WeaponKeys.providerOf(typeKey))) {
+                continue;
+            }
+            SpecializationValues values = snapshot.specValues(spec);
+            result = result == null ? values : SpecializationValues.combine(result, values);
         }
-        return snapshot.specValues(spec);
+        return result == null ? SpecializationValues.NEUTRAL : result;
+    }
+
+    /**
+     * 某个槽位对某件武器此刻能不能生效：武器所属的类型（中圈）和来源（内圈）都达到这个槽的等级门槛。
+     *
+     * @param data      玩家数据
+     * @param typeKey   类型键
+     * @param weaponKey 武器键，可为 null（只看类型）
+     * @param slot      槽位
+     * @param snapshot  配置快照
+     * @return 能生效返回 true
+     */
+    public static boolean isSlotActive(MasteryData data, String typeKey, @Nullable String weaponKey,
+                                       int slot, MasteryConfig.Snapshot snapshot) {
+        // 只看中圈（类型）和内圈（来源），外圈（单件武器）不设门槛：
+        // 类型和来源练到了，这一类下面的每件武器都吃到流派
+        return isSlotUnlocked(data, typeKey, slot, snapshot);
+    }
+
+    /**
+     * 某个槽位能不能选了：本类型（中圈）和所属来源（内圈）都达到门槛。
+     *
+     * @param data     玩家数据
+     * @param typeKey  类型键
+     * @param slot     槽位
+     * @param snapshot 配置快照
+     * @return 可以选返回 true
+     */
+    public static boolean isSlotUnlocked(@Nullable MasteryData data, String typeKey, int slot,
+                                         MasteryConfig.Snapshot snapshot) {
+        if (data == null || !snapshot.enableSpecialization) {
+            return false;
+        }
+        String providerId = WeaponKeys.providerOf(typeKey);
+        if (providerId == null) {
+            return false;
+        }
+        int need = snapshot.specSlotLevel(slot);
+        return data.getTypeLevel(typeKey) >= need
+                && data.getOverallLevel(WeaponKeys.overallKey(providerId)) >= need;
     }
 
     /**
@@ -217,11 +338,7 @@ public final class SpecializationEffects {
         if (data == null || !snapshot.enableSpecialization) {
             return false;
         }
-        String providerId = WeaponKeys.providerOf(typeKey);
-        if (providerId == null) {
-            return false;
-        }
-        return data.getOverallLevel(WeaponKeys.overallKey(providerId)) >= snapshot.maxLevel
-                && data.getTypeLevel(typeKey) >= snapshot.maxLevel;
+        // 「解锁」= 第一槽可以选了
+        return isSlotUnlocked(data, typeKey, 1, snapshot);
     }
 }

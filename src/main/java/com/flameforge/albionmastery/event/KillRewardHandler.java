@@ -5,6 +5,7 @@ import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.mastery.MasteryExperienceHook;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
+import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingExperienceDropEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -40,8 +41,32 @@ public final class KillRewardHandler {
         if (event.getEntity() instanceof Player && !MasteryConfig.COMMON.xpFromPlayerDamage.get()) {
             return;
         }
+        // NPC 走死亡事件按固定值给，这里不重复
+        if (MasteryExperienceHook.isCustomNpc(event.getEntity())) {
+            return;
+        }
         // 事件被取消意味着这只怪最终不掉经验
         int dropped = event.isCanceled() ? 0 : Math.max(0, event.getDroppedExperience());
-        MasteryExperienceHook.record(event.getEntity().getId(), player, dropped);
+        MasteryExperienceHook.record(event.getEntity().getId(), player,
+                Math.max(0, event.getOriginalExperience()), dropped);
+    }
+
+    /**
+     * 自定义 NPC 被玩家杀死：按它编辑页里设的掉落经验给专精经验。
+     *
+     * <p>NPC 大多不掉原版经验，掉落经验那条路不会触发，所以单独挂死亡事件。
+     * 谁算击杀者和别处一样看伤害源的 {@code getEntity()}，子弹、法术都能追到玩家。
+     *
+     * @param event 死亡事件
+     */
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onNpcDeath(LivingDeathEvent event) {
+        if (event.isCanceled() || !MasteryExperienceHook.isCustomNpc(event.getEntity())) {
+            return;
+        }
+        if (!(event.getSource().getEntity() instanceof ServerPlayer player) || player.isSpectator()) {
+            return;
+        }
+        MasteryExperienceHook.awardNpcKill(player, event.getEntity());
     }
 }

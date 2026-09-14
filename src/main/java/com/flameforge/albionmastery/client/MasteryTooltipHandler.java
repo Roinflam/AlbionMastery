@@ -6,6 +6,11 @@ import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.weapon.ResolvedWeapon;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
+import com.flameforge.albionmastery.weapon.WeaponResolver;
+import com.flameforge.albionmastery.client.weapon.ClientWeaponRegistry;
+import com.flameforge.albionmastery.client.weapon.WeaponEntry;
+import com.flameforge.albionmastery.weapon.compat.ArsNouveauSupport;
+import com.flameforge.albionmastery.weapon.compat.IronsSpellsSupport;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
@@ -42,18 +47,13 @@ import java.util.List;
  *
  * <p>配色不用 {@code ChatFormatting}：那 16 个是原版聊天用的高饱和纯色，
  * 几种混在一起就是一股记事本味。这里用和专精界面同一套的金—褐色系，靠明度分主次。
+ * 满级时主行的颜色特效由 {@link MasteryFlair} 负责。
  */
 @Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID, value = Dist.CLIENT)
 public final class MasteryTooltipHandler {
 
     /** 同一行里几段信息之间的分隔符。 */
     private static final String SEPARATOR = " · ";
-
-    /** 主色：和界面的 {@code MasteryPalette.GOLD} 同一个金，用于等级。 */
-    private static final int COLOR_VALUE = 0xFFE9A8;
-
-    /** 加成数值色。 */
-    private static final int COLOR_BONUS = 0xE8C25A;
 
     /** 标签色：压暗的金褐，用于「专精」这类说明字。 */
     private static final int COLOR_LABEL = 0x9C8E70;
@@ -104,15 +104,52 @@ public final class MasteryTooltipHandler {
             return;
         }
 
+        // 铁魔法的法术容器：一本书里几个法术就几行，每行「法术名 · Lv · 加成」，插在名字下面
+        if (WeaponResolver.isIronsLoaded() && IronsSpellsSupport.isContainer(stack)) {
+            List<ResolvedWeapon> spells = IronsSpellsSupport.resolveAll(stack);
+            if (spells.isEmpty()) {
+                return;
+            }
+            List<Component> spellBlock = new ArrayList<>(spells.size());
+            for (ResolvedWeapon spell : spells) {
+                MasteryHelper.Bonus spellBonus = MasteryClientBonus.bonusFor(spell);
+                if (spellBonus == null) {
+                    continue;
+                }
+                spellBlock.add(spellLine(spell, spellBonus, snapshot.maxLevel));
+            }
+            List<Component> lines = event.getToolTip();
+            lines.addAll(Math.min(1, lines.size()), spellBlock);
+            return;
+        }
+
+        // 新生魔艺的施法物品：当前选中法术用到的每个符文一行，插在名字下面
+        if (WeaponResolver.isArsLoaded() && ArsNouveauSupport.isCaster(stack)) {
+            List<ResolvedWeapon> parts = ArsNouveauSupport.resolveAll(stack);
+            if (parts.isEmpty()) {
+                return;
+            }
+            List<Component> partBlock = new ArrayList<>(parts.size());
+            for (ResolvedWeapon part : parts) {
+                MasteryHelper.Bonus partBonus = MasteryClientBonus.bonusFor(part);
+                if (partBonus == null) {
+                    continue;
+                }
+                WeaponEntry entry = ClientWeaponRegistry.weaponByKey(part.weaponKey());
+                Component name = entry != null ? entry.displayName()
+                        : Component.literal(part.weaponId().toString());
+                partBlock.add(namedLine(name, partBonus, snapshot.maxLevel));
+            }
+            List<Component> lines = event.getToolTip();
+            lines.addAll(Math.min(1, lines.size()), partBlock);
+            return;
+        }
+
         // 先攒成一小块再整体插入：逐行 add(index) 要自己维护偏移量，容易插错位置
         List<Component> block = new ArrayList<>(4);
 
-        // 主行：专精 Lv.12/100 · +18.5%
-        block.add(text("tooltip.albionmastery.title", COLOR_LABEL)
-                .append(literal(" Lv." + bonus.weaponLevel(), COLOR_VALUE))
-                .append(literal("/" + snapshot.maxLevel, COLOR_MUTED))
-                .append(literal(SEPARATOR, COLOR_MUTED))
-                .append(literal(MasteryScreen.formatPercent(bonus.total()), COLOR_BONUS)));
+        // 主行：专精 Lv.12/100 · +18.5%，满级特效（三圈各一段、全满彩虹）在 MasteryFlair 里
+        block.add(MasteryFlair.titleLine(bonus, snapshot.maxLevel));
 
         if (MasteryConfig.CLIENT.detailedTooltip.get()) {
             // 明细两行，每行两项。四项各占一行会把提示拉得老长，挤成一行又看不清
@@ -129,6 +166,35 @@ public final class MasteryTooltipHandler {
 
         List<Component> lines = event.getToolTip();
         lines.addAll(insertIndex(lines, weapon.providerId()), block);
+    }
+
+    /**
+     * 法术容器里一个法术的那一行：法术名 · 专精 Lv.x/上限 · 加成。
+     *
+     * <p>名字用法术自己的语言键，和铁魔法书里显示的一致；满级特效沿用主行那一套。
+     *
+     * @param spell    法术
+     * @param bonus    加成
+     * @param maxLevel 等级上限
+     * @return 一行
+     */
+    private static Component spellLine(ResolvedWeapon spell, MasteryHelper.Bonus bonus, int maxLevel) {
+        String nameKey = "spell." + spell.weaponId().getNamespace() + "." + spell.weaponId().getPath();
+        return namedLine(Component.translatable(nameKey), bonus, maxLevel);
+    }
+
+    /**
+     * 「名字 · 专精 Lv.x/上限 · 加成」这种带名字的一行，给一件物品装着多件武器时用。
+     *
+     * @param name     武器名
+     * @param bonus    加成
+     * @param maxLevel 等级上限
+     * @return 一行
+     */
+    private static Component namedLine(Component name, MasteryHelper.Bonus bonus, int maxLevel) {
+        return name.copy().withStyle(color(COLOR_LABEL))
+                .append(literal(SEPARATOR, COLOR_MUTED))
+                .append(MasteryFlair.titleLine(bonus, maxLevel));
     }
 
     /**

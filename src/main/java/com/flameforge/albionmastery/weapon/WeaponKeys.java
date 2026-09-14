@@ -34,6 +34,46 @@ public final class WeaponKeys {
     /** 来源 ID：拔刀剑（含所有附属刀包）。 */
     public static final String PROVIDER_SLASHBLADE = "slashblade";
 
+    /** 铁魔法（Iron's Spells 'n Spellbooks）：单件是法术，大类是学派。 */
+    public static final String PROVIDER_IRONS_SPELLS = "irons_spellbooks";
+
+    /** 新生魔艺（Ars Nouveau）：单件是符文，大类是学派 / 形态 / 增幅。 */
+    public static final String PROVIDER_ARS_NOUVEAU = "ars_nouveau";
+
+    /** 通用近战武器：所有模组里继承原版 SwordItem / AxeItem / TridentItem 的物品，大类是剑 / 斧 / 三叉戟。兜底来源，永远可用。 */
+    public static final String PROVIDER_VANILLA_MELEE = "vanilla_melee";
+
+    /** 通用弓弩：所有继承原版 BowItem / CrossbowItem 的物品，大类是弓 / 弩。兜底来源，永远可用。 */
+    public static final String PROVIDER_BOW = "bow";
+
+    /** 第二流派槽在选择表里的键后缀：类型键 + 这个后缀。存盘和网络包结构因此都不用改。 */
+    public static final String SPEC_SLOT2_SUFFIX = "@2";
+
+    /** 流派槽数。 */
+    public static final int SPEC_SLOTS = 2;
+
+    /**
+     * 某个类型的某个流派槽在选择表里的键。
+     *
+     * @param typeKey 类型键
+     * @param slot    槽位，1 或 2
+     * @return 选择表的键
+     */
+    public static String specSlotKey(String typeKey, int slot) {
+        return slot >= 2 ? typeKey + SPEC_SLOT2_SUFFIX : typeKey;
+    }
+
+    /**
+     * 从选择表的键还原出类型键（去掉槽位后缀）。
+     *
+     * @param slotKey 选择表的键
+     * @return 类型键
+     */
+    public static String specBaseKey(String slotKey) {
+        return slotKey.endsWith(SPEC_SLOT2_SUFFIX)
+                ? slotKey.substring(0, slotKey.length() - SPEC_SLOT2_SUFFIX.length()) : slotKey;
+    }
+
     /** 类型未知时的兜底值。 */
     public static final String TYPE_UNKNOWN = "unknown";
 

@@ -43,9 +43,10 @@ public abstract class ForgeEventFactoryMixin {
     private static void albionmastery$captureFinalExperience(LivingEntity entity, Player attackingPlayer,
                                                              int experience,
                                                              CallbackInfoReturnable<Integer> callback) {
-        if (attackingPlayer == null || entity == null) {
+        if (attackingPlayer == null || entity == null || MasteryExperienceHook.isCustomNpc(entity)) {
             return;
         }
-        MasteryExperienceHook.commitFinal(entity.getId(), attackingPlayer, callback.getReturnValueI());
+        // 第三个参数是进事件之前的原版数值，返回值是所有模组改完之后实际要掉的数，两个都传下去按配置挑
+        MasteryExperienceHook.commitFinal(entity.getId(), attackingPlayer, experience, callback.getReturnValueI());
     }
 }

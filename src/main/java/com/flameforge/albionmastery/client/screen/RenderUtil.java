@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
 
 import java.util.ArrayList;
@@ -23,7 +24,25 @@ import java.util.List;
 public final class RenderUtil {
 
     /** 画圆时的分段数。 */
+    /** 圆的最少分段数：再少就明显是多边形了。 */
     private static final int CIRCLE_SEGMENTS = 28;
+
+    /** 圆的最多分段数：整圈画到这个数再大也看不出区别，只是白费顶点。 */
+    private static final int CIRCLE_SEGMENTS_MAX = 720;
+
+    /**
+     * 按屏幕半径算整圈该分几段：大约每像素半径一段。
+     *
+     * <p>固定 28 段在半径几十像素时够圆，放大到几百上千像素就能看出棱角——
+     * 圆环是整个界面里半径最大的东西，放大一点就露馅。按半径给段数，
+     * 半径 300 像素 300 段，弦长约 6 像素、弦高不到 0.02 像素，肉眼是圆的。
+     *
+     * @param radius 屏幕半径
+     * @return 整圈的分段数
+     */
+    private static int segmentsFor(float radius) {
+        return Math.max(CIRCLE_SEGMENTS, Math.min(CIRCLE_SEGMENTS_MAX, (int) Math.ceil(radius)));
+    }
 
     private RenderUtil() {
     }
@@ -85,6 +104,59 @@ public final class RenderUtil {
      * @param points 顶点数组
      * @param argb   颜色
      */
+    /**
+     * 把一张方形贴图裁成六边形画出来，六边形和节点同形，方形贴图的四个角直接切掉。
+     *
+     * <p>为什么不用 {@code blit}：法术图标是不带透明通道的 16x16 方块，整块贴上去就是一个方框
+     * 戳在圆润的六边形节点里，非常突兀。这里用带纹理坐标的三角形画：六边形的每个顶点
+     * 对应贴图上的一个位置，中间由显卡插值，等于把贴图「剪」成了六边形。
+     *
+     * <p>{@code crop} 控制往里裁多少：1.0 时六边形顶点正好落在贴图边缘，0.9 就再往里收一成，
+     * 把贴图四周那圈通常是背景的像素也切掉。
+     *
+     * <p>自成一次绘制调用，不进 {@link #begin()} 那个批次（批次是纯色的，没有纹理坐标）。
+     *
+     * @param matrix  变换矩阵
+     * @param texture 贴图
+     * @param cx      中心 X
+     * @param cy      中心 Y
+     * @param radius  六边形外接圆半径
+     * @param crop    裁边比例，0~1
+     * @param alpha   整体透明度，0~1
+     */
+    public static void texturedHexagon(Matrix4f matrix, ResourceLocation texture,
+                                       float cx, float cy, float radius, float crop, float alpha) {
+        if (radius <= 0.0F || alpha <= 0.0F) {
+            return;
+        }
+        float[][] points = hexagon(cx, cy, radius);
+        RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
+        RenderSystem.setShaderTexture(0, texture);
+        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        // 六边形顶点是按屏幕坐标顺时针排的，这个绕向在 GUI 投影下会被背面剔除整个吃掉——
+        // 纯色批次（begin()）里就是靠关掉剔除才画得出来的，这里同样要关，画完再开回去
+        RenderSystem.disableCull();
+        BufferBuilder buffer = Tesselator.getInstance().getBuilder();
+        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_TEX_COLOR);
+        float half = 0.5F * crop;
+        for (int i = 0; i < points.length; i++) {
+            float[] a = points[i];
+            float[] b = points[(i + 1) % points.length];
+            buffer.vertex(matrix, cx, cy, 0.0F).uv(0.5F, 0.5F).color(1.0F, 1.0F, 1.0F, alpha).endVertex();
+            buffer.vertex(matrix, a[0], a[1], 0.0F)
+                    .uv(0.5F + (a[0] - cx) / radius * half, 0.5F + (a[1] - cy) / radius * half)
+                    .color(1.0F, 1.0F, 1.0F, alpha).endVertex();
+            buffer.vertex(matrix, b[0], b[1], 0.0F)
+                    .uv(0.5F + (b[0] - cx) / radius * half, 0.5F + (b[1] - cy) / radius * half)
+                    .color(1.0F, 1.0F, 1.0F, alpha).endVertex();
+        }
+        Tesselator.getInstance().end();
+        RenderSystem.enableCull();
+        RenderSystem.disableBlend();
+    }
+
     public static void polygon(BufferBuilder buffer, Matrix4f matrix, float[][] points, int argb) {
         if (points.length < 3) {
             return;
@@ -177,8 +249,9 @@ public final class RenderUtil {
         float r = red(argb);
         float g = green(argb);
         float b = blue(argb);
-        double step = Math.PI * 2.0D / CIRCLE_SEGMENTS;
-        for (int i = 0; i < CIRCLE_SEGMENTS; i++) {
+        int segments = segmentsFor(radius);
+        double step = Math.PI * 2.0D / segments;
+        for (int i = 0; i < segments; i++) {
             double a0 = step * i;
             double a1 = step * (i + 1);
             buffer.vertex(matrix, cx, cy, 0.0F).color(r, g, b, a).endVertex();
@@ -212,7 +285,7 @@ public final class RenderUtil {
         float r = red(argb);
         float g = green(argb);
         float b = blue(argb);
-        int segments = Math.max(2, (int) Math.ceil(CIRCLE_SEGMENTS * (sweep / (Math.PI * 2.0D))));
+        int segments = Math.max(2, (int) Math.ceil(segmentsFor(outer) * (sweep / (Math.PI * 2.0D))));
         double step = sweep / segments;
         for (int i = 0; i < segments; i++) {
             double a0 = startAngle + step * i;

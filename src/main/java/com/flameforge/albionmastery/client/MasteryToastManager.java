@@ -11,7 +11,6 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.Locale;
 import java.util.List;
 
@@ -64,20 +63,35 @@ public final class MasteryToastManager {
 
     private static final List<Toast> ACTIVE = new ArrayList<>();
 
+    /** 等待上屏的提示，已按优先级排好序。 */
+    private static final List<Pending> PENDING = new ArrayList<>();
+
+    /** 等待队列最多攒多少条，再多就丢掉末尾（优先级最低）的。 */
+    private static final int MAX_PENDING = 9;
+
+    /** 到达序号，同优先级按它保持先来先显示。 */
+    private static long sequence = 0L;
+
     private MasteryToastManager() {
     }
 
     /**
-     * 推入一条升级提示。
+     * 排一条升级提示。
      *
-     * @param title    名称（武器名 / 类型名 / 模组名）
-     * @param tier     层级说明，例如「武器专精」
+     * <p>不是立刻上屏：先进等待队列，按「外圈（武器）&gt; 中圈（类型）&gt; 内圈（来源）」
+     * 排好序，屏幕上有空位时再一条条放出来，同时最多 {@value #MAX_VISIBLE} 条。
+     * 一次击杀把一整本书的法术都升了级的时候，不会满屏横幅乱飞，也不会把重要的挤掉。
+     * 队列超过 {@value #MAX_PENDING} 条时把优先级最低的丢掉——内圈升一级本来就是好几件武器
+     * 升级的结果，少看一条不影响什么。
+     *
+     * @param priority 优先级，0 武器 / 1 类型 / 2 来源，越小越先显示
+     * @param title    标题
+     * @param tier     层级名
      * @param oldLevel 旧等级
      * @param newLevel 新等级
-     * @param icons    可轮换的图标列表。武器层只有一个；类型与总体层自己没有图标，
-     *                 就在旗下武器的图标之间轮换，一眼能看出这条提示说的是哪一支分支
+     * @param icons    轮换图标
      */
-    public static void push(Component title, Component tier, int oldLevel, int newLevel,
+    public static void push(int priority, Component title, Component tier, int oldLevel, int newLevel,
                             List<ItemStack> icons) {
         boolean down = newLevel < oldLevel;
         List<ItemStack> usable = new ArrayList<>();
@@ -93,18 +107,41 @@ public final class MasteryToastManager {
         }
         // 学习点不是 1 的时候在横幅上挂个「×2」，让玩家知道涨得快慢是因为什么
         double study = ClientMasteryCache.data().getStudyMultiplier();
-        ACTIVE.add(new Toast(title, tier, oldLevel, newLevel, List.copyOf(usable),
-                Util.getMillis(), down, study));
-        while (ACTIVE.size() > MAX_VISIBLE) {
-            ACTIVE.remove(0);
+        Pending pending = new Pending(priority, sequence++, title, tier, oldLevel, newLevel,
+                List.copyOf(usable), down, study);
+
+        // 按优先级插到该在的位置，同优先级按到达先后；最后一条永远是最不重要的
+        int insertAt = PENDING.size();
+        for (int index = 0; index < PENDING.size(); index++) {
+            if (PENDING.get(index).priority() > priority) {
+                insertAt = index;
+                break;
+            }
         }
-        if (MasteryConfig.CLIENT.levelUpSound.get()) {
-            Minecraft minecraft = Minecraft.getInstance();
-            if (minecraft.player != null) {
-                // 音量压得很低，做成一声轻微的「叮」，不打断正在进行的战斗。
-                // 降级用低音调，不看屏幕也能听出方向不对
-                minecraft.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP,
-                        0.3F, down ? 0.7F : 1.7F);
+        PENDING.add(insertAt, pending);
+        while (PENDING.size() > MAX_PENDING) {
+            PENDING.remove(PENDING.size() - 1);
+        }
+    }
+
+    /**
+     * 有空位就从等待队列放一条上屏。
+     *
+     * @param now 当前时刻
+     */
+    private static void activatePending(long now) {
+        while (ACTIVE.size() < MAX_VISIBLE && !PENDING.isEmpty()) {
+            Pending pending = PENDING.remove(0);
+            ACTIVE.add(new Toast(pending.title(), pending.tier(), pending.oldLevel(), pending.newLevel(),
+                    pending.icons(), now, pending.down(), pending.study()));
+            if (MasteryConfig.CLIENT.levelUpSound.get()) {
+                Minecraft minecraft = Minecraft.getInstance();
+                if (minecraft.player != null) {
+                    // 音量压得很低，做成一声轻微的「叮」，不打断正在进行的战斗。
+                    // 降级用低音调，不看屏幕也能听出方向不对
+                    minecraft.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP,
+                            0.3F, pending.down() ? 0.7F : 1.7F);
+                }
             }
         }
     }
@@ -114,6 +151,7 @@ public final class MasteryToastManager {
      */
     public static void clear() {
         ACTIVE.clear();
+        PENDING.clear();
     }
 
     /**
@@ -122,23 +160,18 @@ public final class MasteryToastManager {
      * @param guiGraphics 绘图上下文
      */
     public static void render(GuiGraphics guiGraphics) {
+        long now = Util.getMillis();
+        float total = ENTER_MS + HOLD_MS + EXIT_MS;
+        // 先把播完的清掉，腾出位子再从队列里放新的
+        ACTIVE.removeIf(toast -> now - toast.bornAt >= total);
+        activatePending(now);
         if (ACTIVE.isEmpty()) {
             return;
         }
         Minecraft minecraft = Minecraft.getInstance();
-        long now = Util.getMillis();
-        float total = ENTER_MS + HOLD_MS + EXIT_MS;
-
-        Iterator<Toast> iterator = ACTIVE.iterator();
         int index = 0;
-        while (iterator.hasNext()) {
-            Toast toast = iterator.next();
-            float elapsed = now - toast.bornAt;
-            if (elapsed >= total) {
-                iterator.remove();
-                continue;
-            }
-            draw(guiGraphics, minecraft, toast, elapsed, index);
+        for (Toast toast : ACTIVE) {
+            draw(guiGraphics, minecraft, toast, now - toast.bornAt, index);
             index++;
         }
     }
@@ -281,6 +314,24 @@ public final class MasteryToastManager {
     private static int alphaOf(int argb, float alpha) {
         int a = (int) (255.0F * Mth.clamp(alpha, 0.0F, 1.0F));
         return (a << 24) | (argb & 0x00FFFFFF);
+    }
+
+    /**
+     * 等待上屏的一条提示。
+     *
+     * @param priority 优先级，越小越先显示
+     * @param sequence 到达序号
+     * @param title    标题
+     * @param tier     层级名
+     * @param oldLevel 旧等级
+     * @param newLevel 新等级
+     * @param icons    轮换图标
+     * @param down     是否降级
+     * @param study    学习倍率
+     */
+    private record Pending(int priority, long sequence, Component title, Component tier,
+                           int oldLevel, int newLevel, List<ItemStack> icons,
+                           boolean down, double study) {
     }
 
     /**
