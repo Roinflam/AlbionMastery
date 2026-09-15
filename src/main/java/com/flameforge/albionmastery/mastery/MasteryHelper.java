@@ -1,3 +1,4 @@
+// 路径：src/main/java/com/flameforge/albionmastery/mastery/MasteryHelper.java
 package com.flameforge.albionmastery.mastery;
 
 import com.flameforge.albionmastery.config.MasteryConfig;
@@ -62,10 +63,14 @@ public final class MasteryHelper {
         // 该类型下所有武器的等级之和，含本武器自己——自己练出来的等级也该算进联动里
         int typeLevelSum = data.getTypeLevelSum(weapon.typeKey());
 
-        double fromOverall = overallLevel * snapshot.overallDamagePerLevel;
-        double fromType = typeLevel * snapshot.typeDamagePerLevel;
-        double fromSelf = weaponLevel * snapshot.weaponDamagePerLevel;
-        double fromOthers = typeLevelSum * snapshot.weaponCrossDamagePerLevel;
+        // 不同武器体系的基础强度跨度非常大：原版剑和高阶模组枪 / 法术拿同一套专精百分比，
+        // 要么原版完全没感觉，要么模组武器直接失控。先按来源取得专精倍率，再统一作用到三层
+        // （总体 / 类型 / 单武器）以及同类型联动。这个倍率只属于“专精等级加成”，不碰流派特化。
+        double sourceMultiplier = snapshot.masteryDamageMultiplier(weapon.providerId());
+        double fromOverall = overallLevel * snapshot.overallDamagePerLevel * sourceMultiplier;
+        double fromType = typeLevel * snapshot.typeDamagePerLevel * sourceMultiplier;
+        double fromSelf = weaponLevel * snapshot.weaponDamagePerLevel * sourceMultiplier;
+        double fromOthers = typeLevelSum * snapshot.weaponCrossDamagePerLevel * sourceMultiplier;
         double raw = fromOverall + fromType + fromSelf + fromOthers;
 
         boolean capped = raw > snapshot.maxTotalDamageBonus;
@@ -171,3 +176,5 @@ public final class MasteryHelper {
         }
     }
 }
+
+

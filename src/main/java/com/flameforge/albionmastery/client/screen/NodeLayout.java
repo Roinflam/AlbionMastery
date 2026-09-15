@@ -1,3 +1,4 @@
+// 路径：src/main/java/com/flameforge/albionmastery/client/screen/NodeLayout.java
 package com.flameforge.albionmastery.client.screen;
 
 import com.flameforge.albionmastery.config.MasteryConfig;
@@ -42,8 +43,9 @@ import java.util.List;
  */
 public final class NodeLayout {
 
-    // 各层半径由内向外递减，相邻层之间保持 1.3～1.6 倍的差距，
-    // 差距太小（比如 30 比 22）在实际画面里根本分不出层次
+    // 各层节点半径由内向外递减，相邻层之间保持 1.3～1.6 倍的差距，
+    // 差距太小（比如 30 比 22）在实际画面里根本分不出层次。
+    // 三个圈到中心的距离按 1 : 2 : 3 排，图再大也是等距的三环
 
     /** 中心总览节点半径。整张图的视觉重心，比来源节点大出一圈才压得住场。 */
     private static final double INFO_RADIUS = 105.0D;
@@ -64,15 +66,31 @@ public final class NodeLayout {
     private static final double WEAPON_GAP_FACTOR = 1.35D;
 
     /**
-     * 来源节点所在的圈。
+     * 来源圈的最小半径。
      *
      * <p>拉得比早先远得多：中心节点放大之后，来源节点原来那个距离显得很挤，
      * 分支还没散开就已经贴上中心了。留出一段空白，放射状的分支才有「从中心长出去」的感觉。
+     * 图大的时候来源圈会跟着武器圈一起往外走（见 {@link #sourceRingFor}），这里只是下限。
      */
-    private static final double SOURCE_RING = 430.0D;
+    private static final double SOURCE_RING_MIN = 430.0D;
 
-    /** 类型圈相对外圈半径的比例。 */
-    private static final double TYPE_RING_RATIO = 0.45D;
+    /**
+     * 来源圈相对武器圈的比例。
+     *
+     * <p>三圈到中心的距离按 1 : 2 : 3 排：中心→来源、来源→类型、类型→武器三段一样长。
+     * 早先来源圈写死 430，一千多件武器把武器圈撑到一万六，缩小看全貌时来源节点全糊在中心那个点上，
+     * 连线像一把伞骨从中心直接扎到中圈，看不出层次。
+     */
+    private static final double SOURCE_RING_RATIO = 1.0D / 3.0D;
+
+    /**
+     * 类型圈在来源圈到武器圈这段距离上的位置，0.5 就是正中间。
+     *
+     * <p>早先是按外圈半径的 0.45 倍算：外圈一大，来源→类型只有 0.45R − 430，
+     * 类型→武器却有 0.55R，武器越多两段差得越远，中圈看着像贴在内圈上。
+     * 改成按两圈之间的距离取比例，两段永远一样长。
+     */
+    private static final double TYPE_RING_RATIO = 0.5D;
 
     /** 类型圈的最小半径。要明显大于来源圈，否则两层会挨在一起。 */
     private static final double TYPE_RING_MIN = 780.0D;
@@ -87,10 +105,11 @@ public final class NodeLayout {
      * 武器圈的最大半径，再往外就只能靠缩小节点消化。
      *
      * <p>放得比原来大得多：装了上千件武器时，半径顶到上限之后就只能压缩节点大小和间距，
-     * 结果是放到最大也还是一堆挤在一起的小点。宁可让整张图更大——反正可以缩放，
-     * 挤成一团是没法通过缩放救回来的。
+     * 结果是放到最大也还是一堆挤在一起的小点。宁可让整张图更大——缩放范围是跟着图走的，
+     * 图大只是全貌时更小，挤成一团是没法通过缩放救回来的。
+     * 四万的半径下，一圈能按满尺寸放下约四千件武器；一千八百件是一万六到两万。
      */
-    private static final double WEAPON_RING_MAX = 16000.0D;
+    private static final double WEAPON_RING_MAX = 40000.0D;
 
     /**
      * 单个武器类型至少占据的角度单位数。
@@ -100,6 +119,18 @@ public final class NodeLayout {
      * 内部的武器仍按正常间距居中排，多出来的角度留白。
      */
     private static final double MIN_TYPE_UNITS = 8.0D;
+
+    /**
+     * 只有一把或两把武器的小类型，额外多给一点角度单位。
+     *
+     * <p>像「发射器」这种只有一把武器的类型，如果只按 {@link #MIN_TYPE_UNITS} 兜底，
+     * 类型节点自己是站住了，但和相邻类型的呼吸空间还是偏小，看起来会比别的中圈挤。
+     * 多补一点单位，优先把这类特别小的类型拉开；武器多的类型维持原逻辑，不会整圈一起膨胀。
+     */
+    private static final double SINGLE_WEAPON_TYPE_EXTRA_UNITS = 2.8D;
+
+    /** 只有两把武器的小类型补一点角度单位，力度比单把更轻。 */
+    private static final double DOUBLE_WEAPON_TYPE_EXTRA_UNITS = 1.4D;
 
     /** 单个来源扇形的角度上限（度）。 */
     private static final double MAX_SOURCE_WEDGE_DEG = 125.0D;
@@ -161,10 +192,36 @@ public final class NodeLayout {
             if (group.weapons().isEmpty()) {
                 continue;
             }
-            total += Math.max(group.weapons().size(), MIN_TYPE_UNITS);
+            total += allocationUnits(group);
             groups++;
         }
         return Math.max(1.0D, total - 1.0D + GROUP_GAP_UNITS * Math.max(0, groups - 1));
+    }
+
+    /**
+     * 单个类型实际占用的角度单位数。
+     *
+     * <p>不是简单地拿武器数量和 {@link #MIN_TYPE_UNITS} 二选一。
+     * 极小类型（1~2 把）真正难看的地方不在外圈，而在中圈：类型节点本身比武器节点大得多，
+     * 如果只给一个很勉强的兜底，它就会显得和隔壁贴得特别近。
+     * 所以对 1 把 / 2 把的类型额外补一点角度，让中圈观感和其它枪械类型更一致。
+     *
+     * @param group 类型分组
+     * @return 该类型应占的单位数
+     */
+    private static double allocationUnits(WeaponTypeGroup group) {
+        int size = group.weapons().size();
+        if (size <= 0) {
+            return 0.0D;
+        }
+        double base = Math.max(size, MIN_TYPE_UNITS);
+        if (size == 1) {
+            return base + SINGLE_WEAPON_TYPE_EXTRA_UNITS;
+        }
+        if (size == 2) {
+            return base + DOUBLE_WEAPON_TYPE_EXTRA_UNITS;
+        }
+        return base;
     }
 
     /**
@@ -228,9 +285,8 @@ public final class NodeLayout {
                 Math.min(maxWedge * ring / maxUnits, arcBudget * ring / totalUnits));
         double weaponRadius = Math.max(WEAPON_RADIUS_MIN,
                 Math.min(WEAPON_RADIUS_MAX, spacing / (2.0D * WEAPON_GAP_FACTOR)));
-        // 类型圈跟着外圈走，同样全图统一
-        double typeRing = Math.max(TYPE_RING_MIN,
-                Math.min(ring - TYPE_RING_MARGIN, ring * TYPE_RING_RATIO));
+        // 类型圈放在来源圈和武器圈的正中间，同样全图统一
+        double typeRing = typeRingFor(ring);
         // 一件武器占的角度，全图统一：来源大小不再影响节点疏密
         double unitAngle = spacing / ring;
 
@@ -259,7 +315,7 @@ public final class NodeLayout {
             spacing = Math.min(desiredSpacing, equalWedge * ring / maxUnits);
             weaponRadius = Math.max(WEAPON_RADIUS_MIN,
                     Math.min(WEAPON_RADIUS_MAX, spacing / (2.0D * WEAPON_GAP_FACTOR)));
-            typeRing = Math.max(TYPE_RING_MIN, Math.min(ring - TYPE_RING_MARGIN, ring * TYPE_RING_RATIO));
+            typeRing = typeRingFor(ring);
             unitAngle = spacing / ring;
             for (int i = 0; i < count; i++) {
                 wedges[i] = equalWedge;
@@ -304,6 +360,28 @@ public final class NodeLayout {
     }
 
     /**
+     * 来源圈的半径：武器圈的三分之一，但不小于 {@value #SOURCE_RING_MIN}。
+     *
+     * @param ring 武器圈半径
+     * @return 来源圈半径
+     */
+    private static double sourceRingFor(double ring) {
+        return Math.max(SOURCE_RING_MIN, ring * SOURCE_RING_RATIO);
+    }
+
+    /**
+     * 类型圈的半径：来源圈到武器圈之间按 {@value #TYPE_RING_RATIO} 取点，再夹进合理范围。
+     *
+     * @param ring 武器圈半径
+     * @return 类型圈半径
+     */
+    private static double typeRingFor(double ring) {
+        double sourceRing = sourceRingFor(ring);
+        double middle = sourceRing + (ring - sourceRing) * TYPE_RING_RATIO;
+        return Math.max(TYPE_RING_MIN, Math.min(ring - TYPE_RING_MARGIN, middle));
+    }
+
+    /**
      * 按算好的扇形角度把各来源摆到圈上。整组扇形以正上方为中心摆开。
      *
      * @param nodes        节点列表（追加进去）
@@ -326,6 +404,7 @@ public final class NodeLayout {
                                                   double ring, double weaponRadius, double typeRing,
                                                   float indexDelay) {
         double cursor = -Math.PI / 2.0D - usedArc / 2.0D;
+        double sourceRing = sourceRingFor(ring);
         int weaponIndex = 0;
 
         for (int s = 0; s < active.size(); s++) {
@@ -335,7 +414,7 @@ public final class NodeLayout {
 
             MasteryNode sourceNode = new MasteryNode(
                     MasteryNode.Type.SOURCE,
-                    Math.cos(center) * SOURCE_RING, Math.sin(center) * SOURCE_RING,
+                    Math.cos(center) * sourceRing, Math.sin(center) * sourceRing,
                     SOURCE_RADIUS, source, null, null, info,
                     DEPTH_DELAY_MS + s * 24.0F);
             nodes.add(sourceNode);
@@ -386,7 +465,7 @@ public final class NodeLayout {
                 continue;
             }
             // 这一类分到的角度：不足下限的按下限给，武器在里面居中排，多出来的留白
-            double allocation = Math.max(weapons.size(), MIN_TYPE_UNITS);
+            double allocation = allocationUnits(group);
             double spanStart = cursor;
             double spanEnd = cursor + (allocation - 1) * unit;
             double typeCenter = (spanStart + spanEnd) / 2.0D;
@@ -414,3 +493,5 @@ public final class NodeLayout {
         return weaponIndex;
     }
 }
+
+

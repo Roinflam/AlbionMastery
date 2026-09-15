@@ -5,9 +5,11 @@ import com.flameforge.albionmastery.event.ArsCombatHandler;
 import com.flameforge.albionmastery.event.GunCombatHandler;
 import com.flameforge.albionmastery.event.SlashBladeCombatHandler;
 import com.flameforge.albionmastery.event.SpellCombatHandler;
+import com.flameforge.albionmastery.leaderboard.MasteryLeaderboard;
 import com.flameforge.albionmastery.mastery.DimensionXpBonus;
 import com.flameforge.albionmastery.network.NetworkHandler;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
+import net.minecraft.server.MinecraftServer;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
@@ -15,6 +17,7 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.config.ModConfigEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -96,6 +99,19 @@ public class AlbionMastery {
         if (event.getConfig().getType() == ModConfig.Type.COMMON) {
             MasteryConfig.refreshServerSnapshot();
             DimensionXpBonus.reload();
+            // 等级上限或曲线变了，排行榜上存的「满级数」这些概况就不对了，得按新曲线重算。
+            // 配置重载事件是文件监视线程发出来的，不在主线程，SavedData 不能在这里直接碰，
+            // 用 server.execute 丢回主线程去做
+            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+            if (server != null && MasteryConfig.COMMON.leaderboardEnable.get()) {
+                server.execute(() -> {
+                    try {
+                        MasteryLeaderboard.get(server).recomputeAll();
+                    } catch (Exception exception) {
+                        LOGGER.error("配置重载后重算排行榜失败", exception);
+                    }
+                });
+            }
         }
     }
 }

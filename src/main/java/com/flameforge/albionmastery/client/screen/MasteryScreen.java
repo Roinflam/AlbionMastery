@@ -54,7 +54,11 @@ import java.util.Set;
  *   总览 → 来源模组 → 总体 → 武器类型 → 具体武器
  * </pre>
  *
- * <p>操作：左键点节点看详情 / 点来源或类型展开收起 / 空白处拖动平移 / 滚轮缩放 / ESC 关闭。
+ * <p>操作：左键点节点看详情 / 双击节点飞过去（来源、类型整支收进屏幕）/ 空白处拖动平移 / 滚轮缩放 / ESC 关闭。
+ *
+ * <p>同一个界面也用来看别人的罗盘：从排行榜点进来时，传入那个人的 {@link MasteryData}，
+ * 界面就按他的数据画，流派选择照样显示，只是不能点（只读）。
+ * 所有数据读取都走 {@link #data} 这个字段而不是直接读客户端缓存，就是为了这一点。
  */
 public class MasteryScreen extends Screen {
 
@@ -70,32 +74,82 @@ public class MasteryScreen extends Screen {
     /**
      * 缩放的绝对下限，只在图大到离谱时兜底。
      *
-     * <p>真正的下限是 {@link #minZoom()} 按当前这张图算出来的：图小就不许缩太小，
-     * 图大才允许缩得更小。写死一个下限两头都不对——只有几把武器时能缩到看不见，
+     * <p>真正的下限是 {@link #minZoom()} 按当前这张图算出来的：图多大就允许缩到多小，
+     * 保证任何时候都能把整张图收进屏幕。写死一个下限两头都不对——只有几把武器时能缩到看不见，
      * 几千把武器时想看全貌又缩不下去。
      */
-    private static final double MIN_ZOOM_FLOOR = 0.012D;
-
-    /** 缩放上限。 */
-    private static final double MAX_ZOOM = 6.0D;
+    private static final double MIN_ZOOM_FLOOR = 0.003D;
 
     /**
-     * 缩到最小时，外圈武器节点至少还有多少像素半径。
+     * 放到最大时，外圈武器节点有多少像素半径。
      *
-     * <p>这是「不许缩太小」那一半：再小节点就成了一粒像素，看着毫无意义。
-     * 22 半径的节点按这个算出来的下限约 0.07，和老版本手调出来的那个值差不多。
+     * <p>上限也跟着图走：武器多的图节点本身就小，得允许放得更大才能看清；
+     * 武器少的图节点大，放到同样的倍数就是一整块屏幕一个六边形，没意义。
      */
-    private static final double MIN_NODE_PIXELS_AT_MIN_ZOOM = 1.6D;
+    private static final double MAX_NODE_PIXELS_AT_MAX_ZOOM = 80.0D;
+
+    /** 缩放上限的取值范围，{@link #maxZoom()} 按节点大小算出来之后夹在这之间。 */
+    private static final double MAX_ZOOM_LOW = 3.0D;
+    private static final double MAX_ZOOM_HIGH = 9.0D;
 
     /**
      * 缩到最小时整张图占屏幕的比例（相对「刚好放下」的缩放再乘这个系数）。
      *
-     * <p>这是「允许看全貌」那一半：留三成余量，图四周有点空当，不至于贴着边框。
+     * <p>几乎不再额外留边，让最小缩放尽量贴近「整张圆盘刚好看完」。
      */
-    private static final double MIN_ZOOM_WHOLE_FACTOR = 0.7D;
+    private static final double MIN_ZOOM_WHOLE_FACTOR = 0.98D;
 
-    /** 每滚一格的缩放倍数。步子小一点更好微调。 */
-    private static final double ZOOM_STEP = 1.11D;
+    /**
+     * 从最小缩到最大要滚多少格。
+     *
+     * <p>每格的倍数不写死，按当前这张图的缩放范围算：图小范围窄，每格走得少；
+     * 图大范围宽，每格走得多。十二格是「从全貌到贴脸」的总数，
+     * 一千多件武器的图从全貌滚到能认出图标大概六七格，几十件的图三四格。
+     */
+    private static final double ZOOM_NOTCHES = 12.0D;
+
+    /**
+     * 在原始全貌最小值的基础上，额外往里抬多少格滚轮。
+     *
+     * <p>1 表示「旧最小值放大一格」；你上一轮就是这个效果。
+     * 这次又明确要求在那基础上再限制一格，所以这里改成 2。
+     */
+    private static final int MIN_ZOOM_EXTRA_NOTCHES = 2;
+
+    /** 每格倍数的取值范围，太小滚不动，太大跳得晃眼。 */
+    private static final double ZOOM_STEP_MIN = 1.15D;
+    private static final double ZOOM_STEP_MAX = 2.0D;
+
+    /**
+     * 内层节点在屏幕上的最小半径（像素）：中心 / 来源 / 类型。
+     *
+     * <p>缩到全貌时按真实比例它们只剩一个点，可它们一共才几十个，是认路用的——
+     * 给个下限让它们始终是个带图标的六边形，缩放只影响最外圈那一千多件武器。
+     * 下限都比节点的真实半径小，放大之后自然过渡到真实尺寸，不会突然跳一下。
+     *
+     * <p>这只是上限意义上的下限：真正用的值还要按圈与圈在屏幕上的间距再压一道
+     * （见 {@link #updateRadiusFloors()}），整张图缩得很小时节点跟着小，
+     * 不至于来源把中心盖住、类型把来源盖住。
+     */
+    private static final double INFO_MIN_SCREEN_RADIUS = 18.0D;
+    private static final double SOURCE_MIN_SCREEN_RADIUS = 13.0D;
+    private static final double TYPE_MIN_SCREEN_RADIUS = 8.0D;
+
+    /**
+     * 节点下限最多占相邻两圈屏幕间距的多少。
+     *
+     * <p>中心到来源那一段，中心占 0.38、来源占 0.28，加起来 0.66，剩下三成多是空的，
+     * 连线看得见；来源到类型、类型到武器同理。类型之间横向挤在一起不管——
+     * 中圈本来就密，横向叠一点不影响认路，纵向盖住别的圈才要命。
+     */
+    private static final double INFO_FLOOR_SHARE = 0.38D;
+    private static final double SOURCE_FLOOR_SHARE = 0.28D;
+    private static final double TYPE_FLOOR_SHARE = 0.28D;
+
+    /** 这一帧实际生效的三个下限，每帧按当前缩放算一次。 */
+    private double infoFloor;
+    private double sourceFloor;
+    private double typeFloor;
 
     /** 节点标签的字号缩放上下限，让文字跟着板子一起缩放而不是固定大小。 */
     private static final float LABEL_SCALE_MIN = 0.5F;
@@ -103,6 +157,22 @@ public class MasteryScreen extends Screen {
 
     /** 节点屏幕半径小于该值才不渲染图标。只挡住小到没有意义的那一档，正常缩放一律画。 */
     private static final float ICON_MIN_SCREEN_RADIUS = 1.5F;
+
+    /**
+     * 来源节点在「节点最小屏幕半径」完全接管尺寸时，图标最少缩到节点图标正常尺寸的多少。
+     *
+     * <p>来源节点本体保留较大的点击区和导航轮廓，但全貌视角下不再让物品图标把六边形塞满，
+     * 避免内圈看起来和中心总汇抢视觉重心；但也不能缩成空壳，所以这一版继续往回拉一些。
+     */
+    private static final float SOURCE_ICON_MIN_SCALE = 0.68F;
+
+    /**
+     * 类型节点在「节点最小屏幕半径」完全接管尺寸时，图标最少缩到节点图标正常尺寸的多少。
+     *
+     * <p>中圈节点数量比来源多，远景下更容易挤成一圈大图标，所以比来源再收一点；
+     * 全貌视角依然比近景更收敛，但这次会更接近“把格子填满”的观感。
+     */
+    private static final float TYPE_ICON_MIN_SCALE = 0.62F;
 
     /**
      * 贴图图标占节点半径的比例。
@@ -119,12 +189,20 @@ public class MasteryScreen extends Screen {
     private static final float TINY_NODE_RADIUS = 3.0F;
 
     /**
-     * 节点屏幕半径小于该值时不画等级铭牌和名字。
+     * 武器节点屏幕半径小于该值时不画等级铭牌和名字。
      *
      * <p>铭牌是字，字的缩放有下限（{@value #LABEL_SCALE_MIN}），节点缩到两三个像素时铭牌反而比节点大，
      * 几千个节点就是几千次文字渲染——「缩到最小就掉帧」大头在这里，不在六边形上。
      */
     private static final float LABEL_MIN_SCREEN_RADIUS = 5.0F;
+
+    /**
+     * 类型节点名称至少要有多少字体坐标宽度的可用空间才显示。
+     *
+     * <p>不再用固定缩放值硬开中圈文字。类型节点在不同来源里的密度差很多，
+     * 同一个 zoom 下有的地方很宽、有的地方已经挤成一团；按真实相邻节点间距判断才不会互相盖字。
+     */
+    private static final int TYPE_LABEL_MIN_BUDGET = 30;
 
     /**
      * 单帧最多渲染多少个物品图标。
@@ -138,25 +216,37 @@ public class MasteryScreen extends Screen {
     /** 铭牌里带上「/ 上限」所需的最小缩放，再小就只留等级数字。 */
     private static final double LEVEL_DETAIL_ZOOM = 0.55D;
 
-    /** 显示武器名称所需的最小缩放。 */
+    /**
+     * 旧版武器名称开始显示的基准缩放。
+     *
+     * <p>真正使用的阈值见 {@link #weaponNameZoomThreshold()}：按你的要求提前一格滚轮倍率。
+     */
     private static final double NAME_ZOOM = 0.68D;
 
     /** 分支合计行相对节点名称的字号系数，比名称小一号，免得抢了名字的视线。 */
     private static final float SUM_LABEL_SCALE = 0.82F;
 
-    /** 对准手持武器时，相对「看全貌」缩放放大多少倍。 */
-    private static final double FOCUS_ZOOM_FACTOR = 5.0D;
+    /**
+     * 对准某个武器节点（手持武器、搜索命中、双击）时，让它在屏幕上有多少像素半径。
+     *
+     * <p>不按倍数算：武器多的图节点本身只有十来个单位大，同样的倍数下就是几个像素，
+     * 认不出图标。按像素定，大图小图对准之后看到的是一样大的节点。
+     */
+    private static final double FOCUS_NODE_PIXELS = 17.0D;
 
-    /** 对准手持武器时的缩放下限，保证节点图标认得出来。 */
-    private static final double MIN_FOCUS_ZOOM = 0.5D;
+    /** 双击聚焦到一个分支时，分支占屏幕可用区域的比例，留点边。 */
+    private static final double FLY_FIT_FACTOR = 0.82D;
 
     /**
-     * 对准手持武器时的缩放上限。
+     * 双击类型节点飞过去时，武器节点至少多少像素半径。
      *
-     * <p>更早的版本这里写死 0.75，看着最舒服，但整张图变大之后写死就成了「贴脸」。
-     * 现在按「看全貌」的倍数算，再用这个值封顶——大图小图都落在同一种观感上。
+     * <p>几十件武器排成一排，整排塞进屏幕每件只剩两三个像素，什么都看不清；
+     * 宁可先看清中间这一段，两边的拖一下就到。
      */
-    private static final double MAX_FOCUS_ZOOM = 0.78D;
+    private static final double FLY_TYPE_NODE_PIXELS = 7.0D;
+
+    /** 两次点击间隔在这之内算双击（毫秒）。 */
+    private static final long DOUBLE_CLICK_MS = 380L;
 
     /** 悬停提示的左右内边距。 */
     private static final int TOOLTIP_PAD_X = 5;
@@ -204,6 +294,9 @@ public class MasteryScreen extends Screen {
     private static final int BUTTON_WIDTH = 74;
     private static final int BUTTON_HEIGHT = 17;
 
+    /** 左下角两个按钮之间的间距。 */
+    private static final int BUTTON_GAP = 6;
+
     /** 单个节点出现动画的时长（毫秒）。 */
     private static final float APPEAR_MS = 240.0F;
 
@@ -241,6 +334,12 @@ public class MasteryScreen extends Screen {
      * <p>没有任何来源时保持 0，装饰环就不画——总比按一个凭空的默认值画出来对不上强。
      */
     private double sourceRingRadius;
+
+    /** 来源节点的个数，算名字与等级牌宽度预算用。 */
+    private int sourceCount;
+
+    /** 类型节点的个数，算名字与等级牌宽度预算用。 */
+    private int typeCount;
 
     /** 上一帧面板显示的是哪个节点，换节点时用来把滚动归零。 */
     @Nullable
@@ -306,6 +405,18 @@ public class MasteryScreen extends Screen {
     /** 外圈武器节点的半径，用于保证默认视角下图标不会小到看不清。 */
     private double weaponNodeRadius = 22.0D;
 
+    /** 正在飞向某个位置（双击聚焦），每帧把平移往目标逼近。拖动或滚轮会打断。 */
+    private boolean flying;
+
+    /** 飞行的目标：让这个图坐标落在屏幕中心。 */
+    private double flyCenterX;
+    private double flyCenterY;
+
+    /** 上一次点中的节点和时刻，用来判断双击。 */
+    @Nullable
+    private MasteryNode lastClickedNode;
+    private long lastClickMs;
+
     private boolean dragging;
     private double lastMouseX;
     private double lastMouseY;
@@ -319,6 +430,21 @@ public class MasteryScreen extends Screen {
      */
     @Nullable
     private static ViewState savedView;
+
+    /**
+     * 这个界面画的是谁的数据。
+     *
+     * <p>自己的界面就是 {@code ClientMasteryCache.data()} 那个对象（同步包会直接改它，界面跟着变）；
+     * 看别人时是一份从服务端拿来的独立副本。
+     */
+    private final MasteryData data;
+
+    /** 从哪个界面进来的（排行榜），ESC 回到它；null 表示直接关闭。 */
+    @Nullable
+    private final Screen parentScreen;
+
+    /** 是否只读：看别人的罗盘时流派卡片只显示不响应。 */
+    private final boolean viewOnly;
 
     /** 缩放锚点是否有效。 */
     private boolean hasZoomAnchor;
@@ -336,10 +462,26 @@ public class MasteryScreen extends Screen {
     private double anchorScreenY;
 
     /**
-     * 构造界面。
+     * 构造自己的专精界面。
      */
     public MasteryScreen() {
-        super(Component.translatable("gui.albionmastery.title"));
+        this(ClientMasteryCache.data(), null, null);
+    }
+
+    /**
+     * 构造一个看别人（或指定数据）的专精界面。
+     *
+     * @param data   要画的专精数据
+     * @param owner  这份数据的主人的名字；传 null 表示是自己的
+     * @param parent 上一层界面，ESC 回到它；传 null 则直接关闭
+     */
+    public MasteryScreen(MasteryData data, @Nullable Component owner, @Nullable Screen parent) {
+        super(owner == null
+                ? Component.translatable("gui.albionmastery.title")
+                : Component.translatable("gui.albionmastery.title_viewing", owner));
+        this.data = data;
+        this.parentScreen = parent;
+        this.viewOnly = owner != null;
     }
 
     @Override
@@ -348,10 +490,11 @@ public class MasteryScreen extends Screen {
         this.sources = ClientWeaponRegistry.rebuild();
         rebuildNodes();
         if (!this.initialized) {
+            // 看别人的罗盘：手上的武器和记住的视角都是自己的事，跟他无关，直接居中看全貌。
             // 顺序很重要：手上拿着武器就一定定位到那把。
             // 「对着物品按 B」这个动作本身就是在说「我要看这把」，
             // 拿上次的视角把它顶掉，等于把这个功能废了。
-            if (!focusHeldWeapon() && !restoreSavedView()) {
+            if (this.viewOnly || (!focusHeldWeapon() && !restoreSavedView())) {
                 // 空手打开、又没有上次的视角：居中看全貌
                 this.zoom = fitZoom();
                 this.targetZoom = this.zoom;
@@ -493,7 +636,7 @@ public class MasteryScreen extends Screen {
         for (MasteryNode node : this.searchHits) {
             double screenX = baseX() + this.panX + node.graphX * this.zoom;
             double screenY = baseY() + this.panY + node.graphY * this.zoom;
-            double radius = node.radius * this.zoom + 4.0D;
+            double radius = screenRadius(node) + 4.0D;
             if (screenX + radius < 0 || screenX - radius > this.width
                     || screenY + radius < 0 || screenY - radius > this.height) {
                 continue;
@@ -513,9 +656,23 @@ public class MasteryScreen extends Screen {
     @Override
     public void removed() {
         super.removed();
+        // 看别人的视角不记：记下来的话回到自己的界面会对着别人那张图的坐标
+        if (this.viewOnly) {
+            return;
+        }
         // 关界面时把视角记下来，下次打开接着看，不用每次重新缩放和拖动
         savedView = new ViewState(this.zoom, this.panX, this.panY,
                 this.selected == null ? null : this.selected.dataKey());
+    }
+
+    @Override
+    public void onClose() {
+        // 从排行榜进来的，退出去应该回到排行榜，而不是直接关掉
+        if (this.parentScreen != null) {
+            Minecraft.getInstance().setScreen(this.parentScreen);
+        } else {
+            super.onClose();
+        }
     }
 
     /**
@@ -533,42 +690,65 @@ public class MasteryScreen extends Screen {
      * @return 缩放
      */
     private double focusZoom() {
-        double wanted = Math.max(fitZoom() * FOCUS_ZOOM_FACTOR, MIN_FOCUS_ZOOM);
-        return Mth.clamp(Math.min(wanted, MAX_FOCUS_ZOOM), minZoom(), maxZoom());
+        return Mth.clamp(FOCUS_NODE_PIXELS / Math.max(1.0D, this.weaponNodeRadius), minZoom(), maxZoom());
+    }
+
+    /**
+     * 不额外抬高之前，整张图按当前窗口「刚好看完」时对应的原始最小缩放。
+     *
+     * <p>这是纯几何意义上的全貌缩放：整张圆盘放进屏幕，再乘上
+     * {@value #MIN_ZOOM_WHOLE_FACTOR} 这点留白系数。真正给玩家用的最小缩放在
+     * {@link #minZoom()} 里还会再往里抬一格，因为上一版虽然已经顺眼很多，
+     * 但你实机看下来仍然觉得能再放大一档更舒服。
+     *
+     * @return 原始全貌缩放下限
+     */
+    private double baseMinZoom() {
+        double whole = Math.min(this.width, this.height) * 0.44D / Math.max(1.0D, this.outerRadius);
+        // 原始下限不能高过上限的一半，否则滚轮只剩一两格可滚。
+        return Mth.clamp(whole * MIN_ZOOM_WHOLE_FACTOR, MIN_ZOOM_FLOOR, maxZoom() * 0.5D);
     }
 
     /**
      * 当前这张图允许缩到多小。
      *
-     * <p>取两个约束里更大的那个：
-     * <ul>
-     *     <li>整张图放进屏幕之后再留三成余量（{@value #MIN_ZOOM_WHOLE_FACTOR}）——图小的时候
-     *         这一条起作用，只有几把武器时缩到底也就是「整张图占大半个屏幕」；</li>
-     *     <li>外圈节点至少 {@value #MIN_NODE_PIXELS_AT_MIN_ZOOM} 像素半径——图大的时候这一条起作用，
-     *         几千把武器时能缩到看清结构，但不会缩成一片像素点。</li>
-     * </ul>
-     * 每次开界面、每次窗口大小变化都会重新按当前屏幕算，不缓存。
+     * <p>这里不是直接返回原始全貌缩放，而是按你这次要求：
+     * 「以现在的为基础，然后放大一次的效果，就是之后的缩小上限」。
+     * 也就是先拿旧逻辑算出原始最小值，再按那一版的滚轮倍率往里推一格，
+     * 把那两格之后的位置当成新的最小缩放。这样以后再往外滚，就会停在“旧版最小值放大两格”这个位置。
      *
-     * @return 缩放下限
+     * @return 给玩家实际使用的缩放下限
      */
     private double minZoom() {
-        double whole = Math.min(this.width, this.height) * 0.44D / Math.max(1.0D, this.outerRadius);
-        double readable = MIN_NODE_PIXELS_AT_MIN_ZOOM / Math.max(1.0D, this.weaponNodeRadius);
-        double bound = Math.max(whole * MIN_ZOOM_WHOLE_FACTOR, readable);
-        // 下限不能高过上限的一半，否则滚轮只剩一两格可滚
-        return Mth.clamp(bound, MIN_ZOOM_FLOOR, MAX_ZOOM * 0.5D);
+        double base = baseMinZoom();
+        double max = maxZoom();
+        double baseStep = Mth.clamp(Math.pow(max / Math.max(base, 1.0E-6D), 1.0D / ZOOM_NOTCHES),
+                ZOOM_STEP_MIN, ZOOM_STEP_MAX);
+        // 下限不能高过上限的一半，否则滚轮只剩一两格可滚。
+        return Mth.clamp(base * Math.pow(baseStep, MIN_ZOOM_EXTRA_NOTCHES), MIN_ZOOM_FLOOR, max * 0.5D);
     }
 
     /**
-     * 当前这张图允许放到多大。
-     *
-     * <p>上限本身是固定的；这里单独做成方法是为了和 {@link #minZoom()} 对称，
-     * 以后要按图大小调上限只改这一处。
+     * 当前这张图允许放到多大：让外圈武器节点放到 {@value #MAX_NODE_PIXELS_AT_MAX_ZOOM} 像素半径为止。
      *
      * @return 缩放上限
      */
     private double maxZoom() {
-        return MAX_ZOOM;
+        return Mth.clamp(MAX_NODE_PIXELS_AT_MAX_ZOOM / Math.max(1.0D, this.weaponNodeRadius),
+                MAX_ZOOM_LOW, MAX_ZOOM_HIGH);
+    }
+
+    /**
+     * 滚轮每格的缩放倍数，按当前范围分成 {@value #ZOOM_NOTCHES} 格。
+     *
+     * <p>注意这里用的是抬高后的 {@link #minZoom()}；也就是说新的最小缩放本身就已经
+     * 等于“旧版最小值再放大一格”，之后再继续滚轮时，会在这个新范围里重新均分格数。
+     *
+     * @return 倍数，大于 1
+     */
+    private double zoomStep() {
+        double range = maxZoom() / minZoom();
+        return Mth.clamp(Math.pow(range, 1.0D / ZOOM_NOTCHES), ZOOM_STEP_MIN, ZOOM_STEP_MAX);
     }
 
     /**
@@ -672,19 +852,93 @@ public class MasteryScreen extends Screen {
      * @param mouseY      鼠标 Y
      */
     private void drawResetButton(GuiGraphics guiGraphics, int mouseX, int mouseY) {
-        int x = buttonX();
-        int y = buttonY();
-        boolean hover = isOnButton(mouseX, mouseY);
+        drawFramedButton(guiGraphics, buttonX(), buttonY(),
+                Component.translatable("gui.albionmastery.reset_view"), isOnButton(mouseX, mouseY));
+    }
+
+    /**
+     * 画一个描边按钮，重置视角和排行榜两个按钮共用。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param x           左边缘
+     * @param y           顶边
+     * @param label       文字
+     * @param hover       是否悬停
+     */
+    private void drawFramedButton(GuiGraphics guiGraphics, int x, int y, Component label, boolean hover) {
         guiGraphics.fill(x, y, x + BUTTON_WIDTH, y + BUTTON_HEIGHT, hover ? 0xF01E1810 : 0xC0130F09);
         int border = hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
         guiGraphics.fill(x, y, x + BUTTON_WIDTH, y + 1, border);
         guiGraphics.fill(x, y + BUTTON_HEIGHT - 1, x + BUTTON_WIDTH, y + BUTTON_HEIGHT, border);
         guiGraphics.fill(x, y, x + 1, y + BUTTON_HEIGHT, border);
         guiGraphics.fill(x + BUTTON_WIDTH - 1, y, x + BUTTON_WIDTH, y + BUTTON_HEIGHT, border);
-        guiGraphics.drawCenteredString(this.font,
-                Component.translatable("gui.albionmastery.reset_view"),
+        guiGraphics.drawCenteredString(this.font, label,
                 x + BUTTON_WIDTH / 2, y + (BUTTON_HEIGHT - 8) / 2 + 1,
                 hover ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT);
+    }
+
+    /**
+     * 左下角第二个按钮要不要画。
+     *
+     * <p>看自己时是「全服排行」，看别人时是「返回排行榜」，两种情况都画。
+     * 单人世界也不藏：开了局域网就是好几个人，榜单照样有意义；真的只有自己一个人，
+     * 榜上只有一行也不碍事。
+     *
+     * @return 要画返回 true
+     */
+    private boolean hasSecondButton() {
+        return true;
+    }
+
+    /**
+     * @return 第二个按钮的左边界，排在重置视角按钮右边
+     */
+    private int secondButtonX() {
+        return buttonX() + BUTTON_WIDTH + BUTTON_GAP;
+    }
+
+    /**
+     * 判断坐标是否落在第二个按钮上。
+     *
+     * @param mouseX 鼠标 X
+     * @param mouseY 鼠标 Y
+     * @return 落在按钮上返回 true
+     */
+    private boolean isOnSecondButton(double mouseX, double mouseY) {
+        return hasSecondButton()
+                && mouseX >= secondButtonX() && mouseX <= secondButtonX() + BUTTON_WIDTH
+                && mouseY >= buttonY() && mouseY <= buttonY() + BUTTON_HEIGHT;
+    }
+
+    /**
+     * 画第二个按钮。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param mouseX      鼠标 X
+     * @param mouseY      鼠标 Y
+     */
+    private void drawSecondButton(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        if (!hasSecondButton()) {
+            return;
+        }
+        Component label = Component.translatable(this.viewOnly
+                ? "gui.albionmastery.leaderboard.back"
+                : "gui.albionmastery.leaderboard.open");
+        drawFramedButton(guiGraphics, secondButtonX(), buttonY(), label, isOnSecondButton(mouseX, mouseY));
+    }
+
+    /**
+     * 第二个按钮被点了：看自己时打开排行榜，看别人时回到排行榜。
+     */
+    private void clickSecondButton() {
+        Minecraft minecraft = Minecraft.getInstance();
+        minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
+        if (this.viewOnly) {
+            onClose();
+        } else {
+            // 把自己这个界面传过去当上一层，从排行榜按 ESC 能原样回来
+            minecraft.setScreen(new LeaderboardScreen(this));
+        }
     }
 
     /**
@@ -704,10 +958,17 @@ public class MasteryScreen extends Screen {
      * @return 缩放值
      */
     private double fitZoom() {
-        double whole = Math.min(this.width, this.height) * 0.44D / Math.max(1.0D, this.outerRadius);
+        double limit = Math.min(this.width, this.height) * 0.44D;
+        double whole = limit / Math.max(1.0D, this.outerRadius);
         double readable = MIN_DEFAULT_NODE_PIXELS / Math.max(1.0D, this.weaponNodeRadius);
-        return Mth.clamp(Math.max(whole, readable) * MasteryConfig.CLIENT.defaultZoom.get(),
-                minZoom(), maxZoom());
+        double zoom = Math.max(whole, readable);
+        // 图大到「看清节点」的缩放下连来源圈都在屏幕外时（一两千件武器就是这样），
+        // 居中打开只能看到中心一个六边形和几条伸出屏幕的线，什么都认不出。
+        // 这种图默认改成看全貌：三个圈和分支名字都在，想看哪支双击过去就行
+        if (this.sourceRingRadius * zoom > limit) {
+            zoom = whole;
+        }
+        return Mth.clamp(zoom * MasteryConfig.CLIENT.defaultZoom.get(), minZoom(), maxZoom());
     }
 
     /**
@@ -756,6 +1017,15 @@ public class MasteryScreen extends Screen {
                     Math.hypot(node.graphX, node.graphY));
         }
         this.sourceRingRadius = this.ringRadii[MasteryNode.Type.SOURCE.ordinal()];
+        this.sourceCount = 0;
+        this.typeCount = 0;
+        for (MasteryNode node : this.nodes) {
+            if (node.type == MasteryNode.Type.SOURCE) {
+                this.sourceCount++;
+            } else if (node.type == MasteryNode.Type.TYPE) {
+                this.typeCount++;
+            }
+        }
         this.selected = null;
         if (previous != null) {
             for (MasteryNode node : this.nodes) {
@@ -772,6 +1042,103 @@ public class MasteryScreen extends Screen {
         this.panY = 0.0D;
         this.targetZoom = fitZoom();
         this.hasZoomAnchor = false;
+        this.flying = false;
+    }
+
+    /**
+     * 飞到一个节点。
+     * <ul>
+     *     <li>中心节点：看全貌。</li>
+     *     <li>来源节点：把这一支的所有类型节点收进屏幕——类型名字是这一层的路标，
+     *         武器不算进来，否则一支大的和全貌没区别。</li>
+     *     <li>类型节点：把它底下的武器收进屏幕，但武器节点不小于 {@value #FLY_TYPE_NODE_PIXELS} 像素半径，
+     *         排太长就先看中间那段。</li>
+     *     <li>武器节点：放到 {@value #FOCUS_NODE_PIXELS} 像素半径，居中。</li>
+     * </ul>
+     *
+     * <p>一两千件武器的图，靠拖动从全貌走到某一把武器要滚二三十格、拖十几下；
+     * 双击一支、再双击一个类型、再单击武器，三下就到了。
+     *
+     * @param node 目标节点
+     */
+    private void flyTo(MasteryNode node) {
+        double zoom;
+        double centerX;
+        double centerY;
+        switch (node.type) {
+            case WEAPON -> {
+                zoom = focusZoom();
+                centerX = node.graphX;
+                centerY = node.graphY;
+            }
+            case INFO -> {
+                zoom = Mth.clamp(minZoom() / MIN_ZOOM_WHOLE_FACTOR, minZoom(), maxZoom());
+                centerX = 0.0D;
+                centerY = 0.0D;
+            }
+            default -> {
+                // 来源看它的类型，类型看它的武器
+                MasteryNode.Type wanted = node.type == MasteryNode.Type.SOURCE
+                        ? MasteryNode.Type.TYPE : MasteryNode.Type.WEAPON;
+                double minX = Double.MAX_VALUE;
+                double minY = Double.MAX_VALUE;
+                double maxX = -Double.MAX_VALUE;
+                double maxY = -Double.MAX_VALUE;
+                int count = 0;
+                for (MasteryNode other : this.nodes) {
+                    if (other.type != wanted || !isDescendant(other, node)) {
+                        continue;
+                    }
+                    minX = Math.min(minX, other.graphX - other.radius);
+                    minY = Math.min(minY, other.graphY - other.radius);
+                    maxX = Math.max(maxX, other.graphX + other.radius);
+                    maxY = Math.max(maxY, other.graphY + other.radius);
+                    count++;
+                }
+                if (count == 0) {
+                    // 底下什么都没有（理论上不会），就对准它自己
+                    zoom = focusZoom();
+                    centerX = node.graphX;
+                    centerY = node.graphY;
+                    break;
+                }
+                // 左侧详情面板会挡住一块，可用宽度扣掉它；上下扣掉顶栏和按钮
+                double availWidth = Math.max(60.0D, this.width - PANEL_WIDTH - 24.0D);
+                double availHeight = Math.max(60.0D, this.height - HEADER_HEIGHT - BUTTON_HEIGHT - 30.0D);
+                double boxWidth = Math.max(1.0D, maxX - minX);
+                double boxHeight = Math.max(1.0D, maxY - minY);
+                zoom = Math.min(availWidth / boxWidth, availHeight / boxHeight) * FLY_FIT_FACTOR;
+                if (node.type == MasteryNode.Type.TYPE) {
+                    zoom = Math.max(zoom, FLY_TYPE_NODE_PIXELS / Math.max(1.0D, this.weaponNodeRadius));
+                }
+                zoom = Mth.clamp(zoom, minZoom(), maxZoom());
+                centerX = (minX + maxX) / 2.0D;
+                centerY = (minY + maxY) / 2.0D;
+            }
+        }
+        this.targetZoom = zoom;
+        this.flyCenterX = centerX;
+        this.flyCenterY = centerY;
+        this.flying = true;
+        this.hasZoomAnchor = false;
+    }
+
+    /**
+     * 判断一个节点是不是另一个节点的后代（顺着父链往上找）。
+     *
+     * @param node     待判断的节点
+     * @param ancestor 祖先
+     * @return 是后代返回 true
+     */
+    private static boolean isDescendant(MasteryNode node, MasteryNode ancestor) {
+        MasteryNode current = node.parent;
+        while (current != null) {
+            if (current == ancestor) {
+                return true;
+            }
+            current = current.parent;
+        }
+        return false;
     }
 
     // ======================================================================
@@ -789,6 +1156,119 @@ public class MasteryScreen extends Screen {
 
     private double toScreenX(double graphX) {
         return baseX() + this.panX + graphX * this.zoom;
+    }
+
+    /**
+     * 节点在屏幕上的半径：武器按真实比例缩放，内层节点有下限（见 {@link #INFO_MIN_SCREEN_RADIUS}）。
+     *
+     * <p>画节点、画图标、画文字、判断鼠标点中都走这一个方法，几处算出来的尺寸才是一致的。
+     *
+     * @param node 节点
+     * @return 屏幕半径（像素）
+     */
+    private double screenRadius(MasteryNode node) {
+        double radius = node.radius * this.zoom;
+        double floor = switch (node.type) {
+            case INFO -> this.infoFloor;
+            case SOURCE -> this.sourceFloor;
+            case TYPE -> this.typeFloor;
+            default -> 0.0D;
+        };
+        return Math.max(radius, floor);
+    }
+
+    /**
+     * 取节点图标相对节点本体的额外缩放。
+     *
+     * <p>来源和类型节点为了远景还能认路，节点本体有屏幕半径下限；问题是如果图标也完全跟着
+     * 这个下限走，缩到全貌时图标会显得异常肥，甚至和中心总汇差不多抢眼。这里不改节点本体、
+     * 点击范围、等级牌和文字，只根据「真实缩放半径 / 最终屏幕半径」判断下限介入了多少：
+     * 下限介入越多，来源 / 类型图标越接近各自的最小比例。这里再额外做一层缓动，
+     * 让远景保持更小一些，往近处放大时再平滑恢复到 1.0。
+     *
+     * @param node         节点
+     * @param screenRadius 已应用屏幕下限后的节点半径
+     * @return 图标额外缩放，武器与中心恒为 1
+     */
+    private float iconScaleFor(MasteryNode node, float screenRadius) {
+        float minScale = switch (node.type) {
+            case SOURCE -> SOURCE_ICON_MIN_SCALE;
+            case TYPE -> TYPE_ICON_MIN_SCALE;
+            default -> 1.0F;
+        };
+        if (minScale >= 1.0F || screenRadius <= 0.0F) {
+            return 1.0F;
+        }
+
+        float naturalRadius = (float) (node.radius * this.zoom);
+        float naturalShare = Mth.clamp(naturalRadius / screenRadius, 0.0F, 1.0F);
+        // 不用线性插值：线性会让图标刚一放大就回弹得太快。
+        // 稍微压一下低端，让「全貌 / 很远」这段保持更克制，往近处拉时再平滑恢复到 1.0。
+        float easedShare = (float) Math.pow(naturalShare, 1.05D);
+        return minScale + (1.0F - minScale) * easedShare;
+    }
+
+    /**
+     * 额外把图标内容往节点内部铺满一点。
+     *
+     * <p>前几轮把来源 / 类型图标压得太狠，副作用就是六边形壳还在，里面却像贴了一张小缩略图。
+     * 这里不去把黑底和描边重新做粗，而是在远景时只把“图标内容”轻轻放大一点：
+     * 节点下限介入越多，额外填充越明显；近景自动退回 1.0。
+     *
+     * @param node         节点
+     * @param screenRadius 已应用屏幕下限后的节点半径
+     * @return 图标内容填充系数
+     */
+    private float iconFillFor(MasteryNode node, float screenRadius) {
+        if ((node.type != MasteryNode.Type.SOURCE && node.type != MasteryNode.Type.TYPE)
+                || screenRadius <= 0.0F) {
+            return 1.0F;
+        }
+        float naturalRadius = (float) (node.radius * this.zoom);
+        float naturalShare = Mth.clamp(naturalRadius / screenRadius, 0.0F, 1.0F);
+        float farZoom = 1.0F - naturalShare;
+        float maxBoost = node.type == MasteryNode.Type.SOURCE ? 0.10F : 0.14F;
+        return 1.0F + maxBoost * farZoom;
+    }
+
+    /**
+     * 当前缩放下，界面装饰与特效应保留多少存在感。
+     *
+     * <p>最小缩放时玩家主要看结构，不需要一圈光环、流光、轨道点在那里抢眼；
+     * 放大后再把这些细节慢慢放回来。返回值范围约为 0.3 ~ 1.0。
+     *
+     * @return 特效强度系数
+     */
+    private float effectScaleForFarZoom() {
+        double min = minZoom();
+        double full = Math.min(maxZoom(), min * 2.2D);
+        if (full <= min + 1.0E-6D) {
+            return 1.0F;
+        }
+        float progress = (float) ((this.zoom - min) / (full - min));
+        progress = Mth.clamp(progress, 0.0F, 1.0F);
+        float eased = (float) Math.pow(progress, 0.85D);
+        return 0.30F + 0.70F * eased;
+    }
+
+    /**
+     * 按当前缩放算这一帧的三个节点下限。
+     *
+     * <p>每个下限取「固定上限」和「相邻两圈屏幕间距 × 份额」里更小的：
+     * 图缩得越小圈越挤，下限跟着缩，圈与圈之间始终留得出一条看得见连线的空当。
+     */
+    private void updateRadiusFloors() {
+        double centerGap = this.sourceRingRadius * this.zoom;
+        double typeRing = this.ringRadii[MasteryNode.Type.TYPE.ordinal()];
+        double weaponRing = this.ringRadii[MasteryNode.Type.WEAPON.ordinal()];
+        double midGap = Math.max(0.0D, typeRing - this.sourceRingRadius) * this.zoom;
+        double outerGap = Math.max(0.0D, weaponRing - typeRing) * this.zoom;
+        // 没有来源（图是空的）时圈距都是 0，下限也就是 0，只剩真实尺寸
+        this.infoFloor = Math.min(INFO_MIN_SCREEN_RADIUS, centerGap * INFO_FLOOR_SHARE);
+        this.sourceFloor = Math.min(SOURCE_MIN_SCREEN_RADIUS,
+                Math.min(centerGap, midGap > 0.0D ? midGap : centerGap) * SOURCE_FLOOR_SHARE);
+        this.typeFloor = Math.min(TYPE_MIN_SCREEN_RADIUS,
+                Math.min(midGap, outerGap > 0.0D ? outerGap : midGap) * TYPE_FLOOR_SHARE);
     }
 
     private double toScreenY(double graphY) {
@@ -812,8 +1292,23 @@ public class MasteryScreen extends Screen {
 
         // 缩放做指数逼近，滚轮滚起来是平滑推进而不是一跳一跳
         double before = this.zoom;
-        this.zoom += (this.targetZoom - this.zoom) * (1.0F - (float) Math.exp(-16.0F * delta));
-        if (this.hasZoomAnchor) {
+        float ease = 1.0F - (float) Math.exp(-16.0F * delta);
+        this.zoom += (this.targetZoom - this.zoom) * ease;
+        if (this.flying) {
+            // 目标平移随当前缩放走：缩放还在逼近的过程中，平移要一直对准同一个图坐标，
+            // 否则飞到一半的画面会先偏出去再飘回来
+            double wantX = -this.flyCenterX * this.zoom;
+            double wantY = -this.flyCenterY * this.zoom;
+            this.panX += (wantX - this.panX) * ease;
+            this.panY += (wantY - this.panY) * ease;
+            if (Math.abs(this.targetZoom - this.zoom) < 1.0E-4D
+                    && Math.abs(wantX - this.panX) < 0.05D && Math.abs(wantY - this.panY) < 0.05D) {
+                this.zoom = this.targetZoom;
+                this.panX = wantX;
+                this.panY = wantY;
+                this.flying = false;
+            }
+        } else if (this.hasZoomAnchor) {
             // 每帧都把锚点重新钉回原位。
             // 之前只在滚轮那一下按「目标缩放」算一次平移，可缩放是逐帧逼近过去的，
             // 中间每一帧的实际缩放都和当时的平移对不上，画面就会一路飘偏。
@@ -825,6 +1320,7 @@ public class MasteryScreen extends Screen {
             }
         }
 
+        updateRadiusFloors();
         guiGraphics.fill(0, 0, this.width, this.height, MasteryPalette.BG);
         this.hovered = pickNode(mouseX, mouseY);
         for (MasteryNode node : this.nodes) {
@@ -851,6 +1347,7 @@ public class MasteryScreen extends Screen {
             guiGraphics.pose().popPose();
         }
         drawResetButton(guiGraphics, mouseX, mouseY);
+        drawSecondButton(guiGraphics, mouseX, mouseY);
 
         super.render(guiGraphics, mouseX, mouseY, partialTick);
 
@@ -931,7 +1428,7 @@ public class MasteryScreen extends Screen {
                 continue;
             }
             float scale = Mth.clamp(appear, 0.0F, 1.15F) * (1.0F + node.hoverAnim * 0.14F);
-            float radius = (float) (node.radius * this.zoom) * scale;
+            float radius = (float) screenRadius(node) * scale;
             float sx = (float) toScreenX(node.graphX);
             float sy = (float) toScreenY(node.graphY);
             if (isOffScreen(sx, sy, radius + 40.0F)) {
@@ -961,6 +1458,7 @@ public class MasteryScreen extends Screen {
     private void drawGuideRings(BufferBuilder buffer, Matrix4f matrix, long now) {
         float cx = (float) toScreenX(0.0D);
         float cy = (float) toScreenY(0.0D);
+        float effectScale = effectScaleForFarZoom();
         for (double radius : this.ringRadii) {
             if (radius <= 0.0D) {
                 continue;
@@ -972,7 +1470,8 @@ public class MasteryScreen extends Screen {
             }
             float width = Math.max(0.6F, 1.2F * (float) this.zoom);
             RenderUtil.ring(buffer, matrix, cx, cy, screen - width, screen + width,
-                    RenderUtil.withAlpha(MasteryPalette.GOLD_DARK, 0.30F), 0.0D, Math.PI * 2.0D);
+                    RenderUtil.withAlpha(MasteryPalette.GOLD_DARK, 0.12F + 0.18F * effectScale),
+                    0.0D, Math.PI * 2.0D);
         }
 
         // 中心的装饰环：一道慢慢转的缺口环，让正中间不至于是一片空地
@@ -981,13 +1480,14 @@ public class MasteryScreen extends Screen {
                 && !isOffScreen(cx, cy, base + 30.0F)) {
             float ringWidth = Math.max(1.0F, 2.0F * (float) this.zoom);
             RenderUtil.ring(buffer, matrix, cx, cy, base - ringWidth, base + ringWidth,
-                    RenderUtil.withAlpha(MasteryPalette.GOLD_DARK, 0.45F), 0.0D, Math.PI * 2.0D);
+                    RenderUtil.withAlpha(MasteryPalette.GOLD_DARK, (0.18F + 0.27F * effectScale)),
+                    0.0D, Math.PI * 2.0D);
             double spin = now / 5200.0D;
             for (int i = 0; i < CENTER_ARCS; i++) {
                 double start = spin + i * (Math.PI * 2.0D / CENTER_ARCS);
                 RenderUtil.ring(buffer, matrix, cx, cy, base + ringWidth * 2.0F,
                         base + ringWidth * 4.0F,
-                        RenderUtil.withAlpha(MasteryPalette.GOLD, 0.35F),
+                        RenderUtil.withAlpha(MasteryPalette.GOLD, (0.12F + 0.23F * effectScale)),
                         start, Math.PI / CENTER_ARCS);
             }
         }
@@ -1017,6 +1517,7 @@ public class MasteryScreen extends Screen {
         if (radius < 4.0F || !node.hasMastery() || levelOf(node) < maxLevel) {
             return;
         }
+        float effectScale = effectScaleForFarZoom();
         // 自己满级是金光；从这个节点一路到中心全满（武器节点就是外圈 + 中圈 + 内圈三圈全满），
         // 换成白金——整套界面只用金色系，「完满」就是金色里最白最亮的那一档，不引入别的颜色
         boolean chain = chainMaxed(node, maxLevel);
@@ -1024,35 +1525,37 @@ public class MasteryScreen extends Screen {
         int soft = chain ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.GOLD;
 
         float breathe = 0.5F + 0.5F * (float) Math.sin(now / 700.0D + node.graphX * 0.01D);
+        float auraSpread = 0.45F + 0.55F * effectScale;
         RenderUtil.polygonOutline(buffer, matrix,
-                RenderUtil.hexagon(sx, sy, radius + 4.0F + breathe * 2.0F),
-                Math.max(1.0F, radius * 0.06F),
-                RenderUtil.withAlpha(bright, (0.25F + 0.35F * breathe) * dim));
+                RenderUtil.hexagon(sx, sy, radius + (4.0F + breathe * 2.0F) * auraSpread),
+                Math.max(1.0F, radius * (0.03F + 0.03F * effectScale)),
+                RenderUtil.withAlpha(bright, (0.08F + (0.17F + 0.25F * breathe) * effectScale) * dim));
         RenderUtil.polygonOutline(buffer, matrix,
-                RenderUtil.hexagon(sx, sy, radius + 9.0F + (1.0F - breathe) * 3.0F),
-                Math.max(1.0F, radius * 0.04F),
-                RenderUtil.withAlpha(soft, (0.12F + 0.22F * (1.0F - breathe)) * dim));
+                RenderUtil.hexagon(sx, sy, radius + (9.0F + (1.0F - breathe) * 3.0F) * auraSpread),
+                Math.max(1.0F, radius * (0.02F + 0.02F * effectScale)),
+                RenderUtil.withAlpha(soft, (0.04F + (0.08F + 0.14F * (1.0F - breathe)) * effectScale) * dim));
 
         // 节点太小的时候星点会挤成一坨，直接省掉
-        if (radius < 8.0F) {
+        if (radius < 8.0F || effectScale < 0.45F) {
             return;
         }
         // 完满的节点多两颗星、转得稍快、外面再多一圈很淡的大环，隔着半屏也能和普通满级区分开
         int stars = chain ? MAXED_STARS + 2 : MAXED_STARS;
         double spin = now / (chain ? 1400.0D : 1800.0D) + node.graphY * 0.004D;
-        float star = Math.max(1.2F, radius * 0.16F);
+        float star = Math.max(1.0F, radius * (0.09F + 0.07F * effectScale));
         for (int i = 0; i < stars; i++) {
             double angle = spin + i * (Math.PI * 2.0D / stars);
-            float px = sx + (float) (Math.cos(angle) * (radius + 7.0F));
-            float py = sy + (float) (Math.sin(angle) * (radius + 7.0F));
+            float orbit = radius + (4.0F + 3.0F * effectScale);
+            float px = sx + (float) (Math.cos(angle) * orbit);
+            float py = sy + (float) (Math.sin(angle) * orbit);
             RenderUtil.polygon(buffer, matrix, RenderUtil.hexagon(px, py, star),
-                    RenderUtil.withAlpha(bright, (0.4F + 0.4F * breathe) * dim));
+                    RenderUtil.withAlpha(bright, (0.12F + (0.20F + 0.22F * breathe) * effectScale) * dim));
         }
         if (chain) {
             RenderUtil.polygonOutline(buffer, matrix,
-                    RenderUtil.hexagon(sx, sy, radius + 15.0F + breathe * 2.0F),
-                    Math.max(1.0F, radius * 0.03F),
-                    RenderUtil.withAlpha(MasteryPalette.GOLD_WHITE, (0.08F + 0.12F * breathe) * dim));
+                    RenderUtil.hexagon(sx, sy, radius + (10.0F + breathe * 2.0F) * auraSpread),
+                    Math.max(1.0F, radius * (0.015F + 0.015F * effectScale)),
+                    RenderUtil.withAlpha(MasteryPalette.GOLD_WHITE, (0.03F + (0.04F + 0.06F * breathe) * effectScale) * dim));
         }
     }
 
@@ -1089,7 +1592,11 @@ public class MasteryScreen extends Screen {
         if (this.selected == null || this.selected.type == MasteryNode.Type.INFO) {
             return;
         }
-        float dotSize = (float) Math.max(1.6D, 3.2D * this.zoom);
+        float effectScale = effectScaleForFarZoom();
+        if (effectScale < 0.35F) {
+            return;
+        }
+        float dotSize = (float) Math.max(1.2D, 3.2D * this.zoom * (0.55F + 0.45F * effectScale));
         for (MasteryNode node : this.pathNodes) {
             if (node.parent == null) {
                 continue;
@@ -1106,7 +1613,8 @@ public class MasteryScreen extends Screen {
                 // 两头淡、中间亮，免得光点在节点上突然出现又突然消失
                 float fade = (float) Math.sin(phase * Math.PI);
                 RenderUtil.polygon(buffer, matrix, RenderUtil.hexagon(px, py, dotSize),
-                        RenderUtil.withAlpha(MasteryPalette.GOLD_BRIGHT, 0.15F + 0.65F * fade));
+                        RenderUtil.withAlpha(MasteryPalette.GOLD_BRIGHT,
+                                (0.04F + (0.11F + 0.50F * fade) * effectScale)));
             }
         }
     }
@@ -1125,13 +1633,17 @@ public class MasteryScreen extends Screen {
         if (this.selected == null) {
             return;
         }
+        float effectScale = effectScaleForFarZoom();
+        if (effectScale < 0.30F) {
+            return;
+        }
         float sx = (float) toScreenX(this.selected.graphX);
         float sy = (float) toScreenY(this.selected.graphY);
-        float orbit = (float) (this.selected.radius * this.zoom) + 10.0F;
+        float orbit = (float) screenRadius(this.selected) + (4.0F + 6.0F * effectScale);
         if (isOffScreen(sx, sy, orbit + 20.0F)) {
             return;
         }
-        float dotSize = (float) Math.max(1.5D, 2.6D * this.zoom);
+        float dotSize = (float) Math.max(1.1D, 2.6D * this.zoom * (0.60F + 0.40F * effectScale));
         double spin = now / 2600.0D;
         for (int i = 0; i < ORBIT_DOTS; i++) {
             double angle = spin + i * (Math.PI * 2.0D / ORBIT_DOTS);
@@ -1140,7 +1652,8 @@ public class MasteryScreen extends Screen {
             // 每颗点自己再呼吸一下，整圈就不会像个死板的齿轮
             float breathe = 0.55F + 0.45F * (float) Math.sin(now / 420.0D + i);
             RenderUtil.polygon(buffer, matrix, RenderUtil.hexagon(px, py, dotSize * breathe),
-                    RenderUtil.withAlpha(MasteryPalette.GOLD_BRIGHT, 0.35F + 0.5F * breathe));
+                    RenderUtil.withAlpha(MasteryPalette.GOLD_BRIGHT,
+                            0.08F + (0.18F + 0.34F * breathe) * effectScale));
         }
     }
 
@@ -1169,13 +1682,22 @@ public class MasteryScreen extends Screen {
         }
 
         if (node == this.selected) {
-            // 选中：缓慢呼吸的金色外环
+            // 选中：缓慢呼吸的金色外环。最小缩放时收一点，免得一眼过去只剩特效在跳。
             float pulse = 0.5F + 0.5F * (float) Math.sin(now / 420.0D);
-            RenderUtil.polygonOutline(buffer, matrix, RenderUtil.hexagon(sx, sy, radius + 7.0F),
-                    2.0F, RenderUtil.withAlpha(MasteryPalette.GOLD_BRIGHT, 0.3F + 0.5F * pulse));
+            float effectScale = effectScaleForFarZoom();
+            RenderUtil.polygonOutline(buffer, matrix,
+                    RenderUtil.hexagon(sx, sy, radius + (3.0F + 4.0F * effectScale)),
+                    1.2F + 0.8F * effectScale,
+                    RenderUtil.withAlpha(MasteryPalette.GOLD_BRIGHT,
+                            0.08F + (0.14F + 0.36F * pulse) * effectScale));
         }
 
-        RenderUtil.polygon(buffer, matrix, RenderUtil.hexagon(sx, sy, radius + 3.0F),
+        // 黑色底板不能固定向外扩 3px：图特别大、缩到全貌时节点本身只剩十来像素，
+        // 固定 3px 就会占掉节点半径两三成，看起来像每个节点都套了一个黑轮胎。
+        // 改成跟当前屏幕半径一起缩放，近景仍保留厚重层次，远景自动收细。
+        float backplatePadding = nodeBackplatePadding(node, radius);
+        RenderUtil.polygon(buffer, matrix,
+                RenderUtil.hexagon(sx, sy, radius + backplatePadding),
                 MasteryPalette.NODE_BACKPLATE);
         RenderUtil.polygon(buffer, matrix, hex,
                 unlocked ? MasteryPalette.NODE_FILL : MasteryPalette.NODE_FILL_LOCKED);
@@ -1198,8 +1720,47 @@ public class MasteryScreen extends Screen {
         } else {
             outline = unlocked ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
         }
-        RenderUtil.polygonOutline(buffer, matrix, hex, Math.max(1.2F, radius * 0.10F),
+        RenderUtil.polygonOutline(buffer, matrix, hex, nodeOutlineWidth(node, radius),
                 RenderUtil.withAlpha(outline, dim));
+    }
+
+    /**
+     * 计算节点黑色底板向外扩多少像素。
+     *
+     * <p>原来固定外扩 3px，在正常缩放下没问题；但武器特别多时整张图会缩得很小，
+     * 3px 相对节点本体就会突然变得非常粗。这里直接按当前屏幕半径算，真正解决比例问题，
+     * 而不是继续缩图标把黑边衬得更明显。中心总览稍厚，维持视觉重心；其余层更克制。
+     *
+     * @param node   节点
+     * @param radius 当前节点屏幕半径
+     * @return 黑色底板向外扩的像素数
+     */
+    private float nodeBackplatePadding(MasteryNode node, float radius) {
+        return switch (node.type) {
+            case INFO -> Mth.clamp(radius * 0.10F, 1.1F, 3.0F);
+            case SOURCE -> Mth.clamp(radius * 0.068F, 0.58F, 2.1F);
+            case TYPE -> Mth.clamp(radius * 0.062F, 0.50F, 1.9F);
+            case WEAPON -> Mth.clamp(radius * 0.080F, 0.55F, 2.0F);
+        };
+    }
+
+    /**
+     * 计算节点金色描边宽度。
+     *
+     * <p>同样不能再用固定的 1.2px 下限，否则全貌视角里节点越小、描边占比反而越大。
+     * 这里按层级给一个较低的安全下限，保证远景还能看出六边形轮廓，同时不会黑金边一起糊成粗圈。
+     *
+     * @param node   节点
+     * @param radius 当前节点屏幕半径
+     * @return 描边宽度（像素）
+     */
+    private float nodeOutlineWidth(MasteryNode node, float radius) {
+        return switch (node.type) {
+            case INFO -> Mth.clamp(radius * 0.09F, 0.85F, 2.5F);
+            case SOURCE -> Mth.clamp(radius * 0.068F, 0.50F, 1.8F);
+            case TYPE -> Mth.clamp(radius * 0.062F, 0.46F, 1.65F);
+            case WEAPON -> Mth.clamp(radius * 0.080F, 0.45F, 1.6F);
+        };
     }
 
     /**
@@ -1224,7 +1785,7 @@ public class MasteryScreen extends Screen {
             if (Mth.clamp(appearOf(node, now), 0.0F, 1.0F) <= 0.05F) {
                 continue;
             }
-            float radius = (float) (node.radius * this.zoom) * (1.0F + node.hoverAnim * 0.14F);
+            float radius = (float) screenRadius(node) * (1.0F + node.hoverAnim * 0.14F);
             if (radius < ICON_MIN_SCREEN_RADIUS) {
                 continue;
             }
@@ -1257,7 +1818,9 @@ public class MasteryScreen extends Screen {
                 continue;
             }
             float appear = Mth.clamp(appearOf(node, now), 0.0F, 1.0F);
-            float radius = (float) (node.radius * this.zoom) * (1.0F + node.hoverAnim * 0.14F);
+            float radius = (float) screenRadius(node) * (1.0F + node.hoverAnim * 0.14F);
+            float iconRadius = radius * iconScaleFor(node, radius);
+            float iconFill = iconFillFor(node, radius);
             float sx = (float) toScreenX(node.graphX);
             float sy = (float) toScreenY(node.graphY);
             if (texture != null) {
@@ -1268,19 +1831,79 @@ public class MasteryScreen extends Screen {
                 guiGraphics.pose().pushPose();
                 guiGraphics.pose().translate(0.0F, 0.0F, 150.0F);
                 RenderUtil.texturedHexagon(guiGraphics.pose().last().pose(), texture,
-                        sx, sy, radius * TEXTURE_ICON_RADIUS_FACTOR * appear,
+                        sx, sy, iconRadius * TEXTURE_ICON_RADIUS_FACTOR * iconFill * appear,
                         TEXTURE_ICON_CROP, appear);
                 guiGraphics.pose().popPose();
                 continue;
             }
             // 物品图标固定 16x16，按节点大小放大后居中
-            float scale = radius / 16.0F * 1.9F * appear;
+            float scale = iconRadius / 16.0F * 1.9F * iconFill * appear;
             guiGraphics.pose().pushPose();
             guiGraphics.pose().translate(sx - 8.0F * scale, sy - 8.0F * scale, 0.0F);
             guiGraphics.pose().scale(scale, scale, 1.0F);
             guiGraphics.renderItem(icon, 0, 0);
             guiGraphics.pose().popPose();
         }
+    }
+
+    /**
+     * 外圈武器名称实际开始显示的缩放阈值。
+     *
+     * <p>上一版是达到 {@link #NAME_ZOOM} 才显示。现在按你的要求，把它提前到
+     * 「原来显示名字之前的那一格滚轮倍率」：也就是旧阈值除以当前一格的缩放倍数。
+     * 不同大小的专精树滚轮倍率不同，所以这里动态算，别再塞一个碰运气的魔法数字。
+     *
+     * @return 武器名开始显示的缩放
+     */
+    private double weaponNameZoomThreshold() {
+        return Mth.clamp(NAME_ZOOM / zoomStep(), minZoom(), maxZoom());
+    }
+
+    /**
+     * 取同一圈中离当前节点最近的另一个节点的屏幕圆心距离。
+     *
+     * <p>中圈只有几十个节点，逐个比较的成本很低；比拿「整圈周长 / 总数量」靠谱得多，
+     * 因为实际布局按来源分扇区，局部疏密根本不均匀。
+     *
+     * @param node 当前节点
+     * @return 最近同层节点的屏幕距离；没有同层邻居时返回正无穷
+     */
+    private double nearestSameLayerScreenSpacing(MasteryNode node) {
+        double x = toScreenX(node.graphX);
+        double y = toScreenY(node.graphY);
+        double nearestSq = Double.POSITIVE_INFINITY;
+        for (MasteryNode other : this.nodes) {
+            if (other == node || other.type != node.type) {
+                continue;
+            }
+            double dx = toScreenX(other.graphX) - x;
+            double dy = toScreenY(other.graphY) - y;
+            double distanceSq = dx * dx + dy * dy;
+            if (distanceSq < nearestSq) {
+                nearestSq = distanceSq;
+            }
+        }
+        return Double.isInfinite(nearestSq) ? Double.POSITIVE_INFINITY : Math.sqrt(nearestSq);
+    }
+
+    /**
+     * 当前类型节点有没有足够空间显示名称。
+     *
+     * <p>先量真实最近邻距离，再扣掉一点安全缝，换算成当前字号下能用的文本宽度。
+     * 有空间就显示，没有就安静待着；悬停 / 选中节点由调用方强制显示。
+     *
+     * @param node  类型节点
+     * @param scale 当前文字缩放
+     * @return 空间足够返回 true
+     */
+    private boolean typeLabelHasRoom(MasteryNode node, float scale) {
+        double spacing = nearestSameLayerScreenSpacing(node);
+        if (Double.isInfinite(spacing)) {
+            return true;
+        }
+        double safeScreenWidth = Math.max(0.0D, spacing - 10.0D);
+        int budget = (int) Math.floor(safeScreenWidth / Math.max(0.1F, scale));
+        return budget >= TYPE_LABEL_MIN_BUDGET;
     }
 
     /**
@@ -1294,9 +1917,9 @@ public class MasteryScreen extends Screen {
      */
     private void drawNodeOverlays(GuiGraphics guiGraphics, long now) {
         float labelScale = Mth.clamp((float) this.zoom, LABEL_SCALE_MIN, LABEL_SCALE_MAX);
-        boolean showGroupLabels = (float) this.zoom >= 0.11F;
         boolean showLevelDetail = this.zoom >= LEVEL_DETAIL_ZOOM;
-        boolean showWeaponNames = this.zoom >= NAME_ZOOM;
+        double weaponNameThreshold = weaponNameZoomThreshold();
+        boolean showWeaponNames = this.zoom >= weaponNameThreshold;
         int maxLevel = ClientMasteryCache.snapshot().maxLevel;
 
         guiGraphics.pose().pushPose();
@@ -1307,7 +1930,7 @@ public class MasteryScreen extends Screen {
             if (Mth.clamp(appearOf(node, now), 0.0F, 1.0F) < 0.9F) {
                 continue;
             }
-            float radius = (float) (node.radius * this.zoom);
+            float radius = (float) screenRadius(node);
             float sx = (float) toScreenX(node.graphX);
             float sy = (float) toScreenY(node.graphY);
             if (isOffScreen(sx, sy, radius + 46.0F)) {
@@ -1315,20 +1938,31 @@ public class MasteryScreen extends Screen {
             }
 
             boolean focused = node == this.hovered || node == this.selected;
-            // 太小的节点不配字；中心说明节点和正在看的那个除外
-            if (radius < LABEL_MIN_SCREEN_RADIUS && !focused && node.type != MasteryNode.Type.INFO) {
+            // 外圈名字现在提前一格显示，因此不能再被旧的 5px 半径门槛二次卡住。
+            // 低于新名字阈值时仍然保留旧门槛，避免全貌视角画成一片文字海。
+            float minLabelRadius = switch (node.type) {
+                case SOURCE, INFO, TYPE -> 0.0F;
+                case WEAPON -> showWeaponNames ? 0.0F : LABEL_MIN_SCREEN_RADIUS;
+            };
+            if (radius < minLabelRadius && !focused) {
                 continue;
             }
             switch (node.type) {
                 case INFO -> drawScaledLabel(guiGraphics, node.displayName().getString(),
                         sx, sy - 4.0F * labelScale, labelScale, MasteryPalette.GOLD_BRIGHT, 170);
-                case SOURCE, TYPE -> drawNodeText(guiGraphics, node, sx, sy, radius, labelScale,
-                        showGroupLabels || focused, showLevelDetail, maxLevel, MasteryPalette.TEXT);
+                case SOURCE -> drawNodeText(guiGraphics, node, sx, sy, radius, labelScale,
+                        true, showLevelDetail, maxLevel, MasteryPalette.TEXT);
+                case TYPE -> {
+                    // 中圈只有真的有位置时才画整套文本（等级牌、分支合计、名称）。
+                    // 否则即使把名称关了，等级牌仍会在那里挤，视觉上还是一团字。
+                    if (focused || typeLabelHasRoom(node, labelScale)) {
+                        drawNodeText(guiGraphics, node, sx, sy, radius, labelScale,
+                                true, showLevelDetail, maxLevel, MasteryPalette.TEXT);
+                    }
+                }
                 case WEAPON -> drawNodeText(guiGraphics, node, sx, sy, radius, labelScale,
                         showWeaponNames || focused, showLevelDetail, maxLevel,
                         focused ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT);
-                default -> {
-                }
             }
         }
         guiGraphics.pose().popPose();
@@ -1359,10 +1993,14 @@ public class MasteryScreen extends Screen {
                               int maxLevel, int nameColor) {
         float below = sy + radius + 3.0F;
         int level = node.hasMastery() ? levelOf(node) : 0;
+        boolean focused = node == this.hovered || node == this.selected;
 
         if (node.hasMastery() && level > 0) {
-            below = drawLevelPlaque(guiGraphics, sx, sy, radius, scale,
-                    showDetail ? level + " / " + maxLevel : String.valueOf(level));
+            String levelText = showDetail ? level + " / " + maxLevel : String.valueOf(level);
+            float plaqueScale = levelPlaqueScale(node, scale, focused, levelText);
+            if (plaqueScale > 0.0F) {
+                below = drawLevelPlaque(guiGraphics, sx, sy, radius, plaqueScale, levelText);
+            }
         }
         // 来源 / 类型节点在放大到能看清时，铭牌下面再补一行「分支等级合计」。
         // 铭牌上的数字是这一层自己的等级，看不出底下几十件武器练成什么样，
@@ -1379,10 +2017,49 @@ public class MasteryScreen extends Screen {
             }
         }
         if (showName) {
-            boolean focused = node == this.hovered || node == this.selected;
             drawScaledLabel(guiGraphics, node.displayName().getString(), sx, below + 2.0F, scale,
                     nameColor, labelBudget(node, scale, focused));
         }
+    }
+
+    /**
+     * 计算当前节点的等级牌该用多大的字号。
+     *
+     * <p>问题不在于「等级牌存在」，而在于来源 / 类型节点挤在一起时，所有牌子都按同一个字号往外探，
+     * 就很容易压住旁边的图标。这里按当前圈层的可用横向间距动态收缩：够宽就原样画，挤一点就缩小，
+     * 再挤到看不清时直接不画。选中 / 悬停节点和外圈武器节点不做这个保守限制，避免把关键信息也收没了。
+     *
+     * @param node    节点
+     * @param scale   原始字号缩放
+     * @param focused 是否悬停或选中
+     * @param text    等级文字
+     * @return 实际字号缩放；返回 0 表示当前太挤，跳过等级牌
+     */
+    private float levelPlaqueScale(MasteryNode node, float scale, boolean focused, String text) {
+        if (focused || node.type == MasteryNode.Type.INFO || node.type == MasteryNode.Type.WEAPON) {
+            return scale;
+        }
+        double spacing;
+        if (node.type == MasteryNode.Type.SOURCE) {
+            double circumference = Math.PI * 2.0D * this.sourceRingRadius * this.zoom;
+            spacing = circumference / Math.max(1, this.sourceCount) - 10.0D;
+        } else if (node.type == MasteryNode.Type.TYPE) {
+            double circumference = Math.PI * 2.0D * this.ringRadii[MasteryNode.Type.TYPE.ordinal()] * this.zoom;
+            spacing = circumference / Math.max(1, this.typeCount) - 8.0D;
+        } else {
+            spacing = node.radius * 2.0D * 1.35D * this.zoom - 6.0D;
+        }
+        double safeWidth = Math.max(0.0D, spacing);
+        double wantedWidth = (this.font.width(text) + 8.0D) * scale;
+        if (wantedWidth <= safeWidth) {
+            return scale;
+        }
+        float shrunk = (float) (scale * safeWidth / Math.max(1.0D, wantedWidth));
+        // 小到这个程度就只剩一条糊掉的金边，不如不画，免得还挡旁边图标。
+        if (shrunk < 0.46F) {
+            return 0.0F;
+        }
+        return Math.min(scale, shrunk);
     }
 
     /**
@@ -1403,8 +2080,9 @@ public class MasteryScreen extends Screen {
         int boxHeight = 11;
 
         guiGraphics.pose().pushPose();
-        // 铭牌骑在节点底边上，压住一点点边框
-        guiGraphics.pose().translate(sx, sy + radius - 2.0F * scale, 0.0F);
+        // 铭牌更多地「坐」在节点内部，少往下面探，避免压到相邻节点的图标。
+        float top = sy + radius - 5.6F * scale;
+        guiGraphics.pose().translate(sx, top, 0.0F);
         guiGraphics.pose().scale(scale, scale, 1.0F);
 
         int left = -boxWidth / 2;
@@ -1415,7 +2093,7 @@ public class MasteryScreen extends Screen {
         guiGraphics.drawCenteredString(this.font, text, 0, 2, MasteryPalette.GOLD_BRIGHT);
 
         guiGraphics.pose().popPose();
-        return sy + radius - 2.0F * scale + (boxHeight + 1) * scale;
+        return top + (boxHeight + 1) * scale;
     }
 
     /**
@@ -1455,11 +2133,18 @@ public class MasteryScreen extends Screen {
         if (focused) {
             return 170;
         }
-        // 相邻节点的间距，和布局里用的间距系数保持一致
-        double spacing = node.radius * 2.0D * 1.35D * this.zoom;
-        if (node.type != MasteryNode.Type.WEAPON) {
-            // 内层节点稀疏得多，给宽一点
-            spacing *= 3.0D;
+        // 来源和中心一共没几个、隔得远，名字永远写全
+        if (node.type == MasteryNode.Type.SOURCE || node.type == MasteryNode.Type.INFO) {
+            return 170;
+        }
+        double spacing;
+        if (node.type == MasteryNode.Type.TYPE) {
+            // 类型节点按真实最近邻距离裁字。来源扇区疏密不均，拿整圈平均值会让密集区照样撞字。
+            double nearest = nearestSameLayerScreenSpacing(node);
+            spacing = Double.isInfinite(nearest) ? 170.0D * scale : nearest - 10.0D;
+        } else {
+            // 相邻武器的间距，和布局里用的间距系数保持一致
+            spacing = node.radius * 2.0D * 1.35D * this.zoom;
         }
         return (int) Mth.clamp(spacing / Math.max(0.1F, scale), 24.0D, 170.0D);
     }
@@ -1487,7 +2172,7 @@ public class MasteryScreen extends Screen {
                 MasteryPalette.GOLD_BRIGHT, false);
         cursor += this.font.width(this.title) + 10;
 
-        double study = ClientMasteryCache.data().getStudyMultiplier();
+        double study = this.data.getStudyMultiplier();
         if (Math.abs(study - 1.0D) > 1.0E-6D) {
             // 只在不是 1 倍时才占位置：默认值挂在标题旁边纯属噪音
             Component label = Component.translatable("gui.albionmastery.header.study",
@@ -1505,11 +2190,12 @@ public class MasteryScreen extends Screen {
                 String.format(Locale.ROOT, "%.1f%%", ratio * 100.0D)),
                 cursor, textY, MasteryPalette.TEXT);
 
-        // 提示压到顶栏下面，字号 0.75，够看又不抢地方
+        // 提示压到顶栏下面，字号 0.75，够看又不抢地方。看别人时换一句：他的流派只能看不能点
         guiGraphics.pose().pushPose();
         guiGraphics.pose().translate(10.0F, HEADER_HEIGHT + 4.0F, 0.0F);
         guiGraphics.pose().scale(0.75F, 0.75F, 1.0F);
-        guiGraphics.drawString(this.font, Component.translatable("gui.albionmastery.hint"),
+        guiGraphics.drawString(this.font, Component.translatable(this.viewOnly
+                        ? "gui.albionmastery.hint_viewing" : "gui.albionmastery.hint"),
                 0, 0, MasteryPalette.TEXT_DIM, false);
         guiGraphics.pose().popPose();
 
@@ -1517,7 +2203,8 @@ public class MasteryScreen extends Screen {
             guiGraphics.drawCenteredString(this.font,
                     Component.translatable("gui.albionmastery.no_weapon"),
                     this.width / 2, this.height / 2 - 4, MasteryPalette.TEXT_DIM);
-        } else if (!ClientMasteryCache.isSynced()) {
+        } else if (!this.viewOnly && !ClientMasteryCache.isSynced()) {
+            // 别人的数据是整份拿来的，不存在「还没同步」这回事
             guiGraphics.drawString(this.font, Component.translatable("gui.albionmastery.not_synced"),
                     10, HEADER_HEIGHT + 14, MasteryPalette.WARN, false);
         }
@@ -1722,7 +2409,7 @@ public class MasteryScreen extends Screen {
         if (source == null) {
             return y;
         }
-        MasteryData data = ClientMasteryCache.data();
+        MasteryData data = this.data;
         MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
         int level = data.getOverallLevel(source.overallKey());
 
@@ -1780,7 +2467,7 @@ public class MasteryScreen extends Screen {
      * @return 结束后的 Y
      */
     private int drawStudyRow(GuiGraphics guiGraphics, int x, int y, int width) {
-        double multiplier = ClientMasteryCache.data().getStudyMultiplier();
+        double multiplier = this.data.getStudyMultiplier();
         boolean boosted = Math.abs(multiplier - 1.0D) > 1.0E-6D;
         Component value = Component.literal("\u00D7" + formatMultiplier(multiplier));
 
@@ -1832,7 +2519,7 @@ public class MasteryScreen extends Screen {
         if (!snapshot.enableSpecialization) {
             return y;
         }
-        MasteryData data = ClientMasteryCache.data();
+        MasteryData data = this.data;
         this.specTypeKey = typeKey;
         int cursor = drawSection(guiGraphics,
                 Component.translatable("gui.albionmastery.panel.section_spec"), x, y, width);
@@ -1861,7 +2548,9 @@ public class MasteryScreen extends Screen {
         if (!anyUnlocked) {
             return drawSpecLocked(guiGraphics, data, typeKey, snapshot, x, cursor + 2, width);
         }
-        cursor = drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.panel.spec_click_hint"),
+        cursor = drawWrapped(guiGraphics, Component.translatable(this.viewOnly
+                        ? "gui.albionmastery.panel.spec_view_hint"
+                        : "gui.albionmastery.panel.spec_click_hint"),
                 x, cursor + 2, width, MasteryPalette.TEXT_DIM) + 4;
 
         String providerId = WeaponKeys.providerOf(typeKey);
@@ -2060,7 +2749,7 @@ public class MasteryScreen extends Screen {
         if (group == null) {
             return y;
         }
-        MasteryData data = ClientMasteryCache.data();
+        MasteryData data = this.data;
         MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
         int level = data.getTypeLevel(group.key());
 
@@ -2103,7 +2792,7 @@ public class MasteryScreen extends Screen {
         if (weapon == null) {
             return y;
         }
-        MasteryData data = ClientMasteryCache.data();
+        MasteryData data = this.data;
         MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
         int level = data.getWeaponLevel(weapon.key());
 
@@ -2472,6 +3161,10 @@ public class MasteryScreen extends Screen {
             resetView();
             return true;
         }
+        if (isOnSecondButton(mouseX, mouseY)) {
+            clickSecondButton();
+            return true;
+        }
         if (this.searchBox != null && mouseY < HEADER_HEIGHT) {
             // 顶栏整条都不参与地图操作，免得点标题就把镜头拖跑了
             return this.searchBox.mouseClicked(mouseX, mouseY, button);
@@ -2482,16 +3175,29 @@ public class MasteryScreen extends Screen {
 
         MasteryNode node = pickNode(mouseX, mouseY);
         if (node != null) {
-            // 整张图是全展开的，点节点就只是选中它、在左侧弹出详情
+            long now = Util.getMillis();
+            boolean doubleClick = node == this.lastClickedNode && now - this.lastClickMs < DOUBLE_CLICK_MS;
+            this.lastClickedNode = node;
+            this.lastClickMs = now;
+            if (doubleClick) {
+                // 双击：飞过去。来源 / 类型节点把整支收进屏幕，武器节点放到能看清图标，中心节点看全貌
+                this.selected = node;
+                updatePath();
+                flyTo(node);
+                return true;
+            }
+            // 整张图是全展开的，单击节点就只是选中它、在左侧弹出详情
             this.selected = node == this.selected ? null : node;
             updatePath();
             return true;
         }
+        this.lastClickedNode = null;
 
         // 点空白处收起详情面板，同时开始拖动
         this.selected = null;
         updatePath();
         this.dragging = true;
+        this.flying = false;
         this.hasZoomAnchor = false;
         this.lastMouseX = mouseX;
         this.lastMouseY = mouseY;
@@ -2509,6 +3215,7 @@ public class MasteryScreen extends Screen {
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
         if (this.dragging && button == 0) {
+            this.flying = false;
             // 拖动直接改当前值，不做插值，否则手感会发飘
             this.hasZoomAnchor = false;
             this.panX += mouseX - this.lastMouseX;
@@ -2527,7 +3234,9 @@ public class MasteryScreen extends Screen {
             this.panelScroll = Math.max(0.0D, this.panelScroll - delta * PANEL_SCROLL_STEP);
             return true;
         }
-        double newZoom = Mth.clamp(this.targetZoom * (delta > 0.0D ? ZOOM_STEP : 1.0D / ZOOM_STEP),
+        this.flying = false;
+        double step = zoomStep();
+        double newZoom = Mth.clamp(this.targetZoom * (delta > 0.0D ? step : 1.0D / step),
                 minZoom(), maxZoom());
         if (Math.abs(newZoom - this.targetZoom) < 1.0E-6D) {
             return true;
@@ -2570,7 +3279,8 @@ public class MasteryScreen extends Screen {
             }
         }
         if (KeyBindings.OPEN_MASTERY.matches(keyCode, scanCode)) {
-            this.onClose();
+            // 按开界面那个键是「我不看了」：看别人时也直接整叠关掉，不回排行榜
+            Minecraft.getInstance().setScreen(null);
             return true;
         }
         // ESC 第一次先退出搜索框，再按收起面板，最后才关界面
@@ -2617,6 +3327,10 @@ public class MasteryScreen extends Screen {
         if (this.specHits.isEmpty() || mouseX < 0.0D || mouseX > PANEL_WIDTH) {
             return false;
         }
+        // 看别人的罗盘：卡片只是展示他选了什么，点了不发包
+        if (this.viewOnly) {
+            return true;
+        }
         // 左键给第一槽，右键给第二槽；解锁、冷却、重复全由服务端再判一遍
         int slot = button == 1 ? 2 : 1;
         // 画的时候用的是内容坐标，这里把鼠标位置换算回去
@@ -2640,7 +3354,7 @@ public class MasteryScreen extends Screen {
         }
         for (int i = this.nodes.size() - 1; i >= 0; i--) {
             MasteryNode node = this.nodes.get(i);
-            double radius = node.radius * this.zoom;
+            double radius = screenRadius(node);
             double dx = mouseX - toScreenX(node.graphX);
             double dy = mouseY - toScreenY(node.graphY);
             if (dx * dx + dy * dy <= radius * radius) {
@@ -2691,7 +3405,7 @@ public class MasteryScreen extends Screen {
         String key = node.dataKey();
         int level = 0;
         if (key != null) {
-            MasteryData data = ClientMasteryCache.data();
+            MasteryData data = this.data;
             level = switch (node.type) {
                 case SOURCE -> data.getOverallLevel(key);
                 case TYPE -> data.getTypeLevel(key);
@@ -2735,7 +3449,7 @@ public class MasteryScreen extends Screen {
             return null;
         }
 
-        MasteryData data = ClientMasteryCache.data();
+        MasteryData data = this.data;
         int levelSum = 0;
         for (WeaponEntry entry : weapons) {
             levelSum += data.getWeaponLevel(entry.key());
@@ -2755,7 +3469,7 @@ public class MasteryScreen extends Screen {
         if (key == null) {
             return 0.0D;
         }
-        MasteryData data = ClientMasteryCache.data();
+        MasteryData data = this.data;
         MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
         // 三层曲线不同，进度条要按本层自己的曲线算
         LevelCurve curve = switch (node.type) {
@@ -2809,8 +3523,8 @@ public class MasteryScreen extends Screen {
      *
      * @return 进度统计
      */
-    private static Progress collectProgress() {
-        MasteryData data = ClientMasteryCache.data();
+    private Progress collectProgress() {
+        MasteryData data = this.data;
         int total = 0;
         int unlocked = 0;
         int levelSum = 0;

@@ -20,6 +20,7 @@
     "GunHudAmmoMixin",
     "GunRecoilMixin",
     "GunSoundMixin",
+    "LrTacticalIdleAnimationMixin",
     "ObjectAnimationRunnerMixin"
   ],
   "server": [],

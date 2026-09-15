@@ -1,7 +1,10 @@
+// 路径：src/main/java/com/flameforge/albionmastery/config/MasteryConfig.java
 package com.flameforge.albionmastery.config;
 
+import com.flameforge.albionmastery.leaderboard.LeaderboardSort;
 import com.flameforge.albionmastery.mastery.LevelCurve;
 import com.flameforge.albionmastery.mastery.spec.Specialization;
+import com.flameforge.albionmastery.weapon.WeaponKeys;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.common.ForgeConfigSpec;
 import org.apache.commons.lang3.tuple.Pair;
@@ -118,6 +121,12 @@ public final class MasteryConfig {
                 COMMON.weaponDamagePerLevel.get(),
                 COMMON.weaponCrossDamagePerLevel.get(),
                 COMMON.maxTotalDamageBonus.get(),
+                COMMON.vanillaWeaponMasteryMultiplier.get(),
+                COMMON.taczMeleeMasteryMultiplier.get(),
+                COMMON.ironsSpellbooksMasteryMultiplier.get(),
+                COMMON.arsNouveauMasteryMultiplier.get(),
+                COMMON.taczGunMasteryMultiplier.get(),
+                COMMON.slashbladeMasteryMultiplier.get(),
                 COMMON.xpBase.get(),
                 COMMON.xpExponent.get(),
                 COMMON.typeXpMultiplier.get(),
@@ -170,12 +179,26 @@ public final class MasteryConfig {
         public final ForgeConfigSpec.DoubleValue weaponDamagePerLevel;
         public final ForgeConfigSpec.DoubleValue weaponCrossDamagePerLevel;
         public final ForgeConfigSpec.DoubleValue maxTotalDamageBonus;
+        /** 原版近战与弓弩来源的专精伤害总倍率。 */
+        public final ForgeConfigSpec.DoubleValue vanillaWeaponMasteryMultiplier;
+        /** lrtactical 近战来源的专精伤害总倍率。 */
+        public final ForgeConfigSpec.DoubleValue taczMeleeMasteryMultiplier;
+        /** Iron's Spells 'n Spellbooks 来源的专精伤害总倍率。 */
+        public final ForgeConfigSpec.DoubleValue ironsSpellbooksMasteryMultiplier;
+        /** Ars Nouveau 来源的专精伤害总倍率。 */
+        public final ForgeConfigSpec.DoubleValue arsNouveauMasteryMultiplier;
+        /** TACZ 枪械来源的专精伤害总倍率。 */
+        public final ForgeConfigSpec.DoubleValue taczGunMasteryMultiplier;
+        /** 拔刀剑来源的专精伤害总倍率。 */
+        public final ForgeConfigSpec.DoubleValue slashbladeMasteryMultiplier;
         public final ForgeConfigSpec.DoubleValue xpBase;
         public final ForgeConfigSpec.DoubleValue xpExponent;
         public final ForgeConfigSpec.DoubleValue xpPerDamage;
         public final ForgeConfigSpec.DoubleValue xpPerKill;
         public final ForgeConfigSpec.BooleanValue xpFromOriginalMobExperience;
         public final ForgeConfigSpec.IntValue npcFallbackMobExperience;
+        /** CustomNPCs 掉落经验参与专精经验折算前的额外倍率。 */
+        public final ForgeConfigSpec.DoubleValue npcExperienceMultiplier;
         public final ForgeConfigSpec.DoubleValue xpPerMobExperience;
         public final ForgeConfigSpec.DoubleValue typeXpMultiplier;
         public final ForgeConfigSpec.DoubleValue overallXpMultiplier;
@@ -205,6 +228,12 @@ public final class MasteryConfig {
         public final ForgeConfigSpec.ConfigValue<List<? extends String>> doubleCastExcludedSpells;
         public final ForgeConfigSpec.IntValue specSlot1Percent;
         public final ForgeConfigSpec.IntValue specSlot2Percent;
+        public final ForgeConfigSpec.BooleanValue leaderboardEnable;
+        public final ForgeConfigSpec.IntValue leaderboardTopCount;
+        public final ForgeConfigSpec.IntValue leaderboardUpdateIntervalSeconds;
+        public final ForgeConfigSpec.IntValue leaderboardRequestCooldownSeconds;
+        public final ForgeConfigSpec.BooleanValue leaderboardBroadcastTopChanges;
+        public final ForgeConfigSpec.EnumValue<LeaderboardSort> leaderboardBroadcastSort;
 
         Common(ForgeConfigSpec.Builder builder) {
             builder.comment("武器专精系统 - 玩法数值（以服务端配置为准，登录时会下发给客户端用于界面显示）")
@@ -231,8 +260,32 @@ public final class MasteryConfig {
                     .defineInRange("weaponCrossDamagePerLevel", 0.001D, 0.0D, 1.0D);
 
             this.maxTotalDamageBonus = builder
-                    .comment("单件武器可获得的伤害加成总上限（10.0 = 最多 +1000%），用于兜底防止数值失控")
-                    .defineInRange("maxTotalDamageBonus", 10.0D, 0.0D, 1000.0D);
+                    .comment("单件武器可获得的伤害加成总上限（100.0 = 最多 +10000%），只是兜底防止数值失控")
+                    .defineInRange("maxTotalDamageBonus", 100.0D, 0.0D, 1000.0D);
+
+            builder.comment("不同武器来源的专精伤害倍率。",
+                            "这里乘的是专精本身给出的伤害加成：总体（内圈）、类型（中圈）、单件武器（外圈）以及同类型联动都会一起乘。",
+                            "不会去乘流派 / 特化里的 damage 等额外倍率；拔刀剑默认 1.0，保持原样。")
+                    .push("sourceDamageMultiplier");
+            this.vanillaWeaponMasteryMultiplier = builder
+                    .comment("原版武器体系（vanilla_melee + bow）的专精伤害倍率")
+                    .defineInRange("vanillaWeapon", 20.0D, 0.0D, 100.0D);
+            this.taczMeleeMasteryMultiplier = builder
+                    .comment("lrtactical 近战武器的专精伤害倍率")
+                    .defineInRange("lrtacticalMelee", 20.0D, 0.0D, 100.0D);
+            this.ironsSpellbooksMasteryMultiplier = builder
+                    .comment("Iron's Spells 'n Spellbooks（铁魔法）的专精伤害倍率")
+                    .defineInRange("ironsSpellbooks", 10.0D, 0.0D, 100.0D);
+            this.arsNouveauMasteryMultiplier = builder
+                    .comment("Ars Nouveau（新生魔艺）的专精伤害倍率")
+                    .defineInRange("arsNouveau", 10.0D, 0.0D, 100.0D);
+            this.taczGunMasteryMultiplier = builder
+                    .comment("TACZ 枪械的专精伤害倍率")
+                    .defineInRange("taczGun", 5.0D, 0.0D, 100.0D);
+            this.slashbladeMasteryMultiplier = builder
+                    .comment("拔刀剑的专精伤害倍率；1.0 = 完全保持原来的专精强度")
+                    .defineInRange("slashblade", 1.0D, 0.0D, 100.0D);
+            builder.pop();
 
             this.xpBase = builder
                     .comment("经验曲线基数：升到第 L 级所需经验 = xpBase * L ^ xpExponent。",
@@ -267,10 +320,15 @@ public final class MasteryConfig {
                             "取实际掉落值的话专精经验会跟着一起膨胀。默认 true，只按原版数值算")
                     .define("xpFromOriginalMobExperience", true);
             this.npcFallbackMobExperience = builder
-                    .comment("击杀自定义 NPC（CustomNPCs）时，专精经验按 NPC 编辑页「掉落」里设的经验（最小 / 最大的平均）折算；",
-                            "NPC 没设（是 0）或者读不到时，改用这里的兜底值。0 = 那种 NPC 不给专精经验。",
+                    .comment("击杀自定义 NPC（CustomNPCs）时，优先读取 NPC 编辑页「掉落」里设的经验（最小 / 最大的平均）；",
+                            "只有读不到 CustomNPCs 数据时才使用这里的兜底值。NPC 明确把最小 / 最大都设为 0 时就是 0，不会套兜底。",
                             "没装 CustomNPCs 时这一项没有作用，本模组不依赖它")
                     .defineInRange("npcFallbackMobExperience", 0, 0, 100000);
+            this.npcExperienceMultiplier = builder
+                    .comment("CustomNPCs 的掉落经验参与专精经验折算前额外乘的倍率。默认 0.1 = 只取原配置经验的 1/10。",
+                            "NPC 原始经验大于 1 且该倍率大于 0 时，折算后的经验最低按 1 计算，避免小经验 NPC 乘完直接接近 0。",
+                            "如果 NPC 的最小 / 最大经验都为 0，则仍然是 0，不会被最低 1 抬起来。")
+                    .defineInRange("npcExperienceMultiplier", 0.1D, 0.0D, 100.0D);
 
             this.typeXpMultiplier = builder
                     .comment("武器类型专精的升级所需经验倍率，以单件武器为基准。",
@@ -401,8 +459,8 @@ public final class MasteryConfig {
                     .defineInRange("slot2UnlockPercent", 100, 1, 100);
             this.debugLogging = builder
                     .comment("排查用：把流派效果的关键路径（双重施法排队 / 补放、法力折扣等）打成 INFO 日志。",
-                            "开发期默认开着，正式上线改成 false")
-                    .define("debugLogging", true);
+                            "默认关闭；只有排查问题时才打开，人多的时候会刷屏")
+                    .define("debugLogging", false);
             this.doubleCastTimeFactor = builder
                     .comment("双重施法补放的那一次，施法时间（引导 / 前摇）乘这个系数。0.5 = 减半")
                     .defineInRange("doubleCastTimeFactor", 0.5D, 0.05D, 1.0D);
@@ -924,6 +982,33 @@ public final class MasteryConfig {
             });
 
             builder.pop();
+
+            builder.comment("全服专精排行榜：在专精界面左下角进入，能看全服谁练得最狠、点进去看他整个罗盘和选的流派。",
+                            "榜单数据存在主世界 data/albionmastery_leaderboard.dat 里，下线的玩家也在榜上。",
+                            "单人世界同样可用（开局域网联机时就是一份小榜单）。")
+                    .push("leaderboard");
+            this.leaderboardEnable = builder
+                    .comment("总开关。关掉后客户端请求一律回「未开启」，已经存下的榜单数据不会删")
+                    .define("enable", true);
+            this.leaderboardTopCount = builder
+                    .comment("榜单最多显示前多少名。请求者自己不在前几名里也能看到自己的名次和数据")
+                    .defineInRange("topCount", 100, 5, 500);
+            this.leaderboardUpdateIntervalSeconds = builder
+                    .comment("在线玩家的榜单数据多久刷新一次（秒）。登录、登出、玩家自己打开榜单时另外会立刻刷新，",
+                            "所以这个值只影响「别人看到你」的延迟，调大点省性能")
+                    .defineInRange("updateIntervalSeconds", 30, 5, 600);
+            this.leaderboardRequestCooldownSeconds = builder
+                    .comment("同一名玩家两次请求榜单之间至少隔几秒（要榜单、看某个人分别计）。0 = 不限")
+                    .defineInRange("requestCooldownSeconds", 2, 0, 60);
+            this.leaderboardBroadcastTopChanges = builder
+                    .comment("总榜前三名易主时给所有在线玩家弹一条和升级同款的横幅（本人看到的是「你成为了…」，",
+                            "别人看到的是「xxx 替代 yyy 成为了…」），不走聊天。只看总榜，日榜周榜月榜的变动不通知")
+                    .define("broadcastTopChanges", true);
+            this.leaderboardBroadcastSort = builder
+                    .comment("广播按哪种排序算前三：MAXED 满级数，LEVEL_SUM 等级总和，UNLOCKED 已解锁数")
+                    .defineEnum("broadcastSort", LeaderboardSort.MAXED);
+            builder.pop();
+
             builder.pop();
         }
     }
@@ -1055,6 +1140,18 @@ public final class MasteryConfig {
         public final double weaponDamagePerLevel;
         public final double weaponCrossDamagePerLevel;
         public final double maxTotalDamageBonus;
+        /** 原版近战 + 弓弩来源的专精伤害倍率。 */
+        public final double vanillaWeaponMasteryMultiplier;
+        /** lrtactical 近战来源的专精伤害倍率。 */
+        public final double taczMeleeMasteryMultiplier;
+        /** 铁魔法来源的专精伤害倍率。 */
+        public final double ironsSpellbooksMasteryMultiplier;
+        /** 新生魔艺来源的专精伤害倍率。 */
+        public final double arsNouveauMasteryMultiplier;
+        /** TACZ 枪械来源的专精伤害倍率。 */
+        public final double taczGunMasteryMultiplier;
+        /** 拔刀剑来源的专精伤害倍率。 */
+        public final double slashbladeMasteryMultiplier;
         public final double xpBase;
         public final double xpExponent;
         public final double typeXpMultiplier;
@@ -1104,6 +1201,12 @@ public final class MasteryConfig {
          * @param weaponDamagePerLevel      单件武器每级自身伤害加成
          * @param weaponCrossDamagePerLevel 单件武器每级对同类型其它武器的伤害加成
          * @param maxTotalDamageBonus       伤害加成总上限
+         * @param vanillaWeaponMasteryMultiplier 原版近战与弓弩来源倍率
+         * @param taczMeleeMasteryMultiplier lrtactical 近战来源倍率
+         * @param ironsSpellbooksMasteryMultiplier 铁魔法来源倍率
+         * @param arsNouveauMasteryMultiplier 新生魔艺来源倍率
+         * @param taczGunMasteryMultiplier TACZ 枪械来源倍率
+         * @param slashbladeMasteryMultiplier 拔刀剑来源倍率
          * @param xpBase                    经验曲线基数
          * @param xpExponent                经验曲线指数
          * @param typeXpMultiplier          类型升级经验倍率
@@ -1118,7 +1221,11 @@ public final class MasteryConfig {
          */
         public Snapshot(int maxLevel, double overallDamagePerLevel, double typeDamagePerLevel,
                         double weaponDamagePerLevel, double weaponCrossDamagePerLevel,
-                        double maxTotalDamageBonus, double xpBase, double xpExponent,
+                        double maxTotalDamageBonus,
+                        double vanillaWeaponMasteryMultiplier, double taczMeleeMasteryMultiplier,
+                        double ironsSpellbooksMasteryMultiplier, double arsNouveauMasteryMultiplier,
+                        double taczGunMasteryMultiplier, double slashbladeMasteryMultiplier,
+                        double xpBase, double xpExponent,
                         double typeXpMultiplier, double overallXpMultiplier,
                         double netherXpMultiplier, double endXpMultiplier,
                         double moddedDimensionXpMultiplier, boolean splitMeleeByPack,
@@ -1131,6 +1238,12 @@ public final class MasteryConfig {
             this.weaponDamagePerLevel = weaponDamagePerLevel;
             this.weaponCrossDamagePerLevel = weaponCrossDamagePerLevel;
             this.maxTotalDamageBonus = maxTotalDamageBonus;
+            this.vanillaWeaponMasteryMultiplier = clamp(vanillaWeaponMasteryMultiplier, 0.0D, 100.0D);
+            this.taczMeleeMasteryMultiplier = clamp(taczMeleeMasteryMultiplier, 0.0D, 100.0D);
+            this.ironsSpellbooksMasteryMultiplier = clamp(ironsSpellbooksMasteryMultiplier, 0.0D, 100.0D);
+            this.arsNouveauMasteryMultiplier = clamp(arsNouveauMasteryMultiplier, 0.0D, 100.0D);
+            this.taczGunMasteryMultiplier = clamp(taczGunMasteryMultiplier, 0.0D, 100.0D);
+            this.slashbladeMasteryMultiplier = clamp(slashbladeMasteryMultiplier, 0.0D, 100.0D);
             this.xpBase = xpBase;
             this.xpExponent = xpExponent;
             this.typeXpMultiplier = Math.max(0.1D, typeXpMultiplier);
@@ -1148,6 +1261,31 @@ public final class MasteryConfig {
             this.weaponCurve = new LevelCurve(this.maxLevel, xpBase, xpExponent);
             this.typeCurve = new LevelCurve(this.maxLevel, xpBase * this.typeXpMultiplier, xpExponent);
             this.overallCurve = new LevelCurve(this.maxLevel, xpBase * this.overallXpMultiplier, xpExponent);
+        }
+
+        /**
+         * 按武器来源取得专精伤害倍率。
+         *
+         * <p>这个倍率只放大专精等级本身算出来的加成，不碰特化 / 流派的独立倍率。
+         * 未知来源按 1.0 处理，新增 Provider 即使忘了补配置也不会莫名变强或变弱。
+         *
+         * @param providerId 武器来源 ID
+         * @return 该来源的专精伤害倍率
+         */
+        public double masteryDamageMultiplier(String providerId) {
+            if (providerId == null) {
+                return 1.0D;
+            }
+            return switch (providerId) {
+                case WeaponKeys.PROVIDER_VANILLA_MELEE, WeaponKeys.PROVIDER_BOW ->
+                        this.vanillaWeaponMasteryMultiplier;
+                case WeaponKeys.PROVIDER_LRTACTICAL_MELEE -> this.taczMeleeMasteryMultiplier;
+                case WeaponKeys.PROVIDER_IRONS_SPELLS -> this.ironsSpellbooksMasteryMultiplier;
+                case WeaponKeys.PROVIDER_ARS_NOUVEAU -> this.arsNouveauMasteryMultiplier;
+                case WeaponKeys.PROVIDER_TACZ_GUN -> this.taczGunMasteryMultiplier;
+                case WeaponKeys.PROVIDER_SLASHBLADE -> this.slashbladeMasteryMultiplier;
+                default -> 1.0D;
+            };
         }
 
         /**
@@ -1198,8 +1336,10 @@ public final class MasteryConfig {
          * @return 默认快照
          */
         public static Snapshot createDefault() {
-            return new Snapshot(100, 0.005D, 0.01D, 0.02D, 0.001D, 10.0D, 40.0D, 1.0D,
-                    3.0D, 10.0D, 1.5D, 2.0D, 2.0D, true, true, 3600, 50, 100, Map.of());
+            return new Snapshot(100, 0.005D, 0.01D, 0.02D, 0.001D, 100.0D,
+                    20.0D, 20.0D, 10.0D, 10.0D, 5.0D, 1.0D,
+                    40.0D, 1.0D, 3.0D, 10.0D, 1.5D, 2.0D, 2.0D,
+                    true, true, 3600, 50, 100, Map.of());
         }
 
         /**
@@ -1226,6 +1366,13 @@ public final class MasteryConfig {
             buf.writeVarInt(this.specSwitchCooldownSeconds);
             buf.writeVarInt(this.specSlot1Percent);
             buf.writeVarInt(this.specSlot2Percent);
+            // 协议 v3 追加：不同来源的专精伤害倍率。客户端面板必须和服务端实际结算完全一致。
+            buf.writeDouble(this.vanillaWeaponMasteryMultiplier);
+            buf.writeDouble(this.taczMeleeMasteryMultiplier);
+            buf.writeDouble(this.ironsSpellbooksMasteryMultiplier);
+            buf.writeDouble(this.arsNouveauMasteryMultiplier);
+            buf.writeDouble(this.taczGunMasteryMultiplier);
+            buf.writeDouble(this.slashbladeMasteryMultiplier);
             buf.writeVarInt(this.specValues.size());
             for (Map.Entry<String, SpecializationValues> entry : this.specValues.entrySet()) {
                 buf.writeUtf(entry.getKey(), 128);
@@ -1258,6 +1405,12 @@ public final class MasteryConfig {
             int specCooldown = Math.max(0, Math.min(604800, buf.readVarInt()));
             int slot1 = Math.max(1, Math.min(100, buf.readVarInt()));
             int slot2 = Math.max(1, Math.min(100, buf.readVarInt()));
+            double vanillaWeaponMul = clamp(buf.readDouble(), 0.0D, 100.0D);
+            double taczMeleeMul = clamp(buf.readDouble(), 0.0D, 100.0D);
+            double ironsMul = clamp(buf.readDouble(), 0.0D, 100.0D);
+            double arsMul = clamp(buf.readDouble(), 0.0D, 100.0D);
+            double taczGunMul = clamp(buf.readDouble(), 0.0D, 100.0D);
+            double slashbladeMul = clamp(buf.readDouble(), 0.0D, 100.0D);
             // 条数按枚举总量封顶，异常包不至于让客户端在这里分配一张巨表
             int specCount = Math.max(0, Math.min(Specialization.values().length, buf.readVarInt()));
             Map<String, SpecializationValues> specValues = new HashMap<>();
@@ -1266,7 +1419,8 @@ public final class MasteryConfig {
                 specValues.put(key, SpecializationValues.read(buf));
             }
             return new Snapshot(maxLevel, overallDmg, typeDmg, wpnDmg, crossDmg,
-                    maxBonus, xpBase, xpExp, typeMul, overallMul, netherMul, endMul, moddedMul,
+                    maxBonus, vanillaWeaponMul, taczMeleeMul, ironsMul, arsMul, taczGunMul, slashbladeMul,
+                    xpBase, xpExp, typeMul, overallMul, netherMul, endMul, moddedMul,
                     splitMelee, enableSpec, specCooldown, slot1, slot2, specValues);
         }
 
@@ -1286,3 +1440,5 @@ public final class MasteryConfig {
         }
     }
 }
+
+

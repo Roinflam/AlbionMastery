@@ -5,14 +5,17 @@ import com.flameforge.albionmastery.config.MasteryConfig;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
-import java.util.Locale;
 import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
 
 /**
  * 升级提示。
@@ -108,7 +111,7 @@ public final class MasteryToastManager {
         // 学习点不是 1 的时候在横幅上挂个「×2」，让玩家知道涨得快慢是因为什么
         double study = ClientMasteryCache.data().getStudyMultiplier();
         Pending pending = new Pending(priority, sequence++, title, tier, oldLevel, newLevel,
-                List.copyOf(usable), down, study);
+                List.copyOf(usable), down, study, null, null, "");
 
         // 按优先级插到该在的位置，同优先级按到达先后；最后一条永远是最不重要的
         int insertAt = PENDING.size();
@@ -125,6 +128,33 @@ public final class MasteryToastManager {
     }
 
     /**
+     * 排一条「排名变动」横幅，样子和升级横幅一样，图标换成那个人的头像。
+     *
+     * <p>优先级排在所有升级提示前面：这种事一天不会有几次，来了就该第一个看到。
+     *
+     * @param title    标题（「全服第一」这种）
+     * @param detail   第二行文案
+     * @param face     头像用谁的皮肤
+     * @param faceName 他的名字，离线时靠它拉皮肤
+     * @param self     是不是本人上位，是的话多放一声升级音效
+     */
+    public static void pushRank(Component title, Component detail, UUID face, String faceName, boolean self) {
+        Pending pending = new Pending(-1, sequence++, title, Component.empty(), 0, 0, List.of(),
+                false, 1.0D, detail, face, faceName);
+        PENDING.add(0, pending);
+        while (PENDING.size() > MAX_PENDING) {
+            PENDING.remove(PENDING.size() - 1);
+        }
+        if (self && MasteryConfig.CLIENT.levelUpSound.get()) {
+            Minecraft minecraft = Minecraft.getInstance();
+            if (minecraft.player != null) {
+                // 自己上榜比升一级大得多，叠一声原版的升级音效
+                minecraft.player.playSound(SoundEvents.PLAYER_LEVELUP, 0.6F, 1.0F);
+            }
+        }
+    }
+
+    /**
      * 有空位就从等待队列放一条上屏。
      *
      * @param now 当前时刻
@@ -133,7 +163,8 @@ public final class MasteryToastManager {
         while (ACTIVE.size() < MAX_VISIBLE && !PENDING.isEmpty()) {
             Pending pending = PENDING.remove(0);
             ACTIVE.add(new Toast(pending.title(), pending.tier(), pending.oldLevel(), pending.newLevel(),
-                    pending.icons(), now, pending.down(), pending.study()));
+                    pending.icons(), now, pending.down(), pending.study(), pending.detail(),
+                    pending.face(), pending.faceName()));
             if (MasteryConfig.CLIENT.levelUpSound.get()) {
                 Minecraft minecraft = Minecraft.getInstance();
                 if (minecraft.player != null) {
@@ -214,10 +245,13 @@ public final class MasteryToastManager {
         }
 
         String name = toast.title.getString();
-        String detail = toast.tier.getString() + "  Lv." + toast.oldLevel + " → " + toast.newLevel;
+        // 排名横幅第二行是现成的文案，升级横幅是「层级  Lv.旧 → 新」
+        String detail = toast.detail != null
+                ? toast.detail.getString()
+                : toast.tier.getString() + "  Lv." + toast.oldLevel + " → " + toast.newLevel;
         int textWidth = Math.max(minecraft.font.width(name), minecraft.font.width(detail));
         ItemStack icon = toast.iconAt(elapsed);
-        boolean hasIcon = !icon.isEmpty();
+        boolean hasIcon = !icon.isEmpty() || toast.face != null;
         // 挂了学习点标记就给右边多留出它的宽度，不然会压到文字上
         int badgeRoom = toast.hasStudyBadge()
                 ? minecraft.font.width("\u00D7" + toast.studyText()) + 12 : 0;
@@ -257,7 +291,11 @@ public final class MasteryToastManager {
         drawSweep(guiGraphics, elapsed, width, alpha, accentBright);
 
         int textX = 10;
-        if (hasIcon) {
+        if (toast.face != null) {
+            PlayerFaceRenderer.draw(guiGraphics, PlayerSkins.skinOf(toast.face, toast.faceName),
+                    8, (BANNER_HEIGHT - 16) / 2, 16);
+            textX = 34;
+        } else if (hasIcon) {
             guiGraphics.renderItem(icon, 8, (BANNER_HEIGHT - 16) / 2);
             textX = 34;
         }
@@ -328,10 +366,14 @@ public final class MasteryToastManager {
      * @param icons    轮换图标
      * @param down     是否降级
      * @param study    学习倍率
+     * @param detail   第二行的现成文案；为 null 时按层级和等级拼
+     * @param face     头像用谁的皮肤；为 null 时用物品图标
+     * @param faceName 头像主人的名字
      */
     private record Pending(int priority, long sequence, Component title, Component tier,
                            int oldLevel, int newLevel, List<ItemStack> icons,
-                           boolean down, double study) {
+                           boolean down, double study, @Nullable Component detail,
+                           @Nullable UUID face, String faceName) {
     }
 
     /**
@@ -343,9 +385,13 @@ public final class MasteryToastManager {
      * @param newLevel 新等级
      * @param icons    可轮换的图标列表
      * @param bornAt   创建时刻
+     * @param detail   第二行的现成文案；为 null 时按层级和等级拼
+     * @param face     头像用谁的皮肤；为 null 时用物品图标
+     * @param faceName 头像主人的名字
      */
     private record Toast(Component title, Component tier, int oldLevel, int newLevel,
-                         List<ItemStack> icons, long bornAt, boolean down, double study) {
+                         List<ItemStack> icons, long bornAt, boolean down, double study,
+                         @Nullable Component detail, @Nullable UUID face, String faceName) {
 
         /**
          * @return 是否要画学习点标记

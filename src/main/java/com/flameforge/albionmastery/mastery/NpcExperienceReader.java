@@ -1,3 +1,4 @@
+// 路径：src/main/java/com/flameforge/albionmastery/mastery/NpcExperienceReader.java
 package com.flameforge.albionmastery.mastery;
 
 import com.flameforge.albionmastery.AlbionMastery;
@@ -6,7 +7,7 @@ import net.minecraft.world.entity.LivingEntity;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Field;
-import java.util.OptionalInt;
+import java.util.OptionalDouble;
 
 /**
  * 读自定义 NPC（CustomNPCs）在编辑界面里设的掉落经验，不引用它的任何类。
@@ -42,12 +43,12 @@ public final class NpcExperienceReader {
      * 读这只 NPC 设定的掉落经验。
      *
      * @param entity NPC 实体
-     * @return min / max 的平均值；读不到返回空
+     * @return min / max 的平均值；读不到返回空。使用 double 保留 0.5 这类半点经验，避免整数平均直接截成 0
      */
-    public static OptionalInt read(LivingEntity entity) {
+    public static OptionalDouble read(LivingEntity entity) {
         Class<?> type = entity.getClass();
         if (type == failedClass) {
-            return OptionalInt.empty();
+            return OptionalDouble.empty();
         }
         try {
             if (type != cachedClass) {
@@ -55,17 +56,17 @@ public final class NpcExperienceReader {
             }
             Object inventory = inventoryField.get(entity);
             if (inventory == null) {
-                return OptionalInt.empty();
+                return OptionalDouble.empty();
             }
             int min = (int) expMinHandle.invoke(inventory);
             int max = (int) expMaxHandle.invoke(inventory);
-            return OptionalInt.of(Math.max(0, (min + max) / 2));
+            return OptionalDouble.of(Math.max(0.0D, (min + max) / 2.0D));
         } catch (Throwable throwable) {
             failedClass = type;
             cachedClass = null;
             AlbionMastery.LOGGER.warn("读取自定义 NPC 掉落经验失败，这类 NPC 改用配置里的固定值: {}",
                     type.getName(), throwable);
-            return OptionalInt.empty();
+            return OptionalDouble.empty();
         }
     }
 
@@ -96,3 +97,5 @@ public final class NpcExperienceReader {
         cachedClass = type;
     }
 }
+
+

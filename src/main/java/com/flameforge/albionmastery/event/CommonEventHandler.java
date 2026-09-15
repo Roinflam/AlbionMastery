@@ -3,6 +3,7 @@ package com.flameforge.albionmastery.event;
 import com.flameforge.albionmastery.AlbionMastery;
 import com.flameforge.albionmastery.command.MasteryCommand;
 import com.flameforge.albionmastery.config.MasteryConfig;
+import com.flameforge.albionmastery.leaderboard.MasteryLeaderboard;
 import com.flameforge.albionmastery.mastery.MasteryCapability;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.MasteryExperienceHook;
@@ -35,6 +36,7 @@ import java.util.Map;
  *     <li>注册并挂载专精 Capability</li>
  *     <li>死亡重生 / 切维度时继承与重新同步专精数据</li>
  *     <li>把战斗中产生的大量小改动合并成定时增量同步</li>
+ *     <li>在登录 / 登出 / 定时刷新时把玩家数据记进全服排行榜</li>
  * </ul>
  */
 @Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID)
@@ -45,6 +47,9 @@ public final class CommonEventHandler {
 
     /** 同步节流用的 tick 计数器。 */
     private static int tickCounter = 0;
+
+    /** 排行榜定时刷新用的 tick 计数器。 */
+    private static int leaderboardTickCounter = 0;
 
     private CommonEventHandler() {
     }
@@ -123,6 +128,47 @@ public final class CommonEventHandler {
             syncFull(player);
             // 移速修饰符不存盘，登录后按当前主手重挂一次
             SpecMoveSpeed.refresh(player);
+            // 登录就记一笔：名字可能改过，而且没上榜的老玩家第一次装上本版本也得进榜
+            recordLeaderboard(player);
+        }
+    }
+
+    /**
+     * 玩家登出：把最后的数据记进排行榜，并清掉他的临时状态。
+     *
+     * <p>这一步是「下线的人也在榜上」的关键：实体马上就没了，现在不记就得等他下次上线。
+     *
+     * @param event 登出事件
+     */
+    @SubscribeEvent
+    public static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            recordLeaderboard(player);
+        }
+    }
+
+    /**
+     * 立刻把一名玩家记进排行榜并清掉他的临时状态（限流、待刷新标记），出错只记日志不影响正常游戏。
+     *
+     * <p>总开关关着就什么都不做，连存盘文件都不会创建。
+     *
+     * @param player 玩家
+     */
+    private static void recordLeaderboard(ServerPlayer player) {
+        if (!MasteryConfig.COMMON.leaderboardEnable.get()) {
+            return;
+        }
+        MinecraftServer server = player.getServer();
+        if (server == null) {
+            return;
+        }
+        try {
+            MasteryLeaderboard board = MasteryLeaderboard.get(server);
+            board.update(player);
+            board.forgetSession(player.getUUID());
+        } catch (Exception exception) {
+            // 排行榜是附加功能，它出问题不能把登录 / 登出流程一起带崩
+            AlbionMastery.LOGGER.error("写入排行榜失败: {}", player.getGameProfile().getName(), exception);
         }
     }
 
@@ -183,6 +229,20 @@ public final class CommonEventHandler {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             flushDirty(player);
         }
+
+        // 排行榜的定时刷新走另一个更慢的计数器：它要序列化整份数据，没必要跟同步包一个节奏
+        if (MasteryConfig.COMMON.leaderboardEnable.get()) {
+            int boardInterval = MasteryConfig.COMMON.leaderboardUpdateIntervalSeconds.get() * 20;
+            leaderboardTickCounter += interval;
+            if (leaderboardTickCounter >= boardInterval) {
+                leaderboardTickCounter = 0;
+                try {
+                    MasteryLeaderboard.get(server).flushChanged(server);
+                } catch (Exception exception) {
+                    AlbionMastery.LOGGER.error("排行榜定时刷新失败", exception);
+                }
+            }
+        }
     }
 
     /**
@@ -199,6 +259,24 @@ public final class CommonEventHandler {
         data.recomputeLevels(snapshot.weaponCurve(), snapshot.typeCurve(), snapshot.overallCurve());
         data.clearDirty();
         NetworkHandler.sendTo(player, S2CSyncMasteryPacket.of(data, snapshot));
+        markLeaderboardChanged(player);
+    }
+
+    /**
+     * 给排行榜打个「这个人的数据变过」的标记，下次定时刷新时记进去。
+     *
+     * <p>只是往一个集合里塞个 UUID，热路径上也不心疼。
+     *
+     * @param player 玩家
+     */
+    private static void markLeaderboardChanged(ServerPlayer player) {
+        if (!MasteryConfig.COMMON.leaderboardEnable.get()) {
+            return;
+        }
+        MinecraftServer server = player.getServer();
+        if (server != null) {
+            MasteryLeaderboard.get(server).markChanged(player.getUUID());
+        }
     }
 
     /**
@@ -237,6 +315,7 @@ public final class CommonEventHandler {
 
         if (!weapons.isEmpty() || !types.isEmpty() || !overalls.isEmpty()) {
             NetworkHandler.sendTo(player, new S2CUpdateMasteryPacket(weapons, types, overalls));
+            markLeaderboardChanged(player);
         }
     }
 }

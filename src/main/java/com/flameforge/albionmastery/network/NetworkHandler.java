@@ -1,3 +1,4 @@
+// 路径：src/main/java/com/flameforge/albionmastery/network/NetworkHandler.java
 package com.flameforge.albionmastery.network;
 
 import com.flameforge.albionmastery.AlbionMastery;
@@ -12,13 +13,18 @@ import net.minecraftforge.network.simple.SimpleChannel;
  * 网络通道注册。
  *
  * <p>数据流基本是单向的：服务端为唯一权威，客户端只接收专精数据用于界面显示。
- * 唯一的 C2S 包是切换特化的请求，它只带一个流派键，解锁条件与冷却全部由服务端重新校验，
- * 客户端说什么都不作数。
+ * C2S 包只有三种：切换特化（只带一个流派键，解锁条件与冷却全部由服务端重新校验）、
+ * 要排行榜、要某个人的专精数据（后两种服务端会限流）。客户端说什么都不作数。
  */
 public final class NetworkHandler {
 
-    /** 协议版本，客户端与服务端不一致时 Forge 会直接拒绝连接。 */
-    private static final String PROTOCOL_VERSION = "1";
+    /**
+     * 协议版本，客户端与服务端不一致时 Forge 会直接拒绝连接。
+     *
+     * <p>加了排行榜的四个包之后升到 2：老版本客户端收到不认识的包 ID 会直接断线报错，
+     * 不如在进服时就明确提示版本不匹配。
+     */
+    private static final String PROTOCOL_VERSION = "3";
 
     /** 主通道。 */
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
@@ -56,6 +62,39 @@ public final class NetworkHandler {
                 .decoder(C2SSelectSpecializationPacket::decode)
                 .consumerMainThread(C2SSelectSpecializationPacket::handle)
                 .add();
+
+        // 排行榜：两问两答，外加一条前三易主的通知。新包一律追加在末尾，前面的 ID 不动
+        CHANNEL.messageBuilder(C2SRequestLeaderboardPacket.class, packetId++,
+                        NetworkDirection.PLAY_TO_SERVER)
+                .encoder(C2SRequestLeaderboardPacket::encode)
+                .decoder(C2SRequestLeaderboardPacket::decode)
+                .consumerMainThread(C2SRequestLeaderboardPacket::handle)
+                .add();
+
+        CHANNEL.messageBuilder(S2CLeaderboardPacket.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(S2CLeaderboardPacket::encode)
+                .decoder(S2CLeaderboardPacket::decode)
+                .consumerMainThread(S2CLeaderboardPacket::handle)
+                .add();
+
+        CHANNEL.messageBuilder(C2SRequestPlayerMasteryPacket.class, packetId++,
+                        NetworkDirection.PLAY_TO_SERVER)
+                .encoder(C2SRequestPlayerMasteryPacket::encode)
+                .decoder(C2SRequestPlayerMasteryPacket::decode)
+                .consumerMainThread(C2SRequestPlayerMasteryPacket::handle)
+                .add();
+
+        CHANNEL.messageBuilder(S2CPlayerMasteryPacket.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(S2CPlayerMasteryPacket::encode)
+                .decoder(S2CPlayerMasteryPacket::decode)
+                .consumerMainThread(S2CPlayerMasteryPacket::handle)
+                .add();
+
+        CHANNEL.messageBuilder(S2CRankChangePacket.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(S2CRankChangePacket::encode)
+                .decoder(S2CRankChangePacket::decode)
+                .consumerMainThread(S2CRankChangePacket::handle)
+                .add();
     }
 
     /**
@@ -77,3 +116,5 @@ public final class NetworkHandler {
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), message);
     }
 }
+
+

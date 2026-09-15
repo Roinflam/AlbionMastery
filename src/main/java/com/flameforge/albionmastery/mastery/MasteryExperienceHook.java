@@ -1,3 +1,4 @@
+// 路径：src/main/java/com/flameforge/albionmastery/mastery/MasteryExperienceHook.java
 package com.flameforge.albionmastery.mastery;
 
 import com.flameforge.albionmastery.AlbionMastery;
@@ -146,7 +147,15 @@ public final class MasteryExperienceHook {
     }
 
     /**
-     * 杀 NPC：按 NPC 编辑页里设的掉落经验（min / max 平均）折算；读不到或设的是 0 时用配置的兜底值。
+     * 杀 NPC：按 NPC 编辑页里设的掉落经验（min / max 平均）折算，并额外乘
+     * {@code npcExperienceMultiplier}。
+     *
+     * <p>这里刻意区分「明确配置为 0」和「反射读取失败」：
+     * <ul>
+     *     <li>NPC 的最小 / 最大经验都为 0：就是 0，直接不给专精经验；</li>
+     *     <li>读不到 NPC 配置：才回退到 {@code npcFallbackMobExperience}；</li>
+     *     <li>原始经验大于 1 且倍率大于 0：倍率折算后最低按 1 计算。</li>
+     * </ul>
      *
      * <p>走 {@code LivingDeathEvent}，因为 NPC 掉经验是它自己生成经验球，不走原版那条路，
      * 掉落经验事件根本不会触发。
@@ -155,24 +164,36 @@ public final class MasteryExperienceHook {
      * @param npc    被杀的 NPC
      */
     public static void awardNpcKill(Player killer, LivingEntity npc) {
-        int experience = NpcExperienceReader.read(npc).orElse(0);
-        if (experience <= 0) {
-            experience = MasteryConfig.COMMON.npcFallbackMobExperience.get();
-        }
-        if (experience <= 0) {
+        var configured = NpcExperienceReader.read(npc);
+        double experience = configured.isPresent()
+                ? configured.getAsDouble()
+                : MasteryConfig.COMMON.npcFallbackMobExperience.get();
+
+        // 明确配置为 0 时保持 0；只有真正读不到时才会走上面的兜底值。
+        if (experience <= 0.0D) {
             return;
         }
-        award(killer, experience, experience);
+
+        double multiplier = MasteryConfig.COMMON.npcExperienceMultiplier.get();
+        double adjusted = experience * multiplier;
+        if (experience > 1.0D && multiplier > 0.0D) {
+            adjusted = Math.max(1.0D, adjusted);
+        }
+        if (adjusted <= 0.0D) {
+            return;
+        }
+        award(killer, adjusted, adjusted);
     }
 
-    private static void award(Player killer, int originalExperience, int droppedExperience) {
+    private static void award(Player killer, double originalExperience, double droppedExperience) {
         if (!(killer instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel level)) {
             return;
         }
         // 默认按原版数值算：恶意、金龟这类模组把掉落经验放大多少倍，专精经验都不跟着涨；
         // 怪最终不掉经验（掉落值 0，比如被取消了）时也不给
         boolean useOriginal = MasteryConfig.COMMON.xpFromOriginalMobExperience.get();
-        int dropped = Math.max(0, useOriginal && droppedExperience > 0 ? originalExperience : droppedExperience);
+        double dropped = Math.max(0.0D,
+                useOriginal && droppedExperience > 0.0D ? originalExperience : droppedExperience);
 
         double base = MasteryConfig.COMMON.xpPerKill.get()
                 + dropped * MasteryConfig.COMMON.xpPerMobExperience.get();
@@ -347,3 +368,5 @@ public final class MasteryExperienceHook {
     private record Pending(Player player, int originalExperience, int droppedExperience) {
     }
 }
+
+
