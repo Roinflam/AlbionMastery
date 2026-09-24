@@ -5,6 +5,7 @@ import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.config.SpecializationValues;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.mastery.spec.ComboTracker;
+import com.flameforge.albionmastery.mastery.spec.SpecKnockback;
 import com.flameforge.albionmastery.mastery.spec.SpecializationEffects;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
@@ -16,10 +17,27 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraftforge.event.entity.living.LivingExperienceDropEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.registries.ForgeRegistries;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+import net.minecraft.world.damagesource.DamageSource;
+import com.flameforge.albionmastery.mastery.spec.DamageAttribution;
+import mods.flammpfeil.slashblade.entity.EntityDrive;
+import mods.flammpfeil.slashblade.entity.EntityJudgementCut;
+import net.minecraftforge.event.TickEvent;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.phys.Vec3;
+import mods.flammpfeil.slashblade.util.NBTHelper;
+import mods.flammpfeil.slashblade.slasharts.SlashArts;
+import mods.flammpfeil.slashblade.registry.ComboStateRegistry;
+import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 
 /**
  * 拔刀剑战斗事件处理。
@@ -47,108 +65,27 @@ public final class SlashBladeCombatHandler {
     }
 
     /**
-     * 挥砍结算前：按专精等级放大伤害。
+     * 拔刀剑打出来的每一下伤害，统一在命中时按专精和特化缩放。
      *
-     * @param event 挥砍事件
-     */
-    @SubscribeEvent(priority = EventPriority.HIGH)
-    public static void onDoSlash(SlashBladeEvent.DoSlashEvent event) {
-        LivingEntity user = event.getUser();
-        if (!(user instanceof ServerPlayer player) || player.isSpectator()) {
-            return;
-        }
-        double damage = event.getDamage();
-        if (damage <= 0.0D) {
-            return;
-        }
-        ResolvedWeapon weapon = SlashBladeSupport.resolve(event.getBlade());
-        if (weapon == null) {
-            return;
-        }
-        MasteryData data = MasteryHelper.get(player);
-        if (data == null) {
-            return;
-        }
-
-        MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
-        MasteryHelper.Bonus bonus = MasteryHelper.computeBonus(data, weapon, snapshot);
-        // 这里是刀身直接砍出去的斩击，对应「刀身 / 幻影剑」两个流派里的「直接攻击」那一半
-        SpecializationValues spec = SpecializationEffects.forData(
-                data, weapon.typeKey(), snapshot);
-        // 斩击事件里拿不到具体被砍中的目标（一次挥砍可能扫到好几个），
-        // 所以只算和目标无关的那部分条件，比如「自己血越少打得越狠」
-        double multiplier = bonus.multiplier() * spec.damage() * spec.directDamage()
-                * SpecializationEffects.conditionalMultiplier(spec, player, null, null)
-                // 暴击按「一次挥砍」掷，扫到的所有目标同吃；连击要知道打中了谁，放在下面的命中事件里
-                * SpecializationEffects.critMultiplier(spec, player.getRandom());
-        if (Math.abs(multiplier - 1.0D) > 1.0E-6D) {
-            event.setDamage(damage * multiplier);
-        }
-    }
-
-    /**
-     * 幻影剑（召唤剑）命中时按特化调整伤害。
+     * <p>以前分三处算：挥砍事件（{@code DoSlashEvent}）里乘专精加成和与目标无关的部分，命中时补连击和看目标的部分，
+     * 召唤剑另算一处。可拔刀剑有好几条伤害路径根本不发挥砍事件——召唤剑、Drive、审判斩、连段里直接判定的几招——
+     * 它们要么拿不到专精加成，要么被当成召唤剑算。现在一律在命中时一处算全：
+     * <ul>
+     *     <li>召唤剑（幻影剑）：吃「幻影剑」那一项；</li>
+     *     <li>Drive、审判斩这些拔刀技专属的实体：吃「刀身」和「SA」两项；</li>
+     *     <li>挥砍本身和斩击特效：吃「刀身」，拔刀技的时间窗里再吃「SA」。</li>
+     * </ul>
+     * 专精加成、特化总伤害、看目标和看自己的条件、暴击、连击，所有来路都吃。
      *
-     * <p>为什么不用 {@code SummonedSwordOnHitEntityEvent}：那个事件只给了剑和目标，
-     * 没给伤害的读写口，而且它相对于伤害实际结算的先后顺序不好保证。
-     * 这里改用通用的 {@code LivingHurtEvent}，靠「直接伤害来源是不是召唤剑实体」来认，
-     * 认出来之后 {@code source.getEntity()} 就是放剑的那个玩家。
-     *
-     * <p>这条路径和 {@code MeleeCombatHandler} 不会打架：那边只处理
-     * 「直接伤害来源就是玩家本人」的情况，召唤剑走不到那里。
+     * <p>只认主手还是拔刀剑的时候：剑飞在半路玩家换成了枪，不能吃枪的特化。
+     * 挥砍只认原版「玩家攻击」类型的伤害，法术、荆棘不会被当成刀砍的。
      *
      * @param event 伤害事件
      */
     @SubscribeEvent(priority = EventPriority.HIGH)
-    public static void onSummonedSwordHurt(LivingHurtEvent event) {
-        if (!(event.getSource().getDirectEntity() instanceof EntityAbstractSummonedSword)) {
-            return;
-        }
-        if (!(event.getSource().getEntity() instanceof ServerPlayer player) || player.isSpectator()) {
-            return;
-        }
-        float amount = event.getAmount();
-        if (amount <= 0.0F) {
-            return;
-        }
-        MasteryData data = MasteryHelper.get(player);
-        if (data == null) {
-            return;
-        }
-
-        // 召唤剑是玩家放出去的，用他主手那把刀的类型来查流派
-        MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
-        ResolvedWeapon blade = WeaponResolver.resolve(
-                player.getMainHandItem(), snapshot.splitMeleeByPack);
-        if (blade == null) {
-            return;
-        }
-        SpecializationValues spec = SpecializationEffects.forData(
-                data, blade.typeKey(), snapshot);
-        double multiplier = spec.damage() * spec.summonedDamage()
-                * SpecializationEffects.conditionalMultiplier(spec, player,
-                        event.getEntity(), null);
-        if (Math.abs(multiplier - 1.0D) <= 1.0E-6D) {
-            return;
-        }
-        // 只乘特化倍率，不再叠专精加成：召唤剑的基础伤害是斩击算出来的，
-        // 斩击那一步在 DoSlashEvent 里已经吃过一次专精加成了，这里再乘一次就是双倍
-        event.setAmount((float) (amount * multiplier));
-    }
-
-    /**
-     * 拔刀剑的连击：连续砍中同一个目标，每一下多一层伤害。
-     *
-     * <p>为什么不放在 {@code DoSlashEvent} 里：那个事件是「挥出去之前」触发的，
-     * 不知道会砍中谁，而连击必须按目标记。所以挂在命中事件上，只认攻击者主手是拔刀剑、
-     * 且直接伤害来源是玩家本人或拔刀剑自己的实体（斩击特效、召唤剑等）的那些伤害。
-     * 这里<b>只</b>乘连击倍率，别的倍率在挥砍事件和召唤剑事件里已经乘过了，再乘就是双倍。
-     *
-     * @param event 伤害事件
-     */
-    @SubscribeEvent(priority = EventPriority.HIGH)
-    public static void onBladeHitCombo(LivingHurtEvent event) {
-        if (!(event.getSource().getEntity() instanceof ServerPlayer player) || player.isSpectator()) {
+    public static void onBladeHurt(LivingHurtEvent event) {
+        DamageSource source = event.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer player) || player.isSpectator()) {
             return;
         }
         float amount = event.getAmount();
@@ -159,7 +96,9 @@ public final class SlashBladeCombatHandler {
         if (target == player || !target.isAlive()) {
             return;
         }
-        if (!isBladeSource(player, event.getSource().getDirectEntity())) {
+        Entity direct = source.getDirectEntity();
+        boolean swing = DamageAttribution.isMeleeSwing(player, source);
+        if (!swing && (direct == null || direct == player || !SlashBladeSupport.isBladeEntity(direct))) {
             return;
         }
         MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
@@ -171,35 +110,169 @@ public final class SlashBladeCombatHandler {
         if (data == null) {
             return;
         }
+        MasteryHelper.Bonus bonus = MasteryHelper.computeBonus(data, blade, snapshot);
         SpecializationValues spec = SpecializationEffects.forData(data, blade, snapshot);
-        if (!spec.hasCombo()) {
-            return;
+
+        double part;
+        if (direct instanceof EntityDrive || direct instanceof EntityJudgementCut) {
+            // Drive 继承自召唤剑，但它是拔刀技打出去的剑气，不是幻影剑
+            part = spec.directDamage() * spec.saDamage();
+        } else if (direct instanceof EntityAbstractSummonedSword sword) {
+            // 拔刀技放出来的剑（附属包的几种拔刀技就是放一圈召唤剑）算拔刀技，平时的幻影剑算幻影剑
+            part = sword.getPersistentData().getBoolean(TAG_SLASH_ART) ? spec.saDamage() : spec.summonedDamage();
+        } else {
+            part = spec.directDamage() * (isInSlashArt(player) ? spec.saDamage() : 1.0D);
         }
-        double multiplier = ComboTracker.hit(player, target, spec);
+        double multiplier = bonus.multiplier() * spec.damage() * part
+                * SpecializationEffects.conditionalMultiplier(spec, player, target, null)
+                * SpecializationEffects.critMultiplier(spec, player.getRandom())
+                * ComboTracker.hit(player, target, spec);
         if (Math.abs(multiplier - 1.0D) > 1.0E-6D) {
             event.setAmount((float) (amount * multiplier));
+        }
+        // 拔刀剑的击退不走原版那套：出手前先把「这一下怎么击退」写进目标身上，它自己的击退监听读这个值，
+        // 多数招式写的是「不击退」并直接取消击退事件，我们挂在后面的监听根本收不到。
+        // 所以有这个值就直接缩放它（不击退的招式缩放了还是不击退，这是拔刀剑连段的设计），没有才走通用那套
+        CompoundTag persistent = target.getPersistentData();
+        if (persistent.contains(KNOCKBACK_FACTOR)) {
+            if (spec.knockback() != 1.0D) {
+                Vec3 factor = NBTHelper.getVector3d(persistent, KNOCKBACK_FACTOR);
+                NBTHelper.putVector3d(persistent, KNOCKBACK_FACTOR, factor.scale(spec.knockback()));
+            }
+        } else {
+            SpecKnockback.mark(target, player.getUUID(), spec.knockback());
+        }
+    }
+
+    /** 拔刀剑把「这一下怎么击退」存在目标身上的键。 */
+    private static final String KNOCKBACK_FACTOR = "knockback_factor";
+
+    /** 拔刀技时间窗里放出来的召唤剑身上打的标记。 */
+    private static final String TAG_SLASH_ART = "albionmastery_slash_art";
+
+    /**
+     * 拔刀技时间窗里生成的召唤剑打上「拔刀技」标记。
+     *
+     * @param event 实体加入世界事件
+     */
+    @SubscribeEvent
+    public static void onSummonedSwordSpawn(EntityJoinLevelEvent event) {
+        if (event.getLevel().isClientSide() || event.loadedFromDisk()
+                || !(event.getEntity() instanceof EntityAbstractSummonedSword sword)
+                || !(sword.getShooter() instanceof ServerPlayer player)) {
+            return;
+        }
+        if (isInSlashArt(player)) {
+            sword.getPersistentData().putBoolean(TAG_SLASH_ART, true);
+        }
+    }
+
+    /** 拔刀技开始后多少 tick 内的斩击算作拔刀技的一部分。 */
+    private static final int SLASH_ART_WINDOW_TICKS = 30;
+
+    /** 玩家 -&gt; 最近一次放拔刀技的世界 tick。只在服务端主线程读写。 */
+    private static final Map<UUID, Long> SLASH_ART_TICKS = new HashMap<>();
+
+    /**
+     * 记下玩家放了拔刀技（SA）。
+     *
+     * <p>拔刀剑的 SA 由好几段斩击组成，每一段都走 {@code DoSlashEvent}，但那个事件本身分不出
+     * 「这是普通连段还是 SA」。所以在 SA 发动时打个时间戳，之后一小段时间里的斩击都按 SA 算。
+     *
+     * @param event 拔刀技事件
+     */
+    @SubscribeEvent
+    public static void onSlashArt(SlashBladeEvent.PerformSlashArtEvent event) {
+        if (event.isCanceled() || !(event.getEntityLiving() instanceof ServerPlayer player)) {
+            return;
+        }
+        // 蓄力不够时拔刀剑也会发这个事件（类型是失败、没有招式）。不挡的话，短按一下右键，
+        // 之后一秒半里的普通斩击都能吃到拔刀技倍率，可以无限刷
+        if (event.getType() == SlashArts.ArtsType.Fail || event.getComboState() == null
+                || event.getComboState().equals(ComboStateRegistry.NONE.getId())) {
+            return;
+        }
+        SLASH_ART_TICKS.put(player.getUUID(), player.level().getGameTime());
+    }
+
+    /**
+     * @param player 玩家
+     * @return 现在是不是在拔刀技的时间窗里
+     */
+    private static boolean isInSlashArt(ServerPlayer player) {
+        Long start = SLASH_ART_TICKS.get(player.getUUID());
+        if (start == null) {
+            return false;
+        }
+        long elapsed = player.level().getGameTime() - start;
+        if (elapsed < 0L || elapsed > SLASH_ART_WINDOW_TICKS) {
+            SLASH_ART_TICKS.remove(player.getUUID());
+            return false;
+        }
+        return true;
+    }
+
+    /** 正在掉经验、即将给刀加刀魂的那个玩家；刀魂事件本身不带玩家。 */
+    private static ServerPlayer soulPlayer;
+
+    /**
+     * 刀魂是在生物掉经验时加的（拔刀剑的 {@code KillCounter} 监听掉经验事件，再发 {@code AddProudSoulEvent}），
+     * 而刀魂事件里只有刀、没有人。所以抢在它前面记下是谁杀的，这一 tick 结束时清掉。
+     *
+     * <p>以前是在同一个掉经验事件的 LOWEST 里清：拔刀剑的监听也是 LOWEST，而且注册得比我们晚，
+     * 同一优先级按注册先后执行，结果人总是在刀魂事件之前就被清掉，刀魂倍率从来没生效过。
+     *
+     * @param event 掉经验事件
+     */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onXpDropStart(LivingExperienceDropEvent event) {
+        soulPlayer = event.getAttackingPlayer() instanceof ServerPlayer player ? player : null;
+    }
+
+    /**
+     * @param event 服务端 tick 事件
+     */
+    @SubscribeEvent
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) {
+            soulPlayer = null;
         }
     }
 
     /**
-     * 判断一次伤害的直接来源算不算「拔刀剑打出来的」。
+     * 刀魂获取：按特化倍率缩放这次加到刀上的刀魂数。带小数时按概率取整，长期平均正好是倍率。
      *
-     * <p>玩家本人（普通挥砍）算；拔刀剑注册的实体（斩击特效、各种召唤剑）算；
-     * 附属包继承 {@code EntityAbstractSummonedSword} 的召唤剑也算。
-     * 手里拿着刀却用弓射出去的箭不算，否则弓箭也能叠刀的连击。
-     *
-     * @param player 攻击者
-     * @param direct 直接造成伤害的实体，可能为 null
-     * @return 算拔刀剑来源返回 true
+     * @param event 刀魂事件
      */
-    private static boolean isBladeSource(ServerPlayer player, Entity direct) {
-        if (direct == null) {
-            return false;
+    @SubscribeEvent
+    public static void onAddProudSoul(SlashBladeEvent.AddProudSoulEvent event) {
+        ServerPlayer player = soulPlayer;
+        if (player == null || player.getMainHandItem() != event.getBlade() || event.getNewCount() <= 0) {
+            return;
         }
-        if (direct == player || direct instanceof EntityAbstractSummonedSword) {
-            return true;
+        ResolvedWeapon blade = SlashBladeSupport.resolve(event.getBlade());
+        if (blade == null) {
+            return;
         }
-        ResourceLocation typeId = ForgeRegistries.ENTITY_TYPES.getKey(direct.getType());
-        return typeId != null && WeaponResolver.SLASHBLADE_MOD_ID.equals(typeId.getNamespace());
+        double factor = SpecializationEffects.forWeapon(player, blade).soulGain();
+        if (factor == 1.0D) {
+            return;
+        }
+        double scaled = event.getNewCount() * factor;
+        int whole = (int) Math.floor(scaled);
+        if (player.getRandom().nextDouble() < scaled - whole) {
+            whole++;
+        }
+        event.setNewCount(Math.max(0, whole));
+    }
+
+    /**
+     * 玩家下线时清掉拔刀技时间戳。
+     *
+     * @param event 下线事件
+     */
+    @SubscribeEvent
+    public static void onLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
+        SLASH_ART_TICKS.remove(event.getEntity().getUUID());
     }
 }

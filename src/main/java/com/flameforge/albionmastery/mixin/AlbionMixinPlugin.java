@@ -21,13 +21,22 @@ import java.util.Set;
  */
 public final class AlbionMixinPlugin implements IMixinConfigPlugin {
 
-    /** 目标类包前缀 -&gt; 对应模组 ID。目标落在这些包里时，模组没装就跳过。 */
+    /**
+     * 目标类包前缀 -&gt; 这个目标需要哪些模组都装着。第一项是前缀，后面全是模组 ID。
+     *
+     * <p>按顺序匹配，第一条前缀对上就按那条判断，所以更细的前缀要排在更粗的前面：
+     * 第三人称动作那两条既要对应模组，也要 Player Animator。
+     */
     private static final String[][] OPTIONAL_TARGETS = {
+            {"com.tacz.guns.compat.playeranimator.", "tacz", "playeranimator"},
+            {"me.xjqsh.lrtactical.compat.player_animator.", "lrtactical", "playeranimator"},
             {"com.tacz.guns.", "tacz"},
             {"me.xjqsh.lrtactical.", "lrtactical"},
             {"mods.flammpfeil.slashblade.", "slashblade"},
             {"io.redspace.ironsspellbooks.", "irons_spellbooks"},
             {"com.hollingsworth.arsnouveau.", "ars_nouveau"},
+            {"com.gametechbc.gtbcs_geomancy_plus.", "gtbcs_geomancy_plus"},
+            {"sweetmagic.", "sweetmagic"},
     };
 
     @Override
@@ -43,7 +52,12 @@ public final class AlbionMixinPlugin implements IMixinConfigPlugin {
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
         for (String[] entry : OPTIONAL_TARGETS) {
             if (targetClassName.startsWith(entry[0])) {
-                return isModPresent(entry[1]);
+                for (int i = 1; i < entry.length; i++) {
+                    if (!isModPresent(entry[i])) {
+                        return false;
+                    }
+                }
+                return true;
             }
         }
         return true;

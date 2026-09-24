@@ -170,11 +170,11 @@ public class MasteryData {
     }
 
     /**
-     * 某个类型某个槽位选的流派。
+     * 某个类型某个槽位选的特化。
      *
      * @param typeKey 类型键
      * @param slot    槽位，1 或 2
-     * @return 流派键；没选返回 null
+     * @return 特化键；没选返回 null
      */
     @Nullable
     public String getSpecialization(String typeKey, int slot) {
@@ -182,11 +182,11 @@ public class MasteryData {
     }
 
     /**
-     * 设置某个类型某个槽位的流派。
+     * 设置某个类型某个槽位的特化。
      *
      * @param typeKey 类型键
      * @param slot    槽位，1 或 2
-     * @param specKey 流派键；null 表示清掉
+     * @param specKey 特化键；null 表示清掉
      */
     public void setSpecialization(String typeKey, int slot, @Nullable String specKey) {
         String key = WeaponKeys.specSlotKey(typeKey, slot);
@@ -197,6 +197,52 @@ public class MasteryData {
         }
         // 特化影响一整类武器，改动很少但影响面大，直接要求一次全量同步
         this.needFullSync = true;
+    }
+
+    /**
+     * 这件武器有没有自己的独立配置（外圈）。
+     *
+     * <p>独立配置和类型的通用配置存在同一张表里，键分别是武器键和类型键（第二栏都带 {@code @2}），
+     * 两种键的格式不一样，不会撞。独立配置里「什么都不选」存的是制式特化的键而不是删掉，
+     * 所以两栏都空的独立配置也认得出来。
+     *
+     * @param weaponKey 武器键，可为 null
+     * @return 有返回 true
+     */
+    public boolean hasWeaponOverride(@Nullable String weaponKey) {
+        return weaponKey != null
+                && (this.specializations.containsKey(WeaponKeys.specSlotKey(weaponKey, 1))
+                || this.specializations.containsKey(WeaponKeys.specSlotKey(weaponKey, 2)));
+    }
+
+    /**
+     * 这件武器实际用哪一份配置：有独立配置就整套用它自己的（外圈），没有就用所属类型的通用配置（中圈）。
+     *
+     * <p>整套覆盖而不是按栏混用：两栏分别来自两处的话，很容易拼出同部位冲突，玩家也看不明白。
+     *
+     * @param typeKey   类型键
+     * @param weaponKey 武器键，可为 null
+     * @return 配置键：武器键或类型键
+     */
+    public String specConfigKey(String typeKey, @Nullable String weaponKey) {
+        return hasWeaponOverride(weaponKey) ? weaponKey : typeKey;
+    }
+
+    /**
+     * 删掉这件武器的独立配置，回到跟随类型的通用配置。
+     *
+     * @param weaponKey 武器键
+     * @return 原来有独立配置返回 true
+     */
+    public boolean clearWeaponOverride(String weaponKey) {
+        boolean removed = false;
+        for (int slot = 1; slot <= WeaponKeys.SPEC_SLOTS; slot++) {
+            removed |= this.specializations.remove(WeaponKeys.specSlotKey(weaponKey, slot)) != null;
+        }
+        if (removed) {
+            this.needFullSync = true;
+        }
+        return removed;
     }
 
     /**
@@ -277,7 +323,7 @@ public class MasteryData {
 
         long max = curve.totalXpToReach(curve.getMaxLevel());
         int oldLevel = record.level;
-        record.xp = Math.min(max, record.xp + amount);
+        record.xp = addCapped(record.xp, amount, max);
         record.level = curve.levelFor(record.xp);
         this.dirtyWeapons.add(weaponKey);
 
@@ -330,10 +376,31 @@ public class MasteryData {
         Entry entry = target.computeIfAbsent(key, k -> new Entry());
         long max = curve.totalXpToReach(curve.getMaxLevel());
         int oldLevel = entry.level;
-        entry.xp = Math.min(max, entry.xp + amount);
+        entry.xp = addCapped(entry.xp, amount, max);
         entry.level = curve.levelFor(entry.xp);
         dirty.add(key);
         return entry.level != oldLevel;
+    }
+
+    /**
+     * 加经验并夹到上限。
+     *
+     * <ul>
+     *     <li>饱和加法：曲线顶到 {@code Long.MAX_VALUE} 时，满级再加一点会溢出成负数，
+     *         负数的条目存盘时会被当成空条目丢掉，等于把进度清零。</li>
+     *     <li>已有经验比上限还高（服主把等级上限或曲线调低了）时原样保留，不往下截：
+     *         调低之后又调回去，进度还在。等级照样按新上限算。</li>
+     * </ul>
+     */
+    private static long addCapped(long current, long amount, long max) {
+        if (current >= max) {
+            return current;
+        }
+        long sum = current + amount;
+        if (sum < current) {
+            sum = Long.MAX_VALUE;
+        }
+        return Math.min(max, sum);
     }
 
     /**
@@ -463,7 +530,7 @@ public class MasteryData {
         this.typeLevelSum.clear();
         this.typeLevelSum.putAll(other.typeLevelSum);
         // 特化与学习点也要跟着走。漏了这两行的后果是：玩家一死，
-        // 辛苦练满才选上的流派会被打回「制式」，管理员发的学习点也归 1，
+        // 辛苦练满才选上的特化会被打回「制式」，管理员发的学习点也归 1，
         // 而且完全没有任何报错，只有玩家自己发现「我的加成怎么没了」
         this.specializations.clear();
         this.specializations.putAll(other.specializations);
@@ -599,9 +666,9 @@ public class MasteryData {
         this.typeLevelSum.clear();
         this.specializations.clear();
         // 老存档没有这个键，getDouble 返回 0，要显式回落到 1.0
-        this.studyMultiplier = root.contains("Study")
-                ? Math.max(0.0D, Math.min(100.0D, root.getDouble("Study")))
-                : 1.0D;
+        double study = root.contains("Study") ? root.getDouble("Study") : 1.0D;
+        // NaN 过不了 min / max 的夹取，得单独挡：坏掉的存档里读出 NaN 会让每次只发 1 点经验
+        this.studyMultiplier = Double.isNaN(study) ? 1.0D : Math.max(0.0D, Math.min(100.0D, study));
 
         ListTag weaponList = root.getList("Weapons", Tag.TAG_COMPOUND);
         for (int i = 0; i < weaponList.size(); i++) {
@@ -630,12 +697,13 @@ public class MasteryData {
             CompoundTag tag = specList.getCompound(i);
             String typeKey = tag.getString("S");
             String value = tag.getString("V");
-            // 两种脏数据都要挡：流派可能在版本更新里被删掉；
+            // 两种脏数据都要挡：特化可能在版本更新里被删掉；
             // 早期版本是按「来源」存的，那些键在这里对不上来源，一并丢弃
             // 第二槽的键带后缀，校验时先去掉
+            // 键可以是类型键（中圈的通用配置），也可以是武器键（外圈的独立配置）
             String baseKey = WeaponKeys.specBaseKey(typeKey);
             Specialization spec = Specialization.byKey(value);
-            if (spec != null && WeaponKeys.isValidTypeKey(baseKey)
+            if (spec != null && (WeaponKeys.isValidTypeKey(baseKey) || WeaponKeys.isValidWeaponKey(baseKey))
                     && spec.sourceId().equals(WeaponKeys.providerOf(baseKey))) {
                 this.specializations.put(typeKey, value);
             }

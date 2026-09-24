@@ -70,7 +70,8 @@ public class C2SRequestPlayerMasteryPacket {
             MasteryLeaderboard board = MasteryLeaderboard.get(server);
             long cooldownMs = MasteryConfig.COMMON.leaderboardRequestCooldownSeconds.get() * 1000L;
             if (!board.tryAcquireRequest(player.getUUID(), MasteryLeaderboard.REQUEST_PLAYER, cooldownMs)) {
-                // 限流丢掉就行：客户端自己也有同样的冷却，正常操作到不了这里
+                // 服务端的冷却可以配得比客户端长，被拒时得回一声，不然客户端会一直显示「读取中」直到超时
+                NetworkHandler.sendTo(player, S2CPlayerMasteryPacket.tooFast(this.target));
                 return;
             }
             CompoundTag data = board.dataOf(server, this.target);

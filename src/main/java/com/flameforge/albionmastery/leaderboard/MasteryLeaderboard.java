@@ -17,19 +17,22 @@ import net.minecraft.world.level.saveddata.SavedData;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Iterator;
 
 /**
- * 全服专精排行榜的数据仓库（服务端）。
+ * 全局专精排行榜的数据仓库（服务端）。
  *
  * <p>玩家的专精数据挂在玩家实体的 Capability 上，人一下线实体就没了，
- * 想排「全服」而不是「此刻在线的这几个」，就得在别的地方留一份副本。
+ * 想排「全局」而不是「此刻在线的这几个」，就得在别的地方留一份副本。
  * 这里用一份世界级的 {@link SavedData}（存在主世界的 {@code data/} 目录下），
  * 按 UUID 记每个人的：
  * <ul>
@@ -81,17 +84,23 @@ public final class MasteryLeaderboard extends SavedData {
     private final List<String> lastTopNames = new ArrayList<>(BROADCAST_TOP);
 
     /**
+     * 这一轮第一次入榜的人。他们挤进前三不广播：榜单刚开启时老玩家陆续上线，
+     * 会连着弹一串「某某成为了第一」，其实谁也没进步。不存盘，每次看完前三就清空。
+     */
+    private final Set<UUID> firstSeen = new HashSet<>();
+
+    /**
      * 新建一份空榜单。
      */
     public MasteryLeaderboard() {
     }
 
     /**
-     * 取当前服务器的榜单，没有就建一份。
+     * 取当前服务端的榜单，没有就建一份。
      *
      * <p>挂在主世界上：主世界总是最先加载、最后卸载，放这里最稳。
      *
-     * @param server 服务器
+     * @param server 服务端
      * @return 榜单
      */
     public static MasteryLeaderboard get(MinecraftServer server) {
@@ -114,6 +123,18 @@ public final class MasteryLeaderboard extends SavedData {
         if (server != null) {
             announceTopChanges(server);
         }
+    }
+
+    /**
+     * 记一遍这名玩家，但不广播前三易主：管理员用指令或罗盘给自己满级测试时，
+     * 不该向全服宣布「成为了第一」。前三的基准同时换成新的，之后也不会补播。
+     *
+     * @param player 在线玩家
+     */
+    public void updateQuietly(ServerPlayer player) {
+        record(player);
+        rememberTop(topRows(MasteryConfig.COMMON.leaderboardBroadcastSort.get(), BROADCAST_TOP));
+        this.firstSeen.clear();
     }
 
     /**
@@ -143,6 +164,9 @@ public final class MasteryLeaderboard extends SavedData {
         Entry previous = this.entries.get(uuid);
         Entry entry = new Entry(name, now, data.serializeNBT(), row);
         entry.rollBaselines(previous);
+        if (previous == null) {
+            this.firstSeen.add(uuid);
+        }
         this.entries.put(uuid, entry);
         setDirty();
     }
@@ -161,9 +185,10 @@ public final class MasteryLeaderboard extends SavedData {
      *
      * <p>已经下线的会在登出事件里单独记过，这里直接跳过。
      *
-     * @param server 服务器
+     * @param server 服务端
      */
     public void flushChanged(MinecraftServer server) {
+        pruneExpired(server);
         if (this.pending.isEmpty()) {
             return;
         }
@@ -177,6 +202,37 @@ public final class MasteryLeaderboard extends SavedData {
         }
         this.pending.clear();
         announceTopChanges(server);
+    }
+
+    /**
+     * 清掉太久没上线的条目。
+     *
+     * <p>榜单把每个玩家的整份专精数据都存在主世界的存档里，只增不减——开服一年之后，
+     * 几千个只来过一次的玩家还各占一份。保留期按配置来，在线的人永远不清。
+     *
+     * @param server 服务端
+     */
+    private void pruneExpired(MinecraftServer server) {
+        int days = MasteryConfig.COMMON.leaderboardRetentionDays.get();
+        if (days <= 0 || this.entries.isEmpty()) {
+            return;
+        }
+        long cutoff = System.currentTimeMillis() - days * 24L * 60L * 60L * 1000L;
+        PlayerList players = server.getPlayerList();
+        int removed = 0;
+        Iterator<Map.Entry<UUID, Entry>> iterator = this.entries.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<UUID, Entry> mapEntry = iterator.next();
+            if (mapEntry.getValue().updatedAt >= cutoff || players.getPlayer(mapEntry.getKey()) != null) {
+                continue;
+            }
+            iterator.remove();
+            removed++;
+        }
+        if (removed > 0) {
+            setDirty();
+            AlbionMastery.LOGGER.info("排行榜清理了 {} 条超过 {} 天没更新的记录", removed, days);
+        }
     }
 
     /**
@@ -194,7 +250,8 @@ public final class MasteryLeaderboard extends SavedData {
      * 配置（等级上限、经验曲线）变了之后，把所有条目的概况按新曲线重算一遍。
      *
      * <p>要把每个人的 NBT 都反序列化一次，几百人的话是几十毫秒的事，只在配置重载时跑。
-     * 基线不动：等级上限一变，「这段时间涨了多少」本来就说不清了，负数会被夹成 0，下一期自然就对了。
+     * 基线不动：等级上限一变，等级维度的「这段时间涨了多少」本来就说不清了，负数会被夹成 0，
+     * 下一期自然就对了。经验是原始值，不受曲线影响，改了配置也照样准。
      */
     public void recomputeAll() {
         MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
@@ -220,13 +277,14 @@ public final class MasteryLeaderboard extends SavedData {
      * <p>只广播「往上爬」的人：A 从第三冲到第一，第二名 B、第三名 C 都是被顶下去的，
      * 一条「A 替代 B 成为了第一」就够了，不用再来两条「B 替代 C」「C 替代 D」。
      *
-     * @param server 服务器
+     * @param server 服务端
      */
     private void announceTopChanges(MinecraftServer server) {
         LeaderboardSort sort = MasteryConfig.COMMON.leaderboardBroadcastSort.get();
         List<LeaderboardRow> top = topRows(sort, BROADCAST_TOP);
         if (!MasteryConfig.COMMON.leaderboardBroadcastTopChanges.get()) {
             rememberTop(top);
+            this.firstSeen.clear();
             return;
         }
         for (int i = 0; i < top.size(); i++) {
@@ -236,20 +294,21 @@ public final class MasteryLeaderboard extends SavedData {
                 continue;
             }
             int oldIndex = this.lastTop.indexOf(newcomer.uuid());
-            // 原来就在更靠前的位置，说明是被顶下来的，不算「成为」
-            if (oldIndex != -1 && oldIndex < i) {
+            // 原来就在更靠前的位置，说明是被顶下来的，不算「成为」；第一次入榜的也不算
+            if (oldIndex != -1 && oldIndex < i || this.firstSeen.contains(newcomer.uuid())) {
                 continue;
             }
             String displaced = before == null ? null : this.lastTopNames.get(i);
             broadcast(server, newcomer, displaced, i + 1);
         }
         rememberTop(top);
+        this.firstSeen.clear();
     }
 
     /**
      * 把「xxx 成为了第几名」发给所有在线玩家，客户端各自弹横幅：本人一句，其他人另一句。
      *
-     * @param server    服务器
+     * @param server    服务端
      * @param newcomer  新上位的人
      * @param displaced 被挤下去的人的名字，没有则为 null
      * @param rank      名次，从 1 起
@@ -306,21 +365,28 @@ public final class MasteryLeaderboard extends SavedData {
         return uuid + "|" + kind;
     }
 
+    /** UUID 至少输几位才按 UUID 开头去匹配：太短的话随便几个字母就能撞上一堆人。 */
+    private static final int UUID_SEARCH_MIN = 8;
+
     /**
      * 按某种范围、某种排序取前若干名，并顺带告诉请求者自己排第几。
      *
      * <p>请求者自己不在前几名里也要能看到名次，所以整张榜先排完再截取。
      * 日 / 周 / 月榜只收这段时间有进展的人，一屏 0 没意义。
      *
-     * @param server 服务器，用来判断谁在线
+     * <p>带了搜索词就在整张排好的榜里筛：名字包含它（不分大小写），或者 UUID 以它开头。
+     * 名次照旧按整张榜算，搜出来的是第 237 名就显示 237，不会因为筛过就变成第 1。
+     *
+     * @param server 服务端，用来判断谁在线
      * @param period 时间范围
      * @param sort   排序方式
      * @param limit  最多返回多少行
      * @param self   请求者的 UUID
+     * @param search 搜索词，空串表示不筛
      * @return 查询结果
      */
     public Result query(MinecraftServer server, LeaderboardPeriod period, LeaderboardSort sort,
-                        int limit, UUID self) {
+                        int limit, UUID self, String search) {
         List<LeaderboardRow> all = allRows(server, period);
         all.sort(sort.comparator());
 
@@ -333,14 +399,50 @@ public final class MasteryLeaderboard extends SavedData {
                 break;
             }
         }
-        List<LeaderboardRow> top = all.size() > limit ? new ArrayList<>(all.subList(0, limit)) : all;
-        return new Result(period, sort, top, selfRank, selfRow, all.size());
+        String query = search == null ? "" : search.trim();
+        if (query.isEmpty()) {
+            List<LeaderboardRow> top = all.size() > limit ? new ArrayList<>(all.subList(0, limit)) : all;
+            return new Result(period, sort, top, null, selfRank, selfRow, all.size(), "", all.size());
+        }
+
+        String needle = query.toLowerCase(Locale.ROOT);
+        // UUID 允许带或不带横线粘进来，统一去掉横线再比
+        String hexNeedle = needle.replace("-", "");
+        boolean byUuid = hexNeedle.length() >= UUID_SEARCH_MIN && isHex(hexNeedle);
+        List<LeaderboardRow> hits = new ArrayList<>();
+        int[] ranks = new int[Math.min(limit, all.size())];
+        int matched = 0;
+        for (int i = 0; i < all.size(); i++) {
+            LeaderboardRow row = all.get(i);
+            boolean hit = row.name().toLowerCase(Locale.ROOT).contains(needle)
+                    || byUuid && row.uuid().toString().replace("-", "").startsWith(hexNeedle);
+            if (!hit) {
+                continue;
+            }
+            if (hits.size() < ranks.length) {
+                ranks[hits.size()] = i + 1;
+                hits.add(row);
+            }
+            matched++;
+        }
+        return new Result(period, sort, hits, Arrays.copyOf(ranks, hits.size()), selfRank, selfRow,
+                all.size(), query, matched);
+    }
+
+    private static boolean isHex(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (!(c >= '0' && c <= '9' || c >= 'a' && c <= 'f')) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
      * 某种范围下的全部行（未排序）。
      *
-     * @param server 服务器，传 null 则所有人都按离线算
+     * @param server 服务端，传 null 则所有人都按离线算
      * @param period 时间范围
      * @return 行列表，可以随意改
      */
@@ -378,7 +480,7 @@ public final class MasteryLeaderboard extends SavedData {
      *
      * <p>人在线就直接从他实体上现拿，保证看到的是最新的；不在线就用榜单里存的副本。
      *
-     * @param server 服务器
+     * @param server 服务端
      * @param uuid   玩家 UUID
      * @return 专精数据的 NBT（独立副本，可以随意改）；从没记录过这个人时返回 null
      */
@@ -398,7 +500,7 @@ public final class MasteryLeaderboard extends SavedData {
     /**
      * 取某名玩家记录在案的名字。
      *
-     * @param server 服务器
+     * @param server 服务端
      * @param uuid   玩家 UUID
      * @return 名字；没记录时返回 null
      */
@@ -434,10 +536,13 @@ public final class MasteryLeaderboard extends SavedData {
         int maxLevel = snapshot.maxLevel;
         int maxed = 0;
         int levelSum = 0;
+        long xpSum = 0L;
         int unlocked = 0;
         int topLevel = 0;
         long topXp = 0L;
         for (MasteryData.WeaponRecord record : data.getWeaponsView().values()) {
+            // 经验不看等级：刚开始练的武器还是 0 级，但它那几百点经验也是今天刷出来的
+            xpSum += record.xp;
             if (record.level > 0) {
                 unlocked++;
                 levelSum += record.level;
@@ -470,7 +575,7 @@ public final class MasteryLeaderboard extends SavedData {
                 specCount++;
             }
         }
-        return new LeaderboardRow(uuid, name, false, updatedAt, maxed, levelSum, unlocked,
+        return new LeaderboardRow(uuid, name, false, updatedAt, maxed, levelSum, xpSum, unlocked,
                 topLevel, topXp, specCount, typeMaxed, overallMaxed);
     }
 
@@ -567,19 +672,29 @@ public final class MasteryLeaderboard extends SavedData {
      *
      * @param period   时间范围
      * @param sort     排序方式
-     * @param rows     前若干名
+     * @param rows     前若干名；搜索时是匹配到的人里名次最高的若干个
+     * @param ranks    rows 里每一行在整张榜上的名次；不搜索时为 null，名次就是下标 + 1
      * @param selfRank 请求者自己的名次，从 1 起；不在榜上为 0
      * @param selfRow  请求者自己那一行，不在榜上为 null
      * @param total    榜上总人数
+     * @param query    这次搜的词，没搜为空串
+     * @param matched  搜到多少人（可能比 rows 多）；不搜索时等于 total
      */
     public record Result(LeaderboardPeriod period, LeaderboardSort sort, List<LeaderboardRow> rows,
-                         int selfRank, @Nullable LeaderboardRow selfRow, int total) {
+                         @Nullable int[] ranks, int selfRank, @Nullable LeaderboardRow selfRow, int total,
+                         String query, int matched) {
     }
 
     /**
-     * 一条基线：某一期开始时这个人的三个累计值。
+     * 一条基线：某一期开始时这个人的几个累计值。
      */
     private static final class Baseline {
+
+        /**
+         * 这条基线是加经验线之前存下的，不知道那时他有多少经验。
+         * 这一期的经验增量按 0 算——直接拿总经验当增量的话，升级当天全服的日榜都是各自的全部身家。
+         */
+        static final long XP_UNKNOWN = -1L;
 
         /** 期号，和 {@link LeaderboardPeriod#currentKey()} 对得上才有效。 */
         final String periodKey;
@@ -587,15 +702,29 @@ public final class MasteryLeaderboard extends SavedData {
         final int levelSum;
         final int unlocked;
 
-        Baseline(String periodKey, int maxed, int levelSum, int unlocked) {
+        /** 所有武器的经验总和，或 {@link #XP_UNKNOWN}。 */
+        final long xpSum;
+
+        Baseline(String periodKey, int maxed, int levelSum, int unlocked, long xpSum) {
             this.periodKey = periodKey;
             this.maxed = maxed;
             this.levelSum = levelSum;
             this.unlocked = unlocked;
+            this.xpSum = xpSum;
         }
 
         static Baseline of(String periodKey, LeaderboardRow row) {
-            return new Baseline(periodKey, row.maxed(), row.levelSum(), row.unlocked());
+            return new Baseline(periodKey, row.maxed(), row.levelSum(), row.unlocked(), row.xpSum());
+        }
+
+        /**
+         * 等级那几项照旧，只把经验线换成给定值。
+         *
+         * @param newXpSum 新的经验线
+         * @return 新的基线
+         */
+        Baseline withXp(long newXpSum) {
+            return new Baseline(this.periodKey, this.maxed, this.levelSum, this.unlocked, newXpSum);
         }
 
         CompoundTag write() {
@@ -604,12 +733,20 @@ public final class MasteryLeaderboard extends SavedData {
             tag.putInt("M", this.maxed);
             tag.putInt("L", this.levelSum);
             tag.putInt("U", this.unlocked);
+            // 经验线还没补上的（老存档，本人这一期还没被记过一次）就不写这个键，
+            // 写出去再读回来会变成「这一期开头他有 0 点经验」，一整期的经验增量就成了他的全部身家
+            if (this.xpSum != XP_UNKNOWN) {
+                tag.putLong("X", this.xpSum);
+            }
             return tag;
         }
 
         static Baseline read(CompoundTag tag) {
+            // 没有 X 的是加经验线之前存下的基线；负数同理，当成不知道
+            long raw = tag.contains("X") ? tag.getLong("X") : XP_UNKNOWN;
             return new Baseline(tag.getString("K"), Math.max(0, tag.getInt("M")),
-                    Math.max(0, tag.getInt("L")), Math.max(0, tag.getInt("U")));
+                    Math.max(0, tag.getInt("L")), Math.max(0, tag.getInt("U")),
+                    raw < 0L ? XP_UNKNOWN : raw);
         }
     }
 
@@ -657,11 +794,17 @@ public final class MasteryLeaderboard extends SavedData {
                 String key = period.currentKey();
                 Baseline old = previous == null ? null : previous.baselines.get(period);
                 if (old != null && old.periodKey.equals(key)) {
-                    this.baselines.put(period, old);
+                    // 加经验线之前存下的基线不知道这一期开头他有多少经验，只能从这一刻起算。
+                    // 否则这条基线所属的整个期间（月榜能有小半个月）经验增量一直是 0，榜是空的。
+                    // 等级那几项照旧从期初算，那些数还在
+                    this.baselines.put(period, old.xpSum == Baseline.XP_UNKNOWN
+                            ? old.withXp(this.row.xpSum()) : old);
                 } else if (previous != null) {
                     this.baselines.put(period, Baseline.of(key, previous.row));
                 } else {
-                    this.baselines.put(period, new Baseline(key, 0, 0, 0));
+                    // 第一次入榜取当前值：榜单刚开启（或存档丢了）时老玩家的全部历史不该算成「今天涨的」。
+                    // 真正的新人第一次入榜时只有刚练出来的一点点，少算这一点无所谓
+                    this.baselines.put(period, Baseline.of(key, this.row));
                 }
             }
         }
@@ -686,11 +829,14 @@ public final class MasteryLeaderboard extends SavedData {
             int maxed = Math.max(0, this.row.maxed() - base.maxed);
             int levelSum = Math.max(0, this.row.levelSum() - base.levelSum);
             int unlocked = Math.max(0, this.row.unlocked() - base.unlocked);
-            if (maxed == 0 && levelSum == 0 && unlocked == 0) {
+            long xpSum = base.xpSum == Baseline.XP_UNKNOWN
+                    ? 0L : Math.max(0L, this.row.xpSum() - base.xpSum);
+            // 刷了经验没升级也算有进展，这正是增量榜要看经验的原因
+            if (maxed == 0 && levelSum == 0 && unlocked == 0 && xpSum == 0L) {
                 return null;
             }
             return new LeaderboardRow(this.row.uuid(), this.row.name(), false, this.row.updatedAt(),
-                    maxed, levelSum, unlocked, this.row.topLevel(), this.row.topXp(),
+                    maxed, levelSum, xpSum, unlocked, this.row.topLevel(), this.row.topXp(),
                     this.row.specCount(), this.row.typeMaxed(), this.row.overallMaxed());
         }
 

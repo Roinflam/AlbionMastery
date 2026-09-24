@@ -12,11 +12,11 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Slice;
 
 /**
- * 子弹初速按流派缩放。
+ * 子弹初速按特化缩放。
  *
  * <p>补的是什么：TACZ 开枪（{@code ModernKineticGunScriptAPI.shootOnce}）时，子弹速度是从配件缓存里按
  * {@code GunProperties.AMMO_SPEED} 这个属性取出来的（配件加成已经乘进去了），之后再乘全局配置。
- * 这里在「取 AMMO_SPEED」那一次调用的返回值上再乘流派倍率。切片从读取 {@code AMMO_SPEED} 常量开始，
+ * 这里在「取 AMMO_SPEED」那一次调用的返回值上再乘特化倍率。切片从读取 {@code AMMO_SPEED} 常量开始，
  * 之后第一次 {@code getCache(GunProperty)} 就是它，别的属性（精度之类）不会误伤。
  *
  * <p>两端都会开枪（服务端真子弹、客户端预测子弹），两端各按各的数据算，倍率一样。

@@ -5,6 +5,7 @@ import com.flameforge.albionmastery.config.SpecializationValues;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.mastery.spec.SpecializationEffects;
 import com.flameforge.albionmastery.weapon.ResolvedWeapon;
+import com.flameforge.albionmastery.weapon.WeaponCatalog;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import io.redspace.ironsspellbooks.api.magic.MagicData;
 import io.redspace.ironsspellbooks.api.magic.SpellSelectionManager;
@@ -16,6 +17,7 @@ import io.redspace.ironsspellbooks.api.spells.SchoolType;
 import io.redspace.ironsspellbooks.api.spells.SpellSlot;
 import io.redspace.ironsspellbooks.api.util.Utils;
 import io.redspace.ironsspellbooks.damage.SpellDamageSource;
+import io.redspace.ironsspellbooks.registries.ItemRegistry;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
@@ -132,7 +134,7 @@ public final class IronsSpellsSupport {
     }
 
     /**
-     * 玩家对某个法术的「法术强度」倍率：专精加成 × 流派的强度倍率。
+     * 玩家对某个法术的「法术强度」倍率：专精加成 × 特化的强度倍率。
      *
      * <p>铁魔法几乎所有法术的数值都从 {@code getSpellPower} 长出来：伤害是它，治疗量是它，
      * 缠绕 / 减速这类控制的持续时间是「它 × 20 tick」。所以专精加成乘在法术强度上，
@@ -180,7 +182,8 @@ public final class IronsSpellsSupport {
         if (bonus == null || bonus.total() <= 0.0D) {
             return 1.0D;
         }
-        double cap = MasteryConfig.COMMON.spellMasteryReductionCap.get();
+        // 按端取：客户端读服务端下发的快照，不读自己那份 COMMON 配置
+        double cap = SpecializationEffects.snapshotFor(player).spellMasteryReductionCap;
         double reduction = Math.min(cap, bonus.total() * share);
         return Math.max(0.05D, 1.0D - reduction);
     }
@@ -313,5 +316,71 @@ public final class IronsSpellsSupport {
             return null;
         }
         return ResourceLocation.tryParse(type.substring(0, dot) + ":" + type.substring(dot + 1));
+    }
+
+    /**
+     * 把全部启用的法术列进清单，每个法术对应一张满级卷轴。
+     *
+     * @param out 输出
+     */
+    public static void catalog(List<WeaponCatalog.Entry> out) {
+        for (AbstractSpell spell : SpellRegistry.REGISTRY.get()) {
+            if (spell == null || spell == SpellRegistry.none() || !spell.isEnabled()) {
+                continue;
+            }
+            ResolvedWeapon weapon = ofSpell(spell);
+            if (weapon == null) {
+                continue;
+            }
+            out.add(new WeaponCatalog.Entry(weapon, () -> {
+                ItemStack scroll = new ItemStack(ItemRegistry.SCROLL.get());
+                ISpellContainer.createScrollContainer(spell, spell.getMaxLevel(), scroll);
+                return List.of(scroll);
+            }));
+        }
+    }
+
+    /**
+     * 某名玩家放这个法术实际要花多少法力：特化倍率 × 专精折扣，和施法时真正扣的一致。
+     *
+     * <p>「够不够蓝」的判断和显示都要用这个值：以前它们按原价算，省蓝的特化在「够付折后价、不够付原价」时
+     * 放不出来，加价的特化在「够原价、不够加价」时照样能放，多出来的代价就被免掉了。
+     *
+     * @param player 玩家
+     * @param spell  法术
+     * @param base   原价
+     * @return 实际价格，原价大于 0 时至少为 1
+     */
+    public static int effectiveManaCost(@Nullable Player player, @Nullable AbstractSpell spell, int base) {
+        if (player == null || spell == null || base <= 0) {
+            return base;
+        }
+        ResolvedWeapon weapon = ofSpell(spell);
+        double factor = SpecializationEffects.forWeapon(player, weapon).manaCost()
+                * masteryReductionFactor(player, weapon,
+                        SpecializationEffects.snapshotFor(player).spellMasteryManaShare);
+        return factor == 1.0D ? base : Math.max(1, (int) Math.round(base * factor));
+    }
+
+    /**
+     * 某名玩家放这个法术之后实际要等多久：特化倍率 × 专精折扣，和真正挂上去的冷却一致。
+     *
+     * <p>真正挂冷却时走的是 {@code SpellCooldownAddedEvent}（见 {@code SpellCombatHandler}），
+     * 而提示和法术轮盘上写的秒数是另算的，不经过那个事件——不补这一条，界面上的数字就和实际等的时间对不上。
+     *
+     * @param player 玩家
+     * @param spell  法术
+     * @param base   原始冷却（tick）
+     * @return 实际冷却，原值大于 0 时至少为 1
+     */
+    public static int effectiveCooldown(@Nullable Player player, @Nullable AbstractSpell spell, int base) {
+        if (player == null || spell == null || base <= 0) {
+            return base;
+        }
+        ResolvedWeapon weapon = ofSpell(spell);
+        double factor = SpecializationEffects.forWeapon(player, weapon).spellCooldown()
+                * masteryReductionFactor(player, weapon,
+                        SpecializationEffects.snapshotFor(player).spellMasteryCooldownShare);
+        return factor == 1.0D ? base : Math.max(1, (int) Math.round(base * factor));
     }
 }

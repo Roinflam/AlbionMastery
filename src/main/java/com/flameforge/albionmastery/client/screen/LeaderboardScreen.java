@@ -10,9 +10,11 @@ import com.flameforge.albionmastery.network.NetworkHandler;
 import com.flameforge.albionmastery.network.S2CLeaderboardPacket;
 import com.flameforge.albionmastery.client.PlayerSkins;
 import com.mojang.blaze3d.vertex.BufferBuilder;
+import net.minecraft.ChatFormatting;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
@@ -25,14 +27,18 @@ import org.lwjgl.glfw.GLFW;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
- * 全服专精排行榜界面。
+ * 全局专精排行榜界面。
  *
  * <p>从专精界面左下角进来。上面是时间范围（总榜 / 日 / 周 / 月，只有专用服务端才有这排）
- * 和排序方式两排按钮，中间是榜单，底下是自己的名次。
+ * 和排序方式两排按钮，中间是榜单，底下是自己的名次，顶栏右端是搜索框。
  * 点任意一行就向服务端要那个人的整份专精数据，回来后用同一个 {@link MasteryScreen} 画他的罗盘（只读）。
+ *
+ * <p>搜索交给服务端做：在整张榜里按名字或 UUID 筛，名次照整张榜算，
+ * 所以前一百名以外的人也能搜到，搜出来显示的还是他的真实名次。
  *
  * <p>数据全部来自服务端：这个界面自己不排、不算，只负责把收到的东西画出来。
  * 界面开着的时候才处理回包，关了之后晚到的包一律丢掉。
@@ -104,6 +110,19 @@ public class LeaderboardScreen extends Screen {
     /** 前几名算「前十」，有徽章。 */
     private static final int TOP_BADGE_RANK = 10;
 
+    /** 搜索框的宽度上下限，窗口越宽框越宽。 */
+    private static final int SEARCH_MIN_WIDTH = 90;
+    private static final int SEARCH_MAX_WIDTH = 150;
+
+    /** 搜索框外框的高度，放在顶栏里上下居中。 */
+    private static final int SEARCH_HEIGHT = 14;
+
+    /** 右端清空按钮「×」占的宽度。 */
+    private static final int SEARCH_CLEAR_WIDTH = 12;
+
+    /** 停手多久自动搜（毫秒）。服务端对要榜单有限流，边打边搜会被挡。 */
+    private static final long SEARCH_DEBOUNCE_MS = 600L;
+
     /** 上一层界面（通常是自己的专精界面），ESC 回到它。 */
     @Nullable
     private final Screen parent;
@@ -132,6 +151,41 @@ public class LeaderboardScreen extends Screen {
 
     /** 榜上总人数。 */
     private int total;
+
+    /** 每一行在整张榜上的名次；看整张榜时为 null，名次就是下标 + 1。 */
+    @Nullable
+    private int[] ranks;
+
+    /** 当前显示的这批行是按什么搜出来的，空串表示整张榜。 */
+    private String activeQuery = "";
+
+    /** 搜到多少人，可能比收到的行多。 */
+    private int matched;
+
+    /** 顶栏右端的搜索框。 */
+    @Nullable
+    private EditBox searchBox;
+
+    /** 最近一次发出去的搜索词，自动搜索靠它判断「这个已经搜过了」。 */
+    private String sentQuery = "";
+
+    /** 自动搜索的触发时刻，0 表示没有待搜的。 */
+    private long searchDueMs;
+
+    /** 延后补发榜单请求的时刻，0 表示没有。冷却中点的按钮、被服务端限流的请求都靠它补上。 */
+    private long retryDueMs;
+
+    /** 被服务端限流后的补发间隔，每被拒一次翻倍，收到正常回包就复原。 */
+    private long retryDelayMs = CLIENT_COOLDOWN_MS;
+
+    /**
+     * 当前显示的这批行是按哪个时间范围、哪种排序算的。
+     *
+     * <p>和按钮上选中的 {@link #period} / {@link #sort} 分开存：点了按钮到回包之间，
+     * 行还是旧的那批，右侧大数字、徽章文字都得跟着行走，不能跟着按钮走。
+     */
+    private LeaderboardPeriod shownPeriod = LeaderboardPeriod.ALL;
+    private LeaderboardSort shownSort = LeaderboardSort.MAXED;
 
     /** 界面状态。 */
     private State state = State.LOADING;
@@ -176,6 +230,24 @@ public class LeaderboardScreen extends Screen {
 
     @Override
     protected void init() {
+        // 窗口缩放会重新 init，框里的字和焦点都得接着用
+        String previous = this.searchBox == null ? "" : this.searchBox.getValue();
+        boolean wasFocused = this.searchBox != null && this.searchBox.isFocused();
+        this.searchBox = new EditBox(this.font, searchLeft() + 5, searchTop() + 3,
+                searchWidth() - 5 - SEARCH_CLEAR_WIDTH, SEARCH_HEIGHT - 6,
+                Component.translatable("gui.albionmastery.leaderboard.search"));
+        this.searchBox.setHint(Component.translatable("gui.albionmastery.leaderboard.search")
+                .withStyle(ChatFormatting.DARK_GRAY));
+        this.searchBox.setBordered(false);
+        this.searchBox.setTextColor(MasteryPalette.TEXT & 0xFFFFFF);
+        this.searchBox.setMaxLength(C2SRequestLeaderboardPacket.MAX_QUERY);
+        this.searchBox.setValue(previous);
+        // 先填旧值再挂回调，不然缩放一下窗口就会被当成「改了搜索词」
+        this.searchBox.setResponder(text -> this.searchDueMs = Util.getMillis() + SEARCH_DEBOUNCE_MS);
+        addRenderableWidget(this.searchBox);
+        if (wasFocused) {
+            setFocused(this.searchBox);
+        }
         if (!this.requestedOnce) {
             this.requestedOnce = true;
             // 第一次不受客户端冷却限制，打开就该立刻去要
@@ -212,15 +284,56 @@ public class LeaderboardScreen extends Screen {
     private void requestList(LeaderboardPeriod wantedPeriod, LeaderboardSort wantedSort) {
         long now = Util.getMillis();
         if (now - this.lastListRequestMs < CLIENT_COOLDOWN_MS) {
-            showNotice(Component.translatable("gui.albionmastery.leaderboard.too_fast"));
+            // 冷却中不丢请求：记下来，冷却一过自动补发。补发时取那一刻选中的范围、排序和搜索词，
+            // 所以连点几个按钮只会发最后那一次
+            this.retryDueMs = Math.max(this.retryDueMs, this.lastListRequestMs + CLIENT_COOLDOWN_MS);
             return;
         }
+        this.retryDueMs = 0L;
         this.lastListRequestMs = now;
         this.waitingSinceMs = now;
         if (this.rows.isEmpty()) {
             this.state = State.LOADING;
         }
-        NetworkHandler.sendToServer(new C2SRequestLeaderboardPacket(wantedPeriod, wantedSort));
+        // 切榜、刷新也按框里当前的词来：搜着「abc」切到周榜，看到的还是周榜里的「abc」
+        this.sentQuery = currentQuery();
+        this.searchDueMs = 0L;
+        NetworkHandler.sendToServer(new C2SRequestLeaderboardPacket(wantedPeriod, wantedSort, this.sentQuery));
+    }
+
+    /**
+     * @return 搜索框里现在的词，去掉首尾空白
+     */
+    private String currentQuery() {
+        return this.searchBox == null ? this.sentQuery : this.searchBox.getValue().trim();
+    }
+
+    /**
+     * 马上按框里的词搜。还在冷却就排到冷却结束自动发，不弹「点太快了」。
+     */
+    private void submitSearch() {
+        this.searchDueMs = Util.getMillis();
+        tickSearch(this.searchDueMs);
+    }
+
+    /**
+     * 到点了就把待搜的词发出去。
+     *
+     * @param now 当前时刻
+     */
+    private void tickSearch(long now) {
+        if (this.searchDueMs == 0L || now < this.searchDueMs) {
+            return;
+        }
+        if (currentQuery().equals(this.sentQuery)) {
+            this.searchDueMs = 0L;
+            return;
+        }
+        if (now - this.lastListRequestMs < CLIENT_COOLDOWN_MS) {
+            return;
+        }
+        this.scroll = 0.0D;
+        requestList(this.period, this.sort);
     }
 
     /**
@@ -248,24 +361,36 @@ public class LeaderboardScreen extends Screen {
      * @param hasPeriods 服务端有没有日 / 周 / 月榜
      * @param newPeriod  服务端按哪个时间范围算的
      * @param newSort   服务端按哪种方式排的
-     * @param newRows   前若干名
+     * @param newRows   前若干名（搜索时是匹配到的）
+     * @param newRanks  每一行在整张榜上的名次，null 表示就是下标 + 1
      * @param rank      自己的名次
      * @param self      自己那一行
      * @param newTotal  榜上总人数
+     * @param query     这批行是按什么搜出来的，空串表示整张榜
+     * @param newMatched 搜到多少人
      */
     public void onRowsReceived(S2CLeaderboardPacket.Status status, boolean hasPeriods,
                                LeaderboardPeriod newPeriod, LeaderboardSort newSort,
-                               List<LeaderboardRow> newRows, int rank,
-                               @Nullable LeaderboardRow self, int newTotal) {
+                               List<LeaderboardRow> newRows, @Nullable int[] newRanks, int rank,
+                               @Nullable LeaderboardRow self, int newTotal, String query, int newMatched) {
         this.waitingSinceMs = 0L;
         switch (status) {
             case OK -> {
-                if (newSort != this.sort || newPeriod != this.period) {
+                if (newSort != this.shownSort || newPeriod != this.shownPeriod || !query.equals(this.activeQuery)) {
                     this.scroll = 0.0D;
                 }
+                this.retryDelayMs = CLIENT_COOLDOWN_MS;
+                this.shownPeriod = newPeriod;
+                this.shownSort = newSort;
+                this.ranks = newRanks != null && newRanks.length == newRows.size() ? newRanks : null;
+                this.activeQuery = query;
+                this.matched = newMatched;
                 this.periodsEnabled = hasPeriods;
-                this.period = newPeriod;
-                this.sort = newSort;
+                // 按钮只在服务端没有日 / 周 / 月榜时被拉回总榜；别的时候以玩家最后点的为准，
+                // 否则回包晚到会把玩家刚点的按钮又跳回去
+                if (!hasPeriods) {
+                    this.period = LeaderboardPeriod.ALL;
+                }
                 this.rows = new ArrayList<>(newRows);
                 this.selfRank = rank;
                 this.selfRow = self;
@@ -276,7 +401,13 @@ public class LeaderboardScreen extends Screen {
                 this.rows = List.of();
                 this.state = State.DISABLED;
             }
-            case TOO_FAST -> showNotice(Component.translatable("gui.albionmastery.leaderboard.too_fast"));
+            case TOO_FAST -> {
+                // 被服务端限流（服务端的冷却可能配得比客户端长）：过一会儿自动补发，越拒越等得久。
+                // 第一次打开就被拒时界面还停在「加载中」，不补发的话会一直停在那里
+                this.sentQuery = this.activeQuery;
+                this.retryDueMs = Util.getMillis() + this.retryDelayMs;
+                this.retryDelayMs = Math.min(this.retryDelayMs * 2L, 16_000L);
+            }
         }
     }
 
@@ -289,6 +420,18 @@ public class LeaderboardScreen extends Screen {
         if (uuid.equals(this.loadingPlayer)) {
             this.loadingPlayer = null;
         }
+    }
+
+    /**
+     * 看某人的请求被服务端限流了（服务端的冷却可能比客户端长）。
+     *
+     * @param uuid 玩家 UUID
+     */
+    public void onPlayerTooFast(UUID uuid) {
+        if (uuid.equals(this.loadingPlayer)) {
+            this.loadingPlayer = null;
+        }
+        showNotice(Component.translatable("gui.albionmastery.leaderboard.too_fast"));
     }
 
     /**
@@ -348,7 +491,37 @@ public class LeaderboardScreen extends Screen {
      * @return 是否要钉一行
      */
     private boolean hasStickySelf() {
-        return this.selfRow != null && this.selfRank > this.rows.size();
+        // 搜索时只看搜出来的人；自己要是匹配，本来就在列表里
+        return this.activeQuery.isEmpty() && this.selfRow != null && this.selfRank > this.rows.size();
+    }
+
+    /**
+     * 列表里第 i 行在整张榜上的名次。
+     *
+     * @param index 行下标
+     * @return 名次，从 1 起
+     */
+    private int rankAt(int index) {
+        return this.ranks != null && index < this.ranks.length ? this.ranks[index] : index + 1;
+    }
+
+    private int searchWidth() {
+        return Mth.clamp(this.width / 4, SEARCH_MIN_WIDTH, SEARCH_MAX_WIDTH);
+    }
+
+    private int searchLeft() {
+        return this.width - 10 - searchWidth();
+    }
+
+    private int searchTop() {
+        return (HEADER_HEIGHT - SEARCH_HEIGHT) / 2;
+    }
+
+    /**
+     * @return 清空按钮「×」的左边缘
+     */
+    private int searchClearLeft() {
+        return searchLeft() + searchWidth() - SEARCH_CLEAR_WIDTH;
     }
 
     /**
@@ -373,8 +546,26 @@ public class LeaderboardScreen extends Screen {
     /**
      * @return 排序方式列表，按枚举顺序
      */
+    /**
+     * 排序按钮从左到右的顺序。
+     *
+     * <p>日 / 周 / 月榜把「经验」提到最前，那是增量榜的主角。换的只是按钮的摆放，
+     * 枚举本身的顺序不能动——序号要进网络包。
+     *
+     * @return 这个时间范围下的排序方式，顺序即按钮顺序
+     */
     private List<LeaderboardSort> visibleSorts() {
-        return List.of(LeaderboardSort.values());
+        if (!this.period.isDelta()) {
+            return List.of(LeaderboardSort.values());
+        }
+        List<LeaderboardSort> ordered = new ArrayList<>();
+        ordered.add(LeaderboardSort.XP);
+        for (LeaderboardSort value : LeaderboardSort.values()) {
+            if (value != LeaderboardSort.XP) {
+                ordered.add(value);
+            }
+        }
+        return ordered;
     }
 
     /**
@@ -411,6 +602,68 @@ public class LeaderboardScreen extends Screen {
         return labels;
     }
 
+    /**
+     * 换时间范围的时候排序跟着换：一直用着默认排序的就换成新范围的默认，手动选过的就留着他选的。
+     *
+     * <p>总榜默认看满级数，日 / 周 / 月榜默认看经验——点进日榜想知道的是「今天谁刷得最多」，
+     * 而不是「今天谁凑巧卡在升级线上」。
+     *
+     * @param current 当前排序
+     * @param from    原来的时间范围
+     * @param to      要切到的时间范围
+     * @return 切过去之后该选中的排序
+     */
+    private static LeaderboardSort carrySort(LeaderboardSort current, LeaderboardPeriod from,
+                                             LeaderboardPeriod to) {
+        return current == LeaderboardSort.defaultFor(from) ? LeaderboardSort.defaultFor(to) : current;
+    }
+
+    /**
+     * 每行右侧那个大数字。
+     *
+     * <p>满级数、等级总和这些都是两三位的整数，原样显示；经验动辄七八位，
+     * 写全了既占掉名字的位置也看不出量级，缩成 12.3K / 4.5M。
+     *
+     * @param row 一行数据
+     * @return 大字文本
+     */
+    private String headlineText(LeaderboardRow row) {
+        long value = this.shownSort.headline(row);
+        return this.shownSort == LeaderboardSort.XP ? compactXp(value) : String.valueOf(value);
+    }
+
+    /**
+     * 经验的紧凑写法：一万以内写全，往上按千、百万、十亿缩，保留一位小数。
+     *
+     * @param value 经验值
+     * @return 最多六个字符的文本
+     */
+    private static String compactXp(long value) {
+        if (value < 10_000L) {
+            return String.valueOf(value);
+        }
+        if (value < 1_000_000L) {
+            return oneDecimal(value / 1_000.0D) + "K";
+        }
+        if (value < 1_000_000_000L) {
+            return oneDecimal(value / 1_000_000.0D) + "M";
+        }
+        return oneDecimal(value / 1_000_000_000.0D) + "B";
+    }
+
+    /**
+     * 保留一位小数，整数就不写那个 .0。
+     *
+     * <p>用 {@link Locale#ROOT}：有些区域的小数点是逗号，"1,2M" 会被当成两个数。
+     *
+     * @param value 数值
+     * @return 文本
+     */
+    private static String oneDecimal(double value) {
+        String text = String.format(Locale.ROOT, "%.1f", value);
+        return text.endsWith(".0") ? text.substring(0, text.length() - 2) : text;
+    }
+
     private int refreshButtonX() {
         return this.width - BUTTON_WIDTH - 12;
     }
@@ -437,6 +690,11 @@ public class LeaderboardScreen extends Screen {
         this.mouseYNow = mouseY;
         long now = Util.getMillis();
         tickTimeouts(now);
+        tickSearch(now);
+        if (this.retryDueMs != 0L && now >= this.retryDueMs) {
+            this.retryDueMs = 0L;
+            requestList(this.period, this.sort);
+        }
 
         guiGraphics.fill(0, 0, this.width, this.height, MasteryPalette.BG);
         drawHeader(guiGraphics, now);
@@ -481,32 +739,63 @@ public class LeaderboardScreen extends Screen {
         guiGraphics.drawString(this.font, this.title, cursor, textY, MasteryPalette.GOLD_BRIGHT, false);
         cursor += this.font.width(this.title) + 10;
 
+        // 概况小字不能压到搜索框上，放不下的就不画
+        int limit = searchLeft() - 10;
         if (this.state == State.READY || this.state == State.EMPTY) {
-            cursor = drawHeaderChip(guiGraphics,
-                    Component.translatable("gui.albionmastery.leaderboard.header_total", this.total),
-                    cursor, textY, MasteryPalette.TEXT);
+            Component count = this.activeQuery.isEmpty()
+                    ? Component.translatable("gui.albionmastery.leaderboard.header_total", this.total)
+                    : Component.translatable("gui.albionmastery.leaderboard.header_search",
+                            this.activeQuery, this.matched);
+            cursor = drawHeaderChip(guiGraphics, count, cursor, textY,
+                    this.activeQuery.isEmpty() ? MasteryPalette.TEXT : MasteryPalette.GOLD_BRIGHT, limit);
             Component mine = this.selfRank > 0
                     ? Component.translatable("gui.albionmastery.leaderboard.header_rank", this.selfRank)
                     : Component.translatable("gui.albionmastery.leaderboard.header_unranked");
-            drawHeaderChip(guiGraphics, mine, cursor, textY,
-                    this.selfRank > 0 ? MasteryPalette.GOLD : MasteryPalette.TEXT_DIM);
+            cursor = drawHeaderChip(guiGraphics, mine, cursor, textY,
+                    this.selfRank > 0 ? MasteryPalette.GOLD : MasteryPalette.TEXT_DIM, limit);
         }
 
-        // 右端：正在等回包时给一个会动的提示
+        drawSearchFrame(guiGraphics, textY);
+
+        // 正在等回包时在搜索框左边给一个会动的提示，地方不够就不画
         if (this.waitingSinceMs != 0L) {
             int dots = (int) ((now / 350L) % 4L);
             String text = Component.translatable("gui.albionmastery.leaderboard.loading").getString()
                     + ".".repeat(dots);
-            guiGraphics.drawString(this.font, text, this.width - 10 - this.font.width(text), textY,
-                    MasteryPalette.TEXT_DIM, false);
+            int textX = limit - this.font.width(text.substring(0, text.length() - dots) + "...");
+            if (textX >= cursor) {
+                guiGraphics.drawString(this.font, text, textX, textY, MasteryPalette.TEXT_DIM, false);
+            }
         }
     }
 
-    private int drawHeaderChip(GuiGraphics guiGraphics, Component text, int x, int y, int color) {
-        guiGraphics.drawString(this.font, "\u00B7", x, y, MasteryPalette.GOLD_DARK, false);
+    private int drawHeaderChip(GuiGraphics guiGraphics, Component text, int x, int y, int color, int limit) {
         int textX = x + this.font.width("\u00B7") + 6;
+        if (textX + this.font.width(text) > limit) {
+            return x;
+        }
+        guiGraphics.drawString(this.font, "\u00B7", x, y, MasteryPalette.GOLD_DARK, false);
         guiGraphics.drawString(this.font, text, textX, y, color, false);
         return textX + this.font.width(text) + 10;
+    }
+
+    /**
+     * 搜索框的外框和清空按钮：原版的灰边黑底和这套配色不搭，自己画，和特化页的搜索框一个样子。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param textY       顶栏文字的基线
+     */
+    private void drawSearchFrame(GuiGraphics guiGraphics, int textY) {
+        boolean focused = this.searchBox != null && this.searchBox.isFocused();
+        boolean searching = !this.activeQuery.isEmpty();
+        int border = focused || searching ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
+        drawFramedBox(guiGraphics, searchLeft(), searchTop(), searchWidth(), SEARCH_HEIGHT, 0xC0130F09, border);
+        if (this.searchBox != null && !this.searchBox.getValue().isEmpty()) {
+            boolean hover = isOn(this.mouseXNow, this.mouseYNow, searchClearLeft(), searchTop(),
+                    SEARCH_CLEAR_WIDTH, SEARCH_HEIGHT);
+            guiGraphics.drawCenteredString(this.font, "\u00D7", searchClearLeft() + SEARCH_CLEAR_WIDTH / 2 - 1,
+                    textY, hover ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT_DIM);
+        }
     }
 
     /**
@@ -573,7 +862,7 @@ public class LeaderboardScreen extends Screen {
         int border = active ? MasteryPalette.GOLD_BRIGHT : (hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK);
         drawFramedBox(guiGraphics, left, top, right - left, TAB_HEIGHT, fill, border);
         guiGraphics.drawCenteredString(this.font, label, (left + right) / 2,
-                top + (TAB_HEIGHT - 8) / 2 + 1,
+                top + (TAB_HEIGHT - 8) / 2,
                 active ? MasteryPalette.GOLD_BRIGHT : (hover ? MasteryPalette.TEXT : MasteryPalette.TEXT_DIM));
     }
 
@@ -608,7 +897,7 @@ public class LeaderboardScreen extends Screen {
         guiGraphics.pose().translate(0.0F, (float) -this.scroll, 0.0F);
         int y = top;
         for (int i = 0; i < this.rows.size(); i++) {
-            int rank = i + 1;
+            int rank = rankAt(i);
             int screenTop = y - (int) Math.round(this.scroll);
             // 屏幕外的行不画，一百行全画一遍每帧要几百次文字绘制
             if (screenTop + ROW_HEIGHT >= top && screenTop <= scrollBottom) {
@@ -658,9 +947,13 @@ public class LeaderboardScreen extends Screen {
                 color = MasteryPalette.WARN;
             }
             case EMPTY -> {
-                text = Component.translatable(this.period.isDelta()
-                        ? "gui.albionmastery.leaderboard.empty_period"
-                        : "gui.albionmastery.leaderboard.empty");
+                if (!this.activeQuery.isEmpty()) {
+                    text = Component.translatable("gui.albionmastery.leaderboard.search_empty", this.activeQuery);
+                } else {
+                    text = Component.translatable(this.shownPeriod.isDelta()
+                            ? "gui.albionmastery.leaderboard.empty_period"
+                            : "gui.albionmastery.leaderboard.empty");
+                }
                 color = MasteryPalette.TEXT_DIM;
             }
             case TIMEOUT -> {
@@ -678,7 +971,7 @@ public class LeaderboardScreen extends Screen {
      * 画一行。
      *
      * <p>前三名和前十名各有一套装饰：名次六边形的填色、外圈的呼吸光环和绕圈的星点，
-     * 名字旁边再挂一块「全服第一」这样的铭牌。自己那一行不管排第几都压一层金底，
+     * 名字旁边再挂一块「全局第一」这样的铭牌。自己那一行不管排第几都压一层金底，
      * 一眼能在一百行里找到自己。
      *
      * @param guiGraphics 绘图上下文
@@ -716,10 +1009,11 @@ public class LeaderboardScreen extends Screen {
 
         // 第一行：名字 + 徽章 + 在线状态
         int nameX = x + NAME_INSET;
-        int line1 = y + 5;
+        // 两行字（名字一行、0.75 倍的小字一行）整体放在行高中间，和头像、名次六边形的中心对齐
+        int line1 = y + 7;
         int nameColor = self ? MasteryPalette.GOLD_BRIGHT
                 : (top3 ? MasteryPalette.GOLD_BRIGHT : (top10 ? MasteryPalette.GOLD : MasteryPalette.TEXT));
-        int headlineWidth = this.font.width(String.valueOf(this.sort.headline(row))) + 4;
+        int headlineWidth = this.font.width(headlineText(row)) + 4;
         int nameBudget = width - NAME_INSET - headlineWidth - 8;
         String name = trimToWidth(row.name(), Math.max(30, nameBudget / 2));
         guiGraphics.drawString(this.font, name, nameX, line1, nameColor, false);
@@ -753,18 +1047,23 @@ public class LeaderboardScreen extends Screen {
         }
 
         // 右侧：这种排序方式看的那个数，大字；底下一行小字说明是什么
-        String headline = String.valueOf(this.sort.headline(row));
+        String headline = headlineText(row);
         int headlineX = x + width - 6 - this.font.width(headline);
         guiGraphics.drawString(this.font, headline, headlineX, line1,
                 top3 ? rankColor(rank) : MasteryPalette.GOLD_BRIGHT, false);
-        Component headlineLabel = Component.translatable(this.sort.nameKey());
+        Component headlineLabel = Component.translatable(this.shownSort.nameKey());
         drawScaled(guiGraphics, headlineLabel,
                 (int) (x + width - 6 - this.font.width(headlineLabel) * SMALL_SCALE),
                 line1 + 13, SMALL_SCALE, MasteryPalette.TEXT_DIM);
 
         // 第二行：其余概况，一行小字，超出就截
-        Component stats = Component.translatable("gui.albionmastery.leaderboard.row_stats",
-                row.maxed(), row.levelSum(), row.unlocked(), row.specCount());
+        // 增量榜里特化数、满级类型这些还是当前值而不是增量，跟着一起显示会让人以为特化也是今天点的，
+        // 所以换一套只讲「这段时间涨了什么」的文案
+        Component stats = this.shownPeriod.isDelta()
+                ? Component.translatable("gui.albionmastery.leaderboard.row_stats_period",
+                        compactXp(row.xpSum()), row.levelSum(), row.maxed(), row.unlocked())
+                : Component.translatable("gui.albionmastery.leaderboard.row_stats",
+                        row.maxed(), row.levelSum(), row.unlocked(), row.specCount());
         String line2 = stats.getString();
         int statsBudget = (int) ((width - NAME_INSET - headlineWidth - 40) / SMALL_SCALE);
         drawScaled(guiGraphics, Component.literal(trimToWidth(line2, statsBudget)),
@@ -854,13 +1153,13 @@ public class LeaderboardScreen extends Screen {
     }
 
     /**
-     * 徽章文字：「全服第一」「日榜第一」「周榜前十」这样，前缀跟着时间范围走。
+     * 徽章文字：「全局第一」「日榜第一」「周榜前十」这样，前缀跟着时间范围走。
      *
      * @param rank 名次
      * @return 文字
      */
     private Component rankBadgeText(int rank) {
-        Component label = Component.translatable(this.period.labelKey());
+        Component label = Component.translatable(this.shownPeriod.labelKey());
         return switch (rank) {
             case 1 -> Component.translatable("gui.albionmastery.leaderboard.badge_1", label);
             case 2 -> Component.translatable("gui.albionmastery.leaderboard.badge_2", label);
@@ -872,7 +1171,7 @@ public class LeaderboardScreen extends Screen {
     /**
      * 某名玩家在当前这张榜上配的徽章文字，前十以外没有。
      *
-     * <p>公开出来是给「查看他人罗盘」的标题用的：点进全服第一的罗盘，标题上就该写着全服第一。
+     * <p>公开出来是给「查看他人罗盘」的标题用的：点进全局第一的罗盘，标题上就该写着全局第一。
      *
      * @param uuid 玩家 UUID
      * @return 徽章文字；不在前十返回 null
@@ -895,7 +1194,7 @@ public class LeaderboardScreen extends Screen {
     public int rankOf(UUID uuid) {
         for (int i = 0; i < this.rows.size(); i++) {
             if (this.rows.get(i).uuid().equals(uuid)) {
-                return i + 1;
+                return rankAt(i);
             }
         }
         if (this.selfRow != null && this.selfRow.uuid().equals(uuid)) {
@@ -1007,13 +1306,20 @@ public class LeaderboardScreen extends Screen {
             guiGraphics.drawCenteredString(this.font, this.notice, this.width / 2, textY, MasteryPalette.WARN);
             return;
         }
+        if (this.state == State.READY && !this.activeQuery.isEmpty() && this.matched > this.rows.size()) {
+            guiGraphics.drawCenteredString(this.font,
+                    Component.translatable("gui.albionmastery.leaderboard.footer_search_more",
+                            this.matched, this.rows.size()),
+                    this.width / 2, textY, MasteryPalette.TEXT_DIM);
+            return;
+        }
         if (this.state == State.READY) {
             Component line;
             if (this.selfRank > 0) {
                 line = Component.translatable("gui.albionmastery.leaderboard.footer_rank",
                         this.selfRank, this.total);
             } else {
-                line = Component.translatable(this.period.isDelta()
+                line = Component.translatable(this.shownPeriod.isDelta()
                         ? "gui.albionmastery.leaderboard.footer_unranked_period"
                         : "gui.albionmastery.leaderboard.footer_unranked");
             }
@@ -1078,6 +1384,25 @@ public class LeaderboardScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        boolean onSearch = isOn(mouseX, mouseY, searchLeft(), searchTop(), searchWidth(), SEARCH_HEIGHT);
+        if (this.searchBox != null) {
+            if (!onSearch && this.searchBox.isFocused()) {
+                this.searchBox.setFocused(false);
+                setFocused(null);
+            }
+            if (onSearch) {
+                if (!this.searchBox.getValue().isEmpty() && mouseX >= searchClearLeft()) {
+                    // 清空就是回到整张榜，不用等防抖
+                    this.searchBox.setValue("");
+                    submitSearch();
+                    return true;
+                }
+                // 整个外框都算搜索框，别让玩家瞄那一行 8 像素高的字
+                setFocused(this.searchBox);
+                this.searchBox.mouseClicked(mouseX, mouseY, button);
+                return true;
+            }
+        }
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
@@ -1100,7 +1425,9 @@ public class LeaderboardScreen extends Screen {
                         periodBounds[i][1] - periodBounds[i][0], TAB_HEIGHT)) {
                     if (periods[i] != this.period) {
                         // 先把按钮切过去，回包再把数据换掉；等待期间旧数据照常显示
+                        LeaderboardPeriod before = this.period;
                         this.period = periods[i];
+                        this.sort = carrySort(this.sort, before, this.period);
                         this.scroll = 0.0D;
                         requestList(this.period, this.sort);
                     }
@@ -1165,7 +1492,25 @@ public class LeaderboardScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (KeyBindings.OPEN_MASTERY.matches(keyCode, scanCode)) {
+        boolean typing = this.searchBox != null && this.searchBox.isFocused();
+        if (typing) {
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                submitSearch();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                this.searchBox.setFocused(false);
+                setFocused(null);
+                return true;
+            }
+            if (this.searchBox.keyPressed(keyCode, scanCode, modifiers)) {
+                return true;
+            }
+        } else if (this.searchBox != null && keyCode == GLFW.GLFW_KEY_F && Screen.hasControlDown()) {
+            setFocused(this.searchBox);
+            return true;
+        }
+        if (!typing && KeyBindings.OPEN_MASTERY.matches(keyCode, scanCode)) {
             // 按开界面那个键是「我不看了」，整叠界面一起关
             Minecraft.getInstance().setScreen(null);
             return true;
@@ -1175,6 +1520,14 @@ public class LeaderboardScreen extends Screen {
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean charTyped(char codePoint, int modifiers) {
+        if (this.searchBox != null && this.searchBox.isFocused()) {
+            return this.searchBox.charTyped(codePoint, modifiers);
+        }
+        return super.charTyped(codePoint, modifiers);
     }
 
     /**

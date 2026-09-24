@@ -12,6 +12,7 @@ import javax.annotation.Nullable;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraftforge.common.util.FakePlayer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -22,6 +23,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import com.flameforge.albionmastery.weapon.compat.SweetMagicSupport;
 
 /**
  * 击杀经验的统一入口。
@@ -86,6 +88,29 @@ public final class MasteryExperienceHook {
         mixinActive = true;
         PENDING.remove(entityId);
         award(player, originalExperience, droppedExperience);
+    }
+
+    /**
+     * 这次击杀能不能发专精经验。Mixin 和兜底监听两条路都先过这一关，规则只写一份。
+     *
+     * <ul>
+     *     <li>击杀者得是真人：自动击杀机器的假玩家不算，不然站在刷怪塔旁边就能挂机分经验；</li>
+     *     <li>旁观者不算；自己把自己弄死不算；</li>
+     *     <li>杀玩家要看 {@code xpFromPlayerDamage}。</li>
+     * </ul>
+     *
+     * @param victim 被杀的实体
+     * @param killer 击杀者
+     * @return 能发返回 true
+     */
+    public static boolean isEligibleKill(LivingEntity victim, @Nullable Player killer) {
+        if (!(killer instanceof ServerPlayer player) || player instanceof FakePlayer || player.isSpectator()) {
+            return false;
+        }
+        if (victim == killer) {
+            return false;
+        }
+        return !(victim instanceof Player) || MasteryConfig.COMMON.xpFromPlayerDamage.get();
     }
 
     /**
@@ -186,7 +211,8 @@ public final class MasteryExperienceHook {
     }
 
     private static void award(Player killer, double originalExperience, double droppedExperience) {
-        if (!(killer instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel level)) {
+        if (!(killer instanceof ServerPlayer player) || player instanceof FakePlayer
+                || !(player.level() instanceof ServerLevel level)) {
             return;
         }
         // 默认按原版数值算：恶意、金龟这类模组把掉落经验放大多少倍，专精经验都不跟着涨；
@@ -207,9 +233,13 @@ public final class MasteryExperienceHook {
         double radius = MasteryConfig.COMMON.nearbyShareRadius.get();
         double radiusSqr = radius * radius;
 
-        List<ServerPlayer> participants = new ArrayList<>();
+        // 每个参与者的武器清单只算一次：这份清单要查主副手、法术书、法杖，
+        // 还要解析武器，算一次大几十微秒。以前「判断他练不练得动」和「真正发经验」
+        // 各算一遍，群体击杀（一 tick 打死十几只）时这笔重复开销会被乘成毫秒级
+        List<Participant> participants = new ArrayList<>();
         for (ServerPlayer candidate : level.players()) {
-            if (candidate.isSpectator()) {
+            // 旁观者、假玩家、已经死了还没重生的（开了死亡不掉落时手里照样拿着武器）都不占人头
+            if (candidate.isSpectator() || candidate instanceof FakePlayer || !candidate.isAlive()) {
                 continue;
             }
             // 半径设成 0 就退化成「只有击杀者自己」
@@ -217,8 +247,13 @@ public final class MasteryExperienceHook {
                     || candidate.distanceToSqr(player) > radiusSqr)) {
                 continue;
             }
-            if (hasRoomToLevel(candidate, snapshot)) {
-                participants.add(candidate);
+            MasteryData data = MasteryHelper.get(candidate);
+            if (data == null) {
+                continue;
+            }
+            List<XpGroup> groups = xpGroups(candidate);
+            if (hasRoomToLevel(data, groups, snapshot)) {
+                participants.add(new Participant(candidate, data, groups));
             }
         }
         if (participants.isEmpty()) {
@@ -227,9 +262,19 @@ public final class MasteryExperienceHook {
 
         double share = falloffFor(participants.size());
         long amount = Math.max(1L, Math.round(base * share));
-        for (ServerPlayer participant : participants) {
+        for (Participant participant : participants) {
             awardTo(participant, amount);
         }
+    }
+
+    /**
+     * 一名参与分摊的玩家，连同这次已经算好的数据和武器清单。
+     *
+     * @param player 玩家
+     * @param data   专精数据
+     * @param groups 这次该发经验的武器分组
+     */
+    private record Participant(ServerPlayer player, MasteryData data, List<XpGroup> groups) {
     }
 
     /**
@@ -243,9 +288,15 @@ public final class MasteryExperienceHook {
         if (table.isEmpty()) {
             return 1.0D;
         }
-        // 人数超过表长就一直用最后一项，不会越查越少变成 0
-        Double value = table.get(Math.min(count, table.size()) - 1);
-        if (value == null || value.isNaN() || value <= 0.0D) {
+        // 人数超过表长就一直用最后一项，不会越查越少变成 0。
+        // 按 Number 取：服主写成 [1, 0.725] 这种整数字面量时 TOML 读出来是 Integer，
+        // 按 Double 取会抛 ClassCastException，而这里在击杀流程里，每杀一只都抛
+        Object raw = table.get(Math.min(count, table.size()) - 1);
+        if (!(raw instanceof Number number)) {
+            return 0.0D;
+        }
+        double value = number.doubleValue();
+        if (Double.isNaN(value) || value <= 0.0D) {
             return 0.0D;
         }
         return Math.min(1.0D, value);
@@ -261,12 +312,9 @@ public final class MasteryExperienceHook {
      * @param snapshot 配置快照
      * @return 还练得动返回 true
      */
-    private static boolean hasRoomToLevel(ServerPlayer player, MasteryConfig.Snapshot snapshot) {
-        MasteryData data = MasteryHelper.get(player);
-        if (data == null) {
-            return false;
-        }
-        for (XpGroup group : xpGroups(player)) {
+    private static boolean hasRoomToLevel(MasteryData data, List<XpGroup> groups,
+                                          MasteryConfig.Snapshot snapshot) {
+        for (XpGroup group : groups) {
             for (ResolvedWeapon weapon : group.weapons()) {
                 if (data.getWeaponLevel(weapon.weaponKey()) < snapshot.maxLevel
                         || data.getTypeLevel(weapon.typeKey()) < snapshot.maxLevel
@@ -306,6 +354,15 @@ public final class MasteryExperienceHook {
             ResolvedWeapon selected = IronsSpellsSupport.selectedSpell(player);
             groups.add(new XpGroup(selected == null ? List.of() : List.of(selected), 1.0D));
         }
+        // 甜蜜魔法：手里拿的是法杖，真正在练的是它当前选中的那张魔法卷轴。
+        // 主副手各一组，和其它手持武器一个口径——副手那根同样按副手比例算，
+        // 两只手各拿一根时也各拿各的那份
+        if (WeaponResolver.isSweetMagicLoaded()) {
+            ResolvedWeapon mainMagic = SweetMagicSupport.selectedMagic(player, player.getMainHandItem());
+            ResolvedWeapon offMagic = SweetMagicSupport.selectedMagic(player, player.getOffhandItem());
+            groups.add(new XpGroup(mainMagic == null ? List.of() : List.of(mainMagic), 1.0D));
+            groups.add(new XpGroup(offMagic == null ? List.of() : List.of(offMagic), offhandRatio));
+        }
         return groups;
     }
 
@@ -325,15 +382,15 @@ public final class MasteryExperienceHook {
         return WeaponResolver.resolveAll(stack);
     }
 
-    private static void awardTo(ServerPlayer player, long amount) {
-        MasteryData data = MasteryHelper.get(player);
-        if (data == null) {
-            return;
-        }
+    private static void awardTo(Participant participant, long amount) {
+        MasteryData data = participant.data();
         Set<String> awarded = new HashSet<>(4);
+        // 类型和总体这次已经记过的键：一个法术好几个符文、主副手同一来源时，
+        // 武器各拿各的，但类型和总体只记一份，不因为手里武器多就翻倍
+        Set<String> credited = new HashSet<>(4);
         double multiRatio = MasteryConfig.COMMON.multiWeaponXpRatio.get();
 
-        for (XpGroup group : xpGroups(player)) {
+        for (XpGroup group : participant.groups()) {
             List<ResolvedWeapon> weapons = group.weapons();
             if (weapons.isEmpty()) {
                 continue;
@@ -351,7 +408,7 @@ public final class MasteryExperienceHook {
                     continue;
                 }
                 try {
-                    MasteryHelper.awardXp(data, weapon, give, MasteryConfig.serverSnapshot());
+                    MasteryHelper.awardXp(data, weapon, give, MasteryConfig.serverSnapshot(), true, credited);
                 } catch (Exception exception) {
                     AlbionMastery.LOGGER.error("发放击杀专精经验失败: {}", weapon.weaponKey(), exception);
                 }

@@ -1,6 +1,6 @@
-// 路径：src/main/java/com/flameforge/albionmastery/config/MasteryConfig.java
 package com.flameforge.albionmastery.config;
 
+import com.flameforge.albionmastery.AlbionMastery;
 import com.flameforge.albionmastery.leaderboard.LeaderboardSort;
 import com.flameforge.albionmastery.mastery.LevelCurve;
 import com.flameforge.albionmastery.mastery.spec.Specialization;
@@ -9,12 +9,17 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.common.ForgeConfigSpec;
 import org.apache.commons.lang3.tuple.Pair;
 
+import java.util.Collections;
 import java.util.EnumMap;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import com.flameforge.albionmastery.weapon.compat.WeaponOverrides;
+import java.util.ArrayList;
 
 /**
  * 武器专精系统的配置。
@@ -25,7 +30,7 @@ import java.util.function.Consumer;
  *     <li>CLIENT：纯客户端表现（是否渲染物品图标等）</li>
  * </ul>
  *
- * <p>由于 COMMON 配置在专用服务器与客户端上是两份独立文件，为了保证界面显示的加成
+ * <p>由于 COMMON 配置在专用服务端与客户端上是两份独立文件，为了保证界面显示的加成
  * 与服务端实际结算的加成一致，登录时会由服务端把 {@link Snapshot} 下发给客户端，
  * 客户端界面只使用快照里的数值，不读自己的配置文件。
  */
@@ -40,7 +45,7 @@ public final class MasteryConfig {
     /**
      * 每个数值项在配置文件里的说明。
      *
-     * <p>放一张表而不是在每个流派里各写一遍：同一个项名在不同流派下含义完全一样，
+     * <p>放一张表而不是在每个特化里各写一遍：同一个项名在不同特化下含义完全一样，
      * 分散写迟早写歪，改一处忘一处。
      *
      * <p>和 {@link #SPEC_ENTRIES} 一样，<b>必须声明在下面那个静态初始化块之前</b>。
@@ -77,16 +82,42 @@ public final class MasteryConfig {
             Map.entry("durability", "武器耐久消耗倍率（0.5 = 只扣一半，1.5 = 多扣五成）"),
             Map.entry("manaCost", "法术法力消耗倍率（0.7 = 省三成）"),
             Map.entry("spellCooldown", "法术冷却时间倍率（0.7 = 快三成）"),
-            Map.entry("spellLevel", "法术等级加成，整数（1 = 施放时按高一级算）"),
+            Map.entry("spellLevel", "法术等级加成，整数；开启 preventMasterySpellRangeScaling 时暂停此项，避免等级间接扩大范围"),
             Map.entry("gunVolume", "枪声音量倍率（0.3 = 只剩三成响，传播距离也跟着缩）"),
             Map.entry("bulletSpeed", "子弹初速倍率（1.2 = 快两成；上限 2.5，太快会穿墙漏判）"),
             Map.entry("recoil", "后座倍率（0.7 = 只剩七成后座）"),
             Map.entry("castTime", "法术施法时间倍率（0.8 = 前摇快两成）"),
             Map.entry("drawSpeed", "拉弓蓄力速度倍率（1.3 = 拉满快三成），只对弓有效"),
-            Map.entry("doubleCast", "法术双重施法概率（1.0 = 每次施放后必定自动免费再放一次，不扣法力不算冷却）"));
+            Map.entry("doubleCast", "法术双重施法概率（1.0 = 每次施放后必定自动免费再放一次，不扣法力不算冷却）"),
+            Map.entry("fireRate", "枪械射速倍率（1.3 = 射速快三成）。上限 3；最快 1200 发/分，TACZ 按 tick 开火，再快打不出来。点射的连发间隔也跟着变"),
+            Map.entry("adsTime", "枪械开镜耗时倍率（0.7 = 开镜快三成，1.3 = 慢三成）"),
+            Map.entry("hipSpread", "枪械腰射散布倍率（0.5 = 散布减半）。没完全开镜时开的枪都算腰射"),
+            Map.entry("aimSpread", "枪械开镜散布倍率（0.5 = 散布减半）。瞄准进度满了才算开镜"),
+            Map.entry("drawTime", "枪械掏枪耗时倍率（0.5 = 切到这把枪后一半时间就能开火）"),
+            Map.entry("boltTime", "枪械拉栓耗时倍率（0.5 = 拉栓快一倍），只对栓动 / 泵动枪有效"),
+            Map.entry("sprintTime", "枪械冲刺后恢复射击的耗时倍率（0.5 = 停跑后一半时间就能开火）"),
+            Map.entry("ammoSave", "省弹概率（0.3 = 30%），上限 0.9。枪械：这一发不扣弹匣，背包直读和栓动枪不生效。"
+                    + "弓弩：只有这一箭确实从背包里扣掉了才会按概率退还，无限附魔、创造模式、模组的无限弓和箭袋饰品都不退"),
+            Map.entry("pierce", "子弹 / 箭 / 魔艺投射物额外穿透的目标数，整数（1 = 多打穿一个目标）。爆炸弹不生效"),
+            Map.entry("knockback", "击退倍率（1.5 = 击退远一半，0.5 = 只剩一半），对近战、拔刀剑、弓箭有效"),
+            Map.entry("reach", "攻击距离倍率（1.2 = 远两成），上限 2。只对吃原版交互距离属性的近战有效（当前是 "
+                    + WeaponKeys.vanillaAttributeProviderList() + "）"),
+            Map.entry("backstabDamage", "从目标背后打中时的额外倍率（目标身后约 120° 的扇形）"),
+            Map.entry("damageTaken", "手持该武器时自己受到的伤害倍率（0.8 = 少掉两成血），最低 0.1"),
+            Map.entry("saDamage", "拔刀剑 SA 伤害倍率：SA 发动后 1.5 秒内的斩击都算"),
+            Map.entry("soulGain", "拔刀剑耀魂获取倍率（1.5 = 多拿一半耀魂）"),
+            Map.entry("killHeal", "击杀后回复自己最大生命值的这个比例（0.1 = 回一成血）"),
+            Map.entry("frenzyStep", "嗜战：每次击杀叠一层，每层伤害加成（0.08 = 每层 +8%），8 秒内不再击杀就清零"),
+            Map.entry("frenzyMax", "嗜战最多叠几层"),
+            Map.entry("nearDamage", "目标在 6 格内时的伤害倍率"),
+            Map.entry("farDamage", "目标在 24 格外时的伤害倍率"),
+            Map.entry("igniteChance", "命中时点燃目标 4 秒的概率（同一 tick 对同一目标只掷一次，霰弹不会必中）"),
+            Map.entry("slowChance", "命中时让目标缓慢 II 3 秒的概率"),
+            Map.entry("weakenChance", "命中时让目标虚弱 4 秒的概率"),
+            Map.entry("lastRoundDamage", "枪械弹匣只剩最后三成子弹时的伤害倍率"));
 
     /**
-     * 每个流派的数值项，由 {@link #defineSpec} 在构建配置时填入。
+     * 每个特化的数值项，由 {@link #defineSpec} 在构建配置时填入。
      *
      * <p>必须声明在下面那个静态初始化块<b>之前</b>：Java 按书写顺序初始化静态成员，
      * 声明写在后面的话，构造 {@code Common} 时这张表还是 null，直接 NPE。
@@ -103,6 +134,14 @@ public final class MasteryConfig {
         CLIENT = clientPair.getLeft();
         CLIENT_SPEC = clientPair.getRight();
     }
+
+    /**
+     * 特化数值的版本号。特化默认值重新平衡时加一：老配置里记的版本比它小，
+     * 启动时就会把全部特化数值重置成新默认值（服主可以用 autoUpdateSpecBalance 关掉）。
+     *
+     * <p>1：初版；2：枪械手感维度 + 全来源特化重做（系别、背刺、击退、攻击距离、拔刀技、刀魂、弓箭穿透省箭爆头）。
+     */
+    public static final int SPEC_BALANCE_VERSION = 2;
 
     /** 服务端当前生效的配置快照，配置加载 / 重载后刷新。 */
     private static volatile Snapshot serverSnapshot = Snapshot.createDefault();
@@ -121,12 +160,7 @@ public final class MasteryConfig {
                 COMMON.weaponDamagePerLevel.get(),
                 COMMON.weaponCrossDamagePerLevel.get(),
                 COMMON.maxTotalDamageBonus.get(),
-                COMMON.vanillaWeaponMasteryMultiplier.get(),
-                COMMON.taczMeleeMasteryMultiplier.get(),
-                COMMON.ironsSpellbooksMasteryMultiplier.get(),
-                COMMON.arsNouveauMasteryMultiplier.get(),
-                COMMON.taczGunMasteryMultiplier.get(),
-                COMMON.slashbladeMasteryMultiplier.get(),
+                COMMON.sourceMultiplierValues(),
                 COMMON.xpBase.get(),
                 COMMON.xpExponent.get(),
                 COMMON.typeXpMultiplier.get(),
@@ -139,24 +173,67 @@ public final class MasteryConfig {
                 COMMON.specSwitchCooldownSeconds.get(),
                 COMMON.specSlot1Percent.get(),
                 COMMON.specSlot2Percent.get(),
-                collectSpecValues()
+                collectSpecValues(),
+                COMMON.preventMasterySpellRangeScaling.get(),
+                List.copyOf(COMMON.extraWeapons.get()),
+                List.copyOf(COMMON.notWeapons.get()),
+                COMMON.spellMasteryManaShare.get(),
+                COMMON.spellMasteryCooldownShare.get(),
+                COMMON.spellMasteryReductionCap.get()
         );
+        // 武器补录表两端各自按同一份配置刷新：服务端读自己的配置，客户端读同步过来的快照
+        WeaponOverrides.applyFromConfig(serverSnapshot.extraWeapons, serverSnapshot.notWeapons);
+        AlbionMastery.LOGGER.info("Mastery configuration refreshed: independent source multipliers, spell range protection={}",
+                serverSnapshot.preventMasterySpellRangeScaling);
     }
 
     /**
-     * 把配置文件里的流派数值读成一张普通的表。
+     * 特化数值跟随模组版本更新：配置里记的版本比 {@link #SPEC_BALANCE_VERSION} 小、且服主没关自动更新时，
+     * 把每个特化的每一项都设回默认值，再写上当前版本并保存。
+     *
+     * <p>在配置加载事件里、刷新快照之前调用。保存文件会再触发一次重载事件，那时版本已经对上，不会重复重置。
+     *
+     * @return 这次有没有重置
+     */
+    public static synchronized boolean migrateSpecBalance() {
+        // 加锁：Forge 补配置时会写一次文件，文件监视线程随即触发重载，和启动线程的加载撞在一起；
+        // 两边各跑一遍结果一样（都是改回默认值），锁住只是免得交错着改、日志也看得清
+        int from = COMMON.specBalanceVersion.get();
+        if (!COMMON.autoUpdateSpecBalance.get() || from >= SPEC_BALANCE_VERSION) {
+            return false;
+        }
+        int changed = 0;
+        for (SpecEntry entry : SPEC_ENTRIES.values()) {
+            for (ForgeConfigSpec.DoubleValue value : entry.values().values()) {
+                if (Double.compare(value.get(), value.getDefault()) != 0) {
+                    value.set(value.getDefault());
+                    changed++;
+                }
+            }
+        }
+        COMMON.specBalanceVersion.set(SPEC_BALANCE_VERSION);
+        COMMON_SPEC.save();
+        AlbionMastery.LOGGER.info("特化数值从版本 {} 更新到 {}：{} 项改回新版默认值", from, SPEC_BALANCE_VERSION, changed);
+        return true;
+    }
+
+    /**
+     * 把配置文件里的特化数值读成一张普通的表。
      *
      * <p>只在刷新快照时调用一次，之后所有读取都走快照，不再碰 {@code ConfigValue}。
      *
-     * @return 流派键 -&gt; 数值
+     * @return 特化键 -&gt; 数值
      */
     private static Map<String, SpecializationValues> collectSpecValues() {
         Map<String, SpecializationValues> values = new HashMap<>();
         for (Map.Entry<Specialization, SpecEntry> entry : SPEC_ENTRIES.entrySet()) {
             SpecEntry config = entry.getValue();
-            // 这个流派没定义的维度取中性默认值，所以不用管每个流派各自关心哪几项
+            // 这个特化没定义的维度取中性默认值，所以不用管每个特化各自关心哪几项
             values.put(entry.getKey().key(), SpecializationValues.of(
-                    key -> config.get(key, SpecializationValues.defaultOf(key))));
+                    // 等级会影响范围、方块数量等多种公式，不能作为通用加成继续叠加。
+                    // 只屏蔽运行快照中的该项，原配置不删除；关闭范围保护后可恢复。
+                    key -> COMMON.preventMasterySpellRangeScaling.get() && "spellLevel".equals(key)
+                            ? 0.0D : config.get(key, SpecializationValues.defaultOf(key))));
         }
         return values;
     }
@@ -173,24 +250,75 @@ public final class MasteryConfig {
      */
     public static final class Common {
 
+        /** 来源 ID → 配置里那行注释怎么写。漏了不影响功能，只是注释里退化成裸的来源 ID。 */
+        private static final Map<String, String> SOURCE_NOTES = sourceNotes();
+
+        /**
+         * 各来源的中文说明。
+         *
+         * @return 来源 ID → 说明
+         */
+        private static Map<String, String> sourceNotes() {
+            Map<String, String> notes = new HashMap<>();
+            notes.put(WeaponKeys.PROVIDER_VANILLA_MELEE, "通用近战武器（所有模组里的剑 / 斧 / 三叉戟，以及补录进来的近战）");
+            notes.put(WeaponKeys.PROVIDER_BOW, "通用弓弩（所有模组里的弓和弩）");
+            notes.put(WeaponKeys.PROVIDER_LRTACTICAL_MELEE, "lrtactical 近战武器");
+            notes.put(WeaponKeys.PROVIDER_TACZ_GUN, "TACZ 枪械");
+            notes.put(WeaponKeys.PROVIDER_SLASHBLADE, "拔刀剑");
+            notes.put(WeaponKeys.PROVIDER_IRONS_SPELLS, "Iron's Spells 'n Spellbooks（铁魔法）");
+            notes.put(WeaponKeys.PROVIDER_ARS_NOUVEAU, "Ars Nouveau（新生魔艺）");
+            notes.put(WeaponKeys.PROVIDER_TCONSTRUCT, "匠魂全家（Tinkers' Construct 及其附属）");
+            notes.put(WeaponKeys.PROVIDER_SWEETMAGIC, "甜蜜魔法的魔法卷轴");
+            return Map.copyOf(notes);
+        }
+
+        /**
+         * 来源 ID 转配置键名：{@code irons_spellbooks} → {@code ironsSpellbooks}。
+         *
+         * <p>按规则生成而不是一个个写死，新增来源才不会漏掉自己的那一行。
+         *
+         * @param providerId 来源 ID
+         * @return 配置键名
+         */
+        private static String sourceConfigKey(String providerId) {
+            StringBuilder key = new StringBuilder(providerId.length());
+            boolean upper = false;
+            for (int i = 0; i < providerId.length(); i++) {
+                char c = providerId.charAt(i);
+                if (c == '_') {
+                    upper = true;
+                    continue;
+                }
+                key.append(upper ? Character.toUpperCase(c) : c);
+                upper = false;
+            }
+            return key.toString();
+        }
+
+        /**
+         * 把各来源的倍率读成一张普通的表，给快照和网络同步用。
+         *
+         * @return 来源 ID → 倍率
+         */
+        public Map<String, Double> sourceMultiplierValues() {
+            Map<String, Double> values = new LinkedHashMap<>();
+            this.sourceMasteryMultipliers.forEach((providerId, value) -> values.put(providerId, value.get()));
+            return values;
+        }
+
         public final ForgeConfigSpec.IntValue maxLevel;
         public final ForgeConfigSpec.DoubleValue overallDamagePerLevel;
         public final ForgeConfigSpec.DoubleValue typeDamagePerLevel;
         public final ForgeConfigSpec.DoubleValue weaponDamagePerLevel;
         public final ForgeConfigSpec.DoubleValue weaponCrossDamagePerLevel;
         public final ForgeConfigSpec.DoubleValue maxTotalDamageBonus;
-        /** 原版近战与弓弩来源的专精伤害总倍率。 */
-        public final ForgeConfigSpec.DoubleValue vanillaWeaponMasteryMultiplier;
-        /** lrtactical 近战来源的专精伤害总倍率。 */
-        public final ForgeConfigSpec.DoubleValue taczMeleeMasteryMultiplier;
-        /** Iron's Spells 'n Spellbooks 来源的专精伤害总倍率。 */
-        public final ForgeConfigSpec.DoubleValue ironsSpellbooksMasteryMultiplier;
-        /** Ars Nouveau 来源的专精伤害总倍率。 */
-        public final ForgeConfigSpec.DoubleValue arsNouveauMasteryMultiplier;
-        /** TACZ 枪械来源的专精伤害总倍率。 */
-        public final ForgeConfigSpec.DoubleValue taczGunMasteryMultiplier;
-        /** 拔刀剑来源的专精伤害总倍率。 */
-        public final ForgeConfigSpec.DoubleValue slashbladeMasteryMultiplier;
+        /**
+         * 每个武器来源各自的专精伤害总倍率：来源 ID → 配置值。
+         *
+         * <p>按 {@link WeaponKeys#ALL_PROVIDERS} 生成，一个来源一个键，谁也不蹭谁的。
+         * 以后加来源只要往那张表里加一行，这里自动多一个默认 1.0 的键。
+         */
+        public final Map<String, ForgeConfigSpec.DoubleValue> sourceMasteryMultipliers;
         public final ForgeConfigSpec.DoubleValue xpBase;
         public final ForgeConfigSpec.DoubleValue xpExponent;
         public final ForgeConfigSpec.DoubleValue xpPerDamage;
@@ -209,6 +337,8 @@ public final class MasteryConfig {
         public final ForgeConfigSpec.ConfigValue<List<? extends String>> dimensionXpMultipliers;
         public final ForgeConfigSpec.DoubleValue offhandXpRatio;
         public final ForgeConfigSpec.DoubleValue multiWeaponXpRatio;
+        /** 是否禁止专精和特化强度扩大已适配法术范围，默认开启。 */
+        public final ForgeConfigSpec.BooleanValue preventMasterySpellRangeScaling;
         public final ForgeConfigSpec.DoubleValue spellMasteryCooldownShare;
         public final ForgeConfigSpec.DoubleValue spellMasteryManaShare;
         public final ForgeConfigSpec.DoubleValue spellMasteryReductionCap;
@@ -226,11 +356,22 @@ public final class MasteryConfig {
         public final ForgeConfigSpec.BooleanValue debugLogging;
         public final ForgeConfigSpec.DoubleValue doubleCastTimeFactor;
         public final ForgeConfigSpec.ConfigValue<List<? extends String>> doubleCastExcludedSpells;
+
+        /** 补录成武器的物品。 */
+        public final ForgeConfigSpec.ConfigValue<List<? extends String>> extraWeapons;
+
+        /** 明确不算武器的物品。 */
+        public final ForgeConfigSpec.ConfigValue<List<? extends String>> notWeapons;
         public final ForgeConfigSpec.IntValue specSlot1Percent;
         public final ForgeConfigSpec.IntValue specSlot2Percent;
+        public final ForgeConfigSpec.BooleanValue autoUpdateSpecBalance;
+        public final ForgeConfigSpec.IntValue specBalanceVersion;
         public final ForgeConfigSpec.BooleanValue leaderboardEnable;
         public final ForgeConfigSpec.IntValue leaderboardTopCount;
         public final ForgeConfigSpec.IntValue leaderboardUpdateIntervalSeconds;
+
+        /** 榜单条目保留天数。 */
+        public final ForgeConfigSpec.IntValue leaderboardRetentionDays;
         public final ForgeConfigSpec.IntValue leaderboardRequestCooldownSeconds;
         public final ForgeConfigSpec.BooleanValue leaderboardBroadcastTopChanges;
         public final ForgeConfigSpec.EnumValue<LeaderboardSort> leaderboardBroadcastSort;
@@ -265,37 +406,37 @@ public final class MasteryConfig {
 
             builder.comment("不同武器来源的专精伤害倍率。",
                             "这里乘的是专精本身给出的伤害加成：总体（内圈）、类型（中圈）、单件武器（外圈）以及同类型联动都会一起乘。",
-                            "不会去乘流派 / 特化里的 damage 等额外倍率；拔刀剑默认 1.0，保持原样。")
+                            "一个来源一个键，互相不影响，默认全是 1.0 = 完全保持专精原本的强度。",
+                            "以后模组新增来源，这里会自动多出一行，不会去蹭别的来源的倍率。",
+                            "更新模组不会覆盖已经改过的值。")
                     .push("sourceDamageMultiplier");
-            this.vanillaWeaponMasteryMultiplier = builder
-                    .comment("原版武器体系（vanilla_melee + bow）的专精伤害倍率")
-                    .defineInRange("vanillaWeapon", 20.0D, 0.0D, 100.0D);
-            this.taczMeleeMasteryMultiplier = builder
-                    .comment("lrtactical 近战武器的专精伤害倍率")
-                    .defineInRange("lrtacticalMelee", 20.0D, 0.0D, 100.0D);
-            this.ironsSpellbooksMasteryMultiplier = builder
-                    .comment("Iron's Spells 'n Spellbooks（铁魔法）的专精伤害倍率")
-                    .defineInRange("ironsSpellbooks", 10.0D, 0.0D, 100.0D);
-            this.arsNouveauMasteryMultiplier = builder
-                    .comment("Ars Nouveau（新生魔艺）的专精伤害倍率")
-                    .defineInRange("arsNouveau", 10.0D, 0.0D, 100.0D);
-            this.taczGunMasteryMultiplier = builder
-                    .comment("TACZ 枪械的专精伤害倍率")
-                    .defineInRange("taczGun", 5.0D, 0.0D, 100.0D);
-            this.slashbladeMasteryMultiplier = builder
-                    .comment("拔刀剑的专精伤害倍率；1.0 = 完全保持原来的专精强度")
-                    .defineInRange("slashblade", 1.0D, 0.0D, 100.0D);
+            Map<String, ForgeConfigSpec.DoubleValue> multipliers = new LinkedHashMap<>();
+            for (String providerId : WeaponKeys.ALL_PROVIDERS) {
+                String note = SOURCE_NOTES.getOrDefault(providerId, providerId);
+                multipliers.put(providerId, builder
+                        .comment(note + "的专精伤害倍率（来源 ID：" + providerId + "）")
+                        .defineInRange(sourceConfigKey(providerId), 1.0D, 0.0D, 100.0D));
+            }
+            this.sourceMasteryMultipliers = Collections.unmodifiableMap(multipliers);
             builder.pop();
 
+            this.preventMasterySpellRangeScaling = builder
+                    .comment("禁止专精与特化强度放大铁魔法及 Geomancy Plus 已适配法术的范围、距离和挖掘尺寸。",
+                            "保留装备、本体配置提供的强度，以及专精的伤害、治疗、时长加成。",
+                            "开启时暂停特化 spellLevel 加成，防止法术等级间接扩大范围；客户端使用服务端同步值。",
+                            "false 可恢复旧范围行为；修改后建议重启服务端并让客户端重新连接。",
+                            "Prevent mastery from increasing supported spell ranges; disables specialization spell-level bonuses.")
+                    .define("preventMasterySpellRangeScaling", true);
+
             this.xpBase = builder
-                    .comment("经验曲线基数：升到第 L 级所需经验 = xpBase * L ^ xpExponent。",
-                            "默认 40 正好是一只僵尸的产出（掉 5 经验 × xpPerMobExperience 8），",
-                            "也就是「打完第一只怪刚好升到 1 级」。这是全局肝度旋钮。")
-                    .defineInRange("xpBase", 40.0D, 0.1D, 1.0E9D);
+                    .comment("经验曲线基数：升到第 L 级所需经验 = round(xpBase * L ^ xpExponent)。",
+                            "默认基数由 40 调整为 80，新配置的升级需求为原默认的两倍，",
+                            "已有 xpBase 配置原值保留；旧服若需要经验翻倍，请自行将原基数乘以 2。")
+                    .defineInRange("xpBase", 80.0D, 0.1D, 1.0E9D);
 
             this.xpExponent = builder
                     .comment("经验曲线指数，越大后期越肝。",
-                            "默认 1.0 是线性：升到第 L 级正好需要 L 只僵尸的量，很好估算。",
+                            "默认 1.0 是线性：单级需求随目标等级线性增长。",
                             "1.25 会让满级总量翻 2.8 倍，后期明显更肝。")
                     .defineInRange("xpExponent", 1.0D, 0.0D, 5.0D);
 
@@ -437,28 +578,38 @@ public final class MasteryConfig {
                             "武器层与总体层的等级不受影响。")
                     .define("splitMeleeByPack", true);
 
-            builder.comment("专精特化（流派）：某个来源的总体专精练满之后，",
-                            "可以给这个来源选一个流派，效果作用于该来源下的所有武器。",
-                            "每个流派都是有得有失的，「制式」是什么都不改的默认值。",
+            builder.comment("专精特化：每个武器类型（中圈）有主、副两栏，练到门槛后各装一项，两项效果叠加。",
+                            "不同武器叫法不同：枪和弓叫改装、刀叫改造、剑叫专长、拔刀剑叫修习、铁魔法叫铭刻、魔艺叫改良。",
+                            "每一项都有得有失，每个来源的第一项（原厂配置 / 无专长 / 无修习等）是什么都不改的默认值。",
                             "倍率一律是「乘在原值上」，时间类小于 1 表示更快。")
                     .push("specialization");
             this.enableSpecialization = builder
-                    .comment("是否启用特化系统。关闭后已选的流派不生效，但选择仍然保留在存档里")
+                    .comment("是否启用特化系统。关闭后已选的特化不生效，但选择仍然保留在存档里")
                     .define("enable", true);
             this.specSwitchCooldownSeconds = builder
-                    .comment("切换流派的冷却时间（秒），默认 1 小时。",
-                            "冷却只记在内存里，服务器重启后清零")
+                    .comment("切换特化的冷却时间（秒），默认 1 小时。",
+                            "冷却只记在内存里，服务端重启后清零")
                     .defineInRange("switchCooldownSeconds", 3600, 0, 604800);
             this.specSlot1Percent = builder
-                    .comment("第一流派槽在进度多少时解锁（百分比，按等级上限算）。",
-                            "选流派要求本类型（中圈）达到这个进度；某件武器要吃到流派效果，它自己（外圈）也得达到")
+                    .comment("第一特化槽在进度多少时解锁（百分比，按等级上限算）。",
+                            "选特化要求本类型（中圈）达到这个进度；某件武器要吃到特化效果，它自己（外圈）也得达到")
                     .defineInRange("slot1UnlockPercent", 50, 1, 100);
             this.specSlot2Percent = builder
-                    .comment("第二流派槽在进度多少时解锁，规则同上。两个槽的效果叠加：",
+                    .comment("第二特化槽在进度多少时解锁，规则同上。两个槽的效果叠加：",
                             "倍率相乘、概率和比例相加、层数和等级取大的")
                     .defineInRange("slot2UnlockPercent", 100, 1, 100);
+            this.autoUpdateSpecBalance = builder
+                    .comment("模组更新重新平衡了特化数值时，是否自动把下面各特化的数值换成新版默认值。",
+                            "Forge 配置只会补上缺的项，已经写在文件里的旧数值不会被新默认值覆盖，",
+                            "不开这个的话，升级后老服务器上的特化还是旧数值（说明文字却会按旧数值显示，不会错）。",
+                            "自己改过特化数值、想保留的服主请关掉")
+                    .define("autoUpdateSpecBalance", true);
+            this.specBalanceVersion = builder
+                    .comment("特化数值的版本号，由模组自己维护，不用手动改。",
+                            "小于当前版本且上面那项开着时，下次启动会把全部特化数值重置为新默认值，然后写成当前版本")
+                    .defineInRange("specBalanceVersion", 0, 0, Integer.MAX_VALUE);
             this.debugLogging = builder
-                    .comment("排查用：把流派效果的关键路径（双重施法排队 / 补放、法力折扣等）打成 INFO 日志。",
+                    .comment("排查用：把特化效果的关键路径（双重施法排队 / 补放、法力折扣等）打成 INFO 日志。",
                             "默认关闭；只有排查问题时才打开，人多的时候会刷屏")
                     .define("debugLogging", false);
             this.doubleCastTimeFactor = builder
@@ -471,339 +622,413 @@ public final class MasteryConfig {
                             "irons_spellbooks:raise_dead",
                             "irons_spellbooks:raise_hell"),
                             value -> value instanceof String);
+            this.extraWeapons = builder
+                    .comment("补录成武器的物品，格式「物品id=大类」，大类可填 sword / axe / trident / other / bow / crossbow，",
+                            "只写物品 id 不写大类时按 other（其它近战）算。",
+                            "模组自己写基类、不继承原版武器类的武器，本体已经内置了一份常见的（灾变、诡厄、额外植物学、血肉重塑），",
+                            "这里只放内置表没收到的。例：\"examplemod:big_sword=sword\"")
+                    .defineListAllowEmpty("extraWeapons", List.of(), value -> value instanceof String);
+            this.notWeapons = builder
+                    .comment("明确不算武器的物品 id：被误收进专精树的东西写在这里就会被踢掉，优先级高于上面的补录表和物品类判定")
+                    .defineListAllowEmpty("notWeapons", List.of(), value -> value instanceof String);
             this.killRefillMobRatio = builder
-                    .comment("击杀补弹：流派里写的补弹比例按「杀玩家」算，杀怪物时再乘这个系数。",
+                    .comment("击杀补弹：特化里写的补弹比例按「杀玩家」算，杀怪物时再乘这个系数。",
                             "默认 0.2：弹药带杀玩家补 50%，杀怪只补 10%，割草不至于永远不用换弹")
                     .defineInRange("killRefillMobRatio", 0.2D, 0.0D, 1.0D);
             this.comboWindowTicks = builder
                     .comment("连击的时间窗（tick）：两次命中同一目标间隔超过这个时间，连击层数清零。默认 3 秒")
                     .defineInRange("comboWindowTicks", 60, 1, 1200);
 
-            // 每个流派一个小节，只暴露它真正用到的数值项。
-            // 每个流派都是「两三样好处 + 一两样代价」，好处里必须有一样是别的流派没有的
+            // 每个特化一个小节，只暴露它真正用到的数值项。
+            // 设计规则：
+            //   1. 每个特化「两三样好处 + 一两样代价」，好处里至少有一样在本来源里是它独有的；
+            //   2. 同一来源里按系别（枪械是改装部位）分组，两个槽不能装同系的，所以同系之间可以是同一方向的强弱取舍；
+            //   3. 各来源都有「对人 / 对怪 / 破甲 / 残血 / 吸血 / 连击 / 练级」这些通用路子，但一定配上本来源的专属维度，
+            //      不做数字一模一样的换皮（枪械配弹速散布，刀配背刺，剑配距离击退，拔刀剑配拔刀技刀魂，法术配冷却前摇法力，
+            //      弓配拉弓爆头省箭，魔艺配投射物）。
+            // 改了这里的默认值，要把上面的 SPEC_BALANCE_VERSION 加一，老配置里的特化数值才会跟着更新。
+
+            // ── 枪械 · 弹匣 ──
             defineSpec(builder, Specialization.GUN_EXTENDED_MAG, values -> {
-                values.put("magazine", 2.0D);
+                values.put("magazine", 1.8D);
                 values.put("killRefill", 0.15D);
-                values.put("reloadTime", 1.8D);
-                values.put("moveSpeed", 0.95D);
+                values.put("reloadTime", 1.4D);
+                values.put("adsTime", 1.1D);
             });
             defineSpec(builder, Specialization.GUN_COMPACT_MAG, values -> {
                 values.put("reloadTime", 0.5D);
-                values.put("moveSpeed", 1.08D);
-                values.put("magazine", 0.5D);
+                values.put("drawTime", 0.8D);
+                values.put("moveSpeed", 1.05D);
+                values.put("magazine", 0.6D);
             });
-            defineSpec(builder, Specialization.GUN_HEAVY_AMMO, values -> {
-                values.put("damage", 2.5D);
-                values.put("critChance", 0.05D);
-                values.put("critDamage", 2.0D);
-                values.put("magazine", 0.5D);
+            defineSpec(builder, Specialization.GUN_JUNGLE_CLIP, values -> {
+                values.put("reloadTime", 0.65D);
+                values.put("magazine", 1.15D);
+                values.put("adsTime", 1.15D);
+                values.put("moveSpeed", 0.95D);
+            });
+            defineSpec(builder, Specialization.GUN_DRUM_MAGAZINE, values -> {
+                values.put("magazine", 2.5D);
+                values.put("recoil", 0.9D);
                 values.put("reloadTime", 2.0D);
+                values.put("adsTime", 1.25D);
+                values.put("drawTime", 1.3D);
                 values.put("moveSpeed", 0.9D);
-                values.put("recoil", 1.25D);
             });
-            defineSpec(builder, Specialization.GUN_MATCH_BARREL, values -> {
-                values.put("headShotDamage", 2.2D);
-                values.put("critChance", 0.15D);
-                values.put("critDamage", 1.5D);
-                values.put("bodyShotDamage", 0.7D);
-                values.put("bulletSpeed", 1.15D);
+            defineSpec(builder, Specialization.GUN_BOTTOM_LOAD, values -> {
+                values.put("lastRoundDamage", 1.6D);
+                values.put("magazine", 0.9D);
+            });
+            // ── 枪械 · 弹药 ──
+            defineSpec(builder, Specialization.GUN_HEAVY_AMMO, values -> {
+                values.put("damage", 2.2D);
+                values.put("magazine", 0.5D);
+                values.put("reloadTime", 1.6D);
+                values.put("recoil", 1.35D);
+                values.put("fireRate", 0.85D);
             });
             defineSpec(builder, Specialization.GUN_HOLLOW_POINT, values -> {
                 values.put("executeDamage", 2.2D);
                 values.put("executeThreshold", 0.35D);
-                values.put("killRefill", 0.25D);
                 values.put("freshDamage", 0.75D);
-            });
-            defineSpec(builder, Specialization.GUN_BANDOLIER, values -> {
-                values.put("killRefill", 0.5D);
-                values.put("xpGain", 1.5D);
-                values.put("damage", 0.85D);
+                values.put("armoredDamage", 0.85D);
             });
             defineSpec(builder, Specialization.GUN_SIPHON_ROUNDS, values -> {
                 values.put("lifeSteal", 0.1D);
                 values.put("damage", 0.85D);
                 values.put("magazine", 0.85D);
             });
-            defineSpec(builder, Specialization.GUN_LIGHT_FRAME, values -> {
-                values.put("moveSpeed", 1.15D);
-                values.put("reloadTime", 0.8D);
-                values.put("damage", 0.85D);
-                values.put("magazine", 0.8D);
-                values.put("recoil", 1.2D);
-            });
             defineSpec(builder, Specialization.GUN_TRACER_ROUNDS, values -> {
                 values.put("comboStep", 0.04D);
                 values.put("comboMax", 10.0D);
-                values.put("damage", 0.8D);
+                values.put("hipSpread", 0.85D);
+                values.put("damage", 0.85D);
             });
             defineSpec(builder, Specialization.GUN_ARMOR_PIERCING, values -> {
                 values.put("armoredDamage", 1.8D);
+                values.put("bulletSpeed", 1.1D);
                 values.put("unarmoredDamage", 0.8D);
             });
             defineSpec(builder, Specialization.GUN_SOFT_POINT, values -> {
-                values.put("unarmoredDamage", 1.5D);
+                values.put("unarmoredDamage", 1.4D);
+                values.put("bodyShotDamage", 1.15D);
                 values.put("armoredDamage", 0.7D);
-            });
-            defineSpec(builder, Specialization.GUN_SUPPRESSOR, values -> {
-                values.put("critChance", 0.12D);
-                values.put("critDamage", 1.4D);
-                values.put("damage", 0.9D);
-                values.put("gunVolume", 0.3D);
-            });
-            defineSpec(builder, Specialization.GUN_MUZZLE_BRAKE, values -> {
-                values.put("comboStep", 0.03D);
-                values.put("comboMax", 8.0D);
-                values.put("reloadTime", 0.9D);
-                values.put("damage", 0.9D);
-                values.put("recoil", 0.6D);
-            });
-            defineSpec(builder, Specialization.GUN_TACTICAL_GRIP, values -> {
-                values.put("moveSpeed", 1.1D);
-                values.put("reloadTime", 0.9D);
-                values.put("magazine", 0.85D);
-                values.put("recoil", 0.8D);
-            });
-            defineSpec(builder, Specialization.GUN_JUNGLE_CLIP, values -> {
-                values.put("reloadTime", 0.7D);
-                values.put("magazine", 1.2D);
-                values.put("damage", 0.9D);
             });
             defineSpec(builder, Specialization.GUN_HOT_LOAD, values -> {
                 values.put("damage", 1.25D);
-                values.put("critDamage", 1.4D);
-                values.put("magazine", 0.8D);
-                values.put("reloadTime", 1.2D);
-                values.put("bulletSpeed", 1.2D);
-                values.put("critChance", 0.1D);
+                values.put("bulletSpeed", 1.25D);
+                values.put("recoil", 1.3D);
+                values.put("reloadTime", 1.15D);
             });
-            defineSpec(builder, Specialization.GUN_DRUM_MAGAZINE, values -> {
-                values.put("magazine", 2.5D);
-                values.put("reloadTime", 2.2D);
-                values.put("moveSpeed", 0.9D);
+            defineSpec(builder, Specialization.GUN_PENETRATOR, values -> {
+                values.put("pierce", 2.0D);
+                values.put("bulletSpeed", 1.2D);
+                values.put("damage", 0.85D);
+                values.put("magazine", 0.85D);
+            });
+            defineSpec(builder, Specialization.GUN_INCENDIARY, values -> {
+                values.put("igniteChance", 0.3D);
+                values.put("damage", 0.9D);
+                values.put("bulletSpeed", 0.9D);
+            });
+            // ── 枪械 · 枪口 ──
+            defineSpec(builder, Specialization.GUN_MATCH_BARREL, values -> {
+                values.put("headShotDamage", 2.0D);
+                values.put("aimSpread", 0.7D);
+                values.put("bulletSpeed", 1.15D);
+                values.put("bodyShotDamage", 0.75D);
+            });
+            defineSpec(builder, Specialization.GUN_SUPPRESSOR, values -> {
+                values.put("gunVolume", 0.3D);
+                values.put("critChance", 0.12D);
+                values.put("critDamage", 1.5D);
+                values.put("damage", 0.9D);
+                // 亚音速弹：消音器的老搭档，安静的代价是飞得慢
+                values.put("bulletSpeed", 0.85D);
+            });
+            defineSpec(builder, Specialization.GUN_MUZZLE_BRAKE, values -> {
+                values.put("recoil", 0.6D);
+                values.put("hipSpread", 0.8D);
+                values.put("gunVolume", 1.5D);
+                values.put("damage", 0.95D);
+            });
+            // ── 枪械 · 枪机 ──
+            defineSpec(builder, Specialization.GUN_RAPID_CYCLE, values -> {
+                values.put("fireRate", 1.3D);
+                values.put("recoil", 1.3D);
+                values.put("hipSpread", 1.25D);
+                values.put("aimSpread", 1.15D);
+            });
+            defineSpec(builder, Specialization.GUN_HEAVY_BUFFER, values -> {
+                values.put("damage", 1.3D);
+                values.put("recoil", 0.7D);
+                values.put("fireRate", 0.75D);
+            });
+            defineSpec(builder, Specialization.GUN_STRAIGHT_PULL, values -> {
+                values.put("boltTime", 0.5D);
+                values.put("reloadTime", 0.85D);
+                values.put("recoil", 1.15D);
+            });
+            // ── 枪械 · 枪身 ──
+            defineSpec(builder, Specialization.GUN_TACTICAL_GRIP, values -> {
+                values.put("recoil", 0.8D);
+                values.put("adsTime", 0.85D);
+                values.put("hipSpread", 0.8D);
+                values.put("drawTime", 1.15D);
+            });
+            defineSpec(builder, Specialization.GUN_MARKSMAN_STOCK, values -> {
+                values.put("aimSpread", 0.4D);
+                values.put("adsTime", 0.8D);
+                values.put("recoil", 0.85D);
+                values.put("hipSpread", 1.5D);
+                values.put("moveSpeed", 0.93D);
+            });
+            defineSpec(builder, Specialization.GUN_LIGHT_FRAME, values -> {
+                values.put("moveSpeed", 1.12D);
+                values.put("sprintTime", 0.6D);
+                values.put("drawTime", 0.85D);
+                values.put("recoil", 1.2D);
+                values.put("damage", 0.9D);
+            });
+            // ── 枪械 · 训练 ──
+            defineSpec(builder, Specialization.GUN_POINT_SHOOTING, values -> {
+                values.put("hipSpread", 0.4D);
+                values.put("moveSpeed", 1.05D);
+                values.put("adsTime", 1.35D);
+                values.put("aimSpread", 1.25D);
             });
             defineSpec(builder, Specialization.GUN_VETERAN_MANUAL, values -> {
                 values.put("xpGain", 1.8D);
+                values.put("reloadTime", 0.9D);
                 values.put("damage", 0.9D);
+            });
+            defineSpec(builder, Specialization.GUN_AMMO_DISCIPLINE, values -> {
+                values.put("ammoSave", 0.3D);
+                values.put("aimSpread", 0.85D);
+                values.put("fireRate", 0.85D);
+            });
+            defineSpec(builder, Specialization.GUN_BREACHER, values -> {
+                values.put("nearDamage", 1.5D);
+                values.put("moveSpeed", 1.05D);
+                values.put("farDamage", 0.7D);
+            });
+            defineSpec(builder, Specialization.GUN_LONGSHOT, values -> {
+                values.put("farDamage", 1.4D);
+                values.put("aimSpread", 0.9D);
+                values.put("nearDamage", 0.8D);
+                values.put("adsTime", 1.1D);
+            });
+            // ── 枪械 · 装具 ──
+            defineSpec(builder, Specialization.GUN_BANDOLIER, values -> {
+                values.put("killRefill", 0.5D);
+                values.put("reloadTime", 0.9D);
+                values.put("moveSpeed", 0.95D);
             });
             defineSpec(builder, Specialization.GUN_FIELD_DRESSING, values -> {
-                values.put("lifeSteal", 0.06D);
-                values.put("killRefill", 0.2D);
-                values.put("damage", 0.9D);
+                values.put("damageTaken", 0.8D);
+                values.put("moveSpeed", 0.92D);
+                values.put("sprintTime", 1.2D);
+            });
+            defineSpec(builder, Specialization.GUN_QUICKDRAW, values -> {
+                values.put("drawTime", 0.3D);
+                values.put("sprintTime", 0.7D);
+                values.put("damage", 0.93D);
+            });
+            defineSpec(builder, Specialization.GUN_ADRENALINE, values -> {
+                values.put("frenzyStep", 0.08D);
+                values.put("frenzyMax", 5.0D);
+                values.put("killHeal", 0.05D);
+                values.put("damageTaken", 1.1D);
             });
 
+            // ── 近战刀包 · 握柄 ──
             defineSpec(builder, Specialization.MELEE_WRAPPED_GRIP, values -> {
-                values.put("attackInterval", 0.6D);
-                values.put("moveSpeed", 1.1D);
-                values.put("damage", 0.65D);
+                values.put("attackInterval", 0.65D);
+                values.put("moveSpeed", 1.08D);
+                values.put("damage", 0.7D);
             });
+            defineSpec(builder, Specialization.MELEE_SHORT_GRIP, values -> {
+                values.put("backstabDamage", 1.6D);
+                values.put("moveSpeed", 1.08D);
+                values.put("damage", 0.88D);
+                values.put("knockback", 0.5D);
+            });
+            defineSpec(builder, Specialization.MELEE_BALANCED_POMMEL, values -> {
+                values.put("attackInterval", 0.85D);
+                values.put("knockback", 1.3D);
+                values.put("durability", 1.4D);
+            });
+            // ── 近战刀包 · 刀身 ──
             defineSpec(builder, Specialization.MELEE_WEIGHTED_HEAD, values -> {
-                values.put("damage", 1.6D);
-                values.put("critChance", 0.15D);
-                values.put("critDamage", 1.8D);
-                values.put("attackInterval", 1.6D);
-                values.put("durability", 1.5D);
+                values.put("damage", 1.45D);
+                values.put("knockback", 1.6D);
+                values.put("critChance", 0.1D);
+                values.put("critDamage", 1.6D);
+                values.put("attackInterval", 1.5D);
+                values.put("durability", 1.3D);
             });
             defineSpec(builder, Specialization.MELEE_HARDENED_TIP, values -> {
-                values.put("armoredDamage", 1.9D);
+                values.put("armoredDamage", 1.8D);
                 values.put("durability", 0.7D);
-                values.put("unarmoredDamage", 0.75D);
+                values.put("unarmoredDamage", 0.8D);
             });
+            defineSpec(builder, Specialization.MELEE_FORGED_STEEL, values -> {
+                values.put("durability", 0.35D);
+                values.put("damage", 1.1D);
+                values.put("attackInterval", 1.15D);
+            });
+            // ── 近战刀包 · 刃口 ──
             defineSpec(builder, Specialization.MELEE_SERRATED_EDGE, values -> {
-                values.put("executeDamage", 2.5D);
+                values.put("executeDamage", 2.3D);
                 values.put("executeThreshold", 0.3D);
                 values.put("lifeSteal", 0.05D);
-                values.put("freshDamage", 0.7D);
-            });
-            defineSpec(builder, Specialization.MELEE_BLOOD_GROOVE, values -> {
-                values.put("lifeSteal", 0.15D);
-                values.put("damage", 0.8D);
+                values.put("freshDamage", 0.75D);
             });
             defineSpec(builder, Specialization.MELEE_KEEN_EDGE, values -> {
-                values.put("comboStep", 0.08D);
+                values.put("comboStep", 0.07D);
                 values.put("comboMax", 6.0D);
-                values.put("damage", 0.8D);
+                values.put("attackInterval", 0.95D);
+                values.put("damage", 0.82D);
             });
+            defineSpec(builder, Specialization.MELEE_RECURVE_BLADE, values -> {
+                values.put("critChance", 0.2D);
+                values.put("critDamage", 1.6D);
+                values.put("damage", 0.9D);
+            });
+            defineSpec(builder, Specialization.MELEE_BLOOD_GROOVE, values -> {
+                values.put("lifeSteal", 0.13D);
+                values.put("durability", 0.85D);
+                values.put("damage", 0.82D);
+            });
+            defineSpec(builder, Specialization.MELEE_VENOM_EDGE, values -> {
+                values.put("weakenChance", 0.35D);
+                values.put("slowChance", 0.2D);
+                values.put("damage", 0.9D);
+            });
+            // ── 近战刀包 · 战法 ──
+            defineSpec(builder, Specialization.MELEE_BLEEDER, values -> {
+                values.put("freshDamage", 1.5D);
+                values.put("backstabDamage", 1.25D);
+                values.put("executeDamage", 0.8D);
+                values.put("executeThreshold", 0.3D);
+            });
+            defineSpec(builder, Specialization.MELEE_TRENCH_KNIFE, values -> {
+                values.put("vsPlayerDamage", 1.45D);
+                values.put("moveSpeed", 1.05D);
+                values.put("vsMobDamage", 0.85D);
+            });
+            defineSpec(builder, Specialization.MELEE_HUNTING_KNIFE, values -> {
+                values.put("vsMobDamage", 1.3D);
+                values.put("backstabDamage", 1.15D);
+                values.put("vsPlayerDamage", 0.8D);
+            });
+            defineSpec(builder, Specialization.MELEE_BLOODLUST, values -> {
+                values.put("frenzyStep", 0.1D);
+                values.put("frenzyMax", 3.0D);
+                values.put("moveSpeed", 1.05D);
+                values.put("durability", 1.2D);
+            });
+            // ── 近战刀包 · 保养 ──
             defineSpec(builder, Specialization.MELEE_WHETSTONE, values -> {
                 values.put("xpGain", 1.6D);
                 values.put("durability", 0.5D);
                 values.put("damage", 0.85D);
             });
-            defineSpec(builder, Specialization.MELEE_RECURVE_BLADE, values -> {
-                values.put("critChance", 0.2D);
-                values.put("critDamage", 1.5D);
-                values.put("damage", 0.9D);
-            });
-            defineSpec(builder, Specialization.MELEE_BALANCED_POMMEL, values -> {
-                values.put("attackInterval", 0.9D);
-                values.put("damage", 1.05D);
-                values.put("durability", 1.4D);
-            });
-            defineSpec(builder, Specialization.MELEE_TRENCH_KNIFE, values -> {
-                values.put("vsPlayerDamage", 1.5D);
-                values.put("vsMobDamage", 0.85D);
-            });
-            defineSpec(builder, Specialization.MELEE_HUNTING_KNIFE, values -> {
-                values.put("vsMobDamage", 1.3D);
-                values.put("xpGain", 1.2D);
-                values.put("vsPlayerDamage", 0.8D);
-                values.put("durability", 1.25D);
-            });
-            defineSpec(builder, Specialization.MELEE_FORGED_STEEL, values -> {
-                values.put("durability", 0.4D);
-                values.put("damage", 1.1D);
-                values.put("attackInterval", 1.15D);
-            });
-            defineSpec(builder, Specialization.MELEE_BLEEDER, values -> {
-                values.put("executeDamage", 1.8D);
-                values.put("executeThreshold", 0.4D);
-                values.put("comboStep", 0.04D);
-                values.put("comboMax", 6.0D);
-                values.put("freshDamage", 0.85D);
-            });
-            defineSpec(builder, Specialization.MELEE_SHORT_GRIP, values -> {
-                values.put("moveSpeed", 1.12D);
-                values.put("damage", 0.85D);
-            });
 
+            // ── 拔刀剑 · 刀装 ──
+            defineSpec(builder, Specialization.BLADE_POLISH, values -> {
+                values.put("directDamage", 1.5D);
+                values.put("summonedDamage", 0.55D);
+            });
+            defineSpec(builder, Specialization.BLADE_MEITO, values -> {
+                values.put("saDamage", 1.5D);
+                values.put("durability", 0.5D);
+                values.put("summonedDamage", 0.8D);
+            });
+            defineSpec(builder, Specialization.BLADE_ZANTETSU, values -> {
+                values.put("armoredDamage", 1.8D);
+                values.put("knockback", 1.3D);
+                values.put("unarmoredDamage", 0.8D);
+            });
+            defineSpec(builder, Specialization.BLADE_RAIKIRI, values -> {
+                values.put("slowChance", 0.35D);
+                values.put("saDamage", 1.1D);
+                values.put("summonedDamage", 0.85D);
+            });
+            // ── 拔刀剑 · 幻影 ──
             defineSpec(builder, Specialization.BLADE_PHANTOM, values -> {
-                values.put("summonedDamage", 2.0D);
+                values.put("summonedDamage", 1.9D);
                 values.put("moveSpeed", 1.05D);
                 values.put("directDamage", 0.6D);
             });
-            defineSpec(builder, Specialization.BLADE_POLISH, values -> {
-                values.put("directDamage", 1.5D);
-                values.put("critChance", 0.15D);
-                values.put("critDamage", 1.6D);
-                values.put("summonedDamage", 0.5D);
+            defineSpec(builder, Specialization.BLADE_ONIKOKU, values -> {
+                values.put("summonedDamage", 1.4D);
+                values.put("soulGain", 1.5D);
+                values.put("directDamage", 0.8D);
             });
-            defineSpec(builder, Specialization.BLADE_HAISUI, values -> {
-                values.put("desperationDamage", 2.2D);
-                values.put("desperationThreshold", 0.5D);
-                values.put("desperationFloor", 0.3D);
-                values.put("lifeSteal", 0.08D);
-                values.put("damage", 0.85D);
-            });
-            defineSpec(builder, Specialization.BLADE_SHINKEN, values -> {
-                values.put("vsPlayerDamage", 1.6D);
-                values.put("durability", 0.75D);
-                values.put("vsMobDamage", 0.8D);
-            });
-            defineSpec(builder, Specialization.BLADE_SOUL_EATER, values -> {
-                values.put("lifeSteal", 0.15D);
-                values.put("damage", 0.8D);
-            });
-            defineSpec(builder, Specialization.BLADE_COMBO, values -> {
-                values.put("comboStep", 0.08D);
-                values.put("comboMax", 6.0D);
-                values.put("damage", 0.8D);
-            });
-            defineSpec(builder, Specialization.BLADE_SHUGYO, values -> {
-                values.put("xpGain", 1.6D);
-                values.put("durability", 0.5D);
-                values.put("damage", 0.85D);
-            });
+            // ── 拔刀剑 · 剑技 ──
             defineSpec(builder, Specialization.BLADE_IAI, values -> {
-                values.put("freshDamage", 1.6D);
-                values.put("critChance", 0.1D);
+                values.put("freshDamage", 1.7D);
                 values.put("damage", 0.9D);
             });
             defineSpec(builder, Specialization.BLADE_MIKIRI, values -> {
                 values.put("critChance", 0.25D);
-                values.put("critDamage", 1.5D);
+                values.put("critDamage", 1.6D);
+                values.put("damageTaken", 0.92D);
                 values.put("damage", 0.85D);
             });
-            defineSpec(builder, Specialization.BLADE_ONIKOKU, values -> {
-                values.put("summonedDamage", 1.5D);
-                values.put("lifeSteal", 0.08D);
-                values.put("directDamage", 0.8D);
-            });
-            defineSpec(builder, Specialization.BLADE_ZANTETSU, values -> {
-                values.put("armoredDamage", 1.9D);
-                values.put("unarmoredDamage", 0.8D);
+            defineSpec(builder, Specialization.BLADE_COMBO, values -> {
+                values.put("comboStep", 0.07D);
+                values.put("comboMax", 7.0D);
+                values.put("saDamage", 1.1D);
+                values.put("damage", 0.82D);
             });
             defineSpec(builder, Specialization.BLADE_MUSOU, values -> {
-                values.put("vsMobDamage", 1.3D);
-                values.put("comboStep", 0.05D);
-                values.put("comboMax", 8.0D);
+                values.put("vsMobDamage", 1.25D);
+                values.put("knockback", 1.2D);
+                values.put("moveSpeed", 1.05D);
                 values.put("vsPlayerDamage", 0.8D);
+            });
+            // ── 拔刀剑 · 心法 ──
+            defineSpec(builder, Specialization.BLADE_HAISUI, values -> {
+                values.put("desperationDamage", 2.2D);
+                values.put("desperationThreshold", 0.5D);
+                values.put("desperationFloor", 0.3D);
+                values.put("lifeSteal", 0.06D);
+                values.put("damage", 0.85D);
+            });
+            defineSpec(builder, Specialization.BLADE_SHINKEN, values -> {
+                values.put("vsPlayerDamage", 1.5D);
+                values.put("durability", 0.75D);
+                values.put("vsMobDamage", 0.8D);
+            });
+            defineSpec(builder, Specialization.BLADE_SHUGYO, values -> {
+                values.put("xpGain", 1.6D);
+                values.put("soulGain", 1.3D);
+                values.put("damage", 0.85D);
             });
             defineSpec(builder, Specialization.BLADE_SHINSOKU, values -> {
                 values.put("moveSpeed", 1.15D);
+                values.put("damageTaken", 0.92D);
                 values.put("damage", 0.85D);
             });
-            defineSpec(builder, Specialization.BLADE_MEITO, values -> {
-                values.put("durability", 0.4D);
-                values.put("damage", 1.1D);
-                values.put("summonedDamage", 0.8D);
+            defineSpec(builder, Specialization.BLADE_SOUL_EATER, values -> {
+                values.put("lifeSteal", 0.14D);
+                values.put("soulGain", 1.2D);
+                values.put("damage", 0.82D);
+            });
+            defineSpec(builder, Specialization.BLADE_SHURA, values -> {
+                values.put("frenzyStep", 0.1D);
+                values.put("frenzyMax", 5.0D);
+                values.put("damageTaken", 1.15D);
             });
 
+            // ── 铁魔法 · 媒介 ──
             defineSpec(builder, Specialization.SPELL_FOCUS_CRYSTAL, values -> {
                 values.put("damage", 1.35D);
                 values.put("critChance", 0.1D);
                 values.put("critDamage", 1.5D);
                 values.put("manaCost", 1.3D);
-            });
-            defineSpec(builder, Specialization.SPELL_COOLDOWN_RUNE, values -> {
-                values.put("spellCooldown", 0.7D);
-                values.put("damage", 0.85D);
-                values.put("castTime", 0.9D);
-            });
-            defineSpec(builder, Specialization.SPELL_THRIFTY_INK, values -> {
-                values.put("manaCost", 0.65D);
-                values.put("damage", 0.9D);
-            });
-            defineSpec(builder, Specialization.SPELL_ARCANE_SEAL, values -> {
-                values.put("spellLevel", 1.0D);
-                values.put("manaCost", 1.3D);
-                values.put("spellCooldown", 1.15D);
-            });
-            defineSpec(builder, Specialization.SPELL_SOUL_SIGIL, values -> {
-                values.put("lifeSteal", 0.12D);
-                values.put("damage", 0.85D);
-            });
-            defineSpec(builder, Specialization.SPELL_CHAIN_BOOKMARK, values -> {
-                values.put("comboStep", 0.06D);
-                values.put("comboMax", 8.0D);
-                values.put("damage", 0.8D);
-            });
-            defineSpec(builder, Specialization.SPELL_STUDY_NOTES, values -> {
-                values.put("xpGain", 1.6D);
-                values.put("damage", 0.85D);
-            });
-            defineSpec(builder, Specialization.SPELL_SEARING_INK, values -> {
-                values.put("damage", 1.2D);
-                values.put("critChance", 0.1D);
-                values.put("manaCost", 1.15D);
-            });
-            defineSpec(builder, Specialization.SPELL_SHORTHAND_RUNE, values -> {
-                values.put("spellCooldown", 0.85D);
-                values.put("manaCost", 0.85D);
-                values.put("damage", 0.85D);
-                values.put("castTime", 0.8D);
-            });
-            defineSpec(builder, Specialization.SPELL_HUNTER_CHAPTER, values -> {
-                values.put("vsMobDamage", 1.3D);
-                values.put("vsPlayerDamage", 0.8D);
-                values.put("manaCost", 1.15D);
-            });
-            defineSpec(builder, Specialization.SPELL_DUEL_CHAPTER, values -> {
-                values.put("vsPlayerDamage", 1.4D);
-                values.put("vsMobDamage", 0.85D);
-            });
-            defineSpec(builder, Specialization.SPELL_EXECUTION_SEAL, values -> {
-                values.put("executeDamage", 2.0D);
-                values.put("executeThreshold", 0.3D);
-                values.put("freshDamage", 0.8D);
-            });
-            defineSpec(builder, Specialization.SPELL_SUNDER_SEAL, values -> {
-                values.put("armoredDamage", 1.7D);
-                values.put("unarmoredDamage", 0.85D);
-            });
-            defineSpec(builder, Specialization.SPELL_DOUBLE_BINDING, values -> {
-                values.put("spellLevel", 1.0D);
-                values.put("damage", 0.9D);
-                values.put("spellCooldown", 1.3D);
-                values.put("castTime", 1.2D);
             });
             defineSpec(builder, Specialization.SPELL_ECHO_CRYSTAL, values -> {
                 values.put("doubleCast", 1.0D);
@@ -811,179 +1036,488 @@ public final class MasteryConfig {
                 values.put("manaCost", 1.5D);
                 values.put("spellCooldown", 1.5D);
             });
-
-            defineSpec(builder, Specialization.GLYPH_SOURCE_GEM, values -> {
-                values.put("damage", 1.35D);
-                values.put("critChance", 0.1D);
-                values.put("critDamage", 1.5D);
-                values.put("manaCost", 1.3D);
-            });
-            defineSpec(builder, Specialization.GLYPH_THRIFTY_QUILL, values -> {
+            // ── 铁魔法 · 墨水 ──
+            defineSpec(builder, Specialization.SPELL_THRIFTY_INK, values -> {
                 values.put("manaCost", 0.65D);
                 values.put("damage", 0.9D);
+                values.put("spellCooldown", 1.05D);
             });
-            defineSpec(builder, Specialization.GLYPH_SOUL_RIBBON, values -> {
-                values.put("lifeSteal", 0.12D);
-                values.put("damage", 0.85D);
+            defineSpec(builder, Specialization.SPELL_SEARING_INK, values -> {
+                values.put("freshDamage", 1.45D);
+                values.put("damage", 1.08D);
+                values.put("manaCost", 1.15D);
             });
-            defineSpec(builder, Specialization.GLYPH_CHAIN_RUNE, values -> {
+            // ── 铁魔法 · 符文 ──
+            defineSpec(builder, Specialization.SPELL_COOLDOWN_RUNE, values -> {
+                values.put("spellCooldown", 0.72D);
+                values.put("damage", 0.88D);
+            });
+            defineSpec(builder, Specialization.SPELL_SHORTHAND_RUNE, values -> {
+                values.put("castTime", 0.65D);
+                values.put("manaCost", 0.92D);
+                values.put("damage", 0.9D);
+            });
+            defineSpec(builder, Specialization.SPELL_DOUBLE_BINDING, values -> {
+                // 冷却周转收益，不增加法术实体数量或法术等级
+                values.put("spellCooldown", 0.55D);
+                values.put("manaCost", 1.25D);
+                values.put("castTime", 1.15D);
+            });
+            // ── 铁魔法 · 章节 ──
+            defineSpec(builder, Specialization.SPELL_HUNTER_CHAPTER, values -> {
+                values.put("vsMobDamage", 1.3D);
+                values.put("xpGain", 1.15D);
+                values.put("vsPlayerDamage", 0.8D);
+            });
+            defineSpec(builder, Specialization.SPELL_DUEL_CHAPTER, values -> {
+                values.put("vsPlayerDamage", 1.4D);
+                values.put("castTime", 0.9D);
+                values.put("vsMobDamage", 0.85D);
+            });
+            defineSpec(builder, Specialization.SPELL_STUDY_NOTES, values -> {
+                values.put("xpGain", 1.6D);
+                values.put("spellCooldown", 0.95D);
+                values.put("damage", 0.88D);
+            });
+            defineSpec(builder, Specialization.SPELL_CHAIN_BOOKMARK, values -> {
                 values.put("comboStep", 0.06D);
                 values.put("comboMax", 8.0D);
-                values.put("damage", 0.8D);
+                values.put("castTime", 0.92D);
+                values.put("damage", 0.82D);
+            });
+            defineSpec(builder, Specialization.SPELL_FAR_CHAPTER, values -> {
+                values.put("farDamage", 1.35D);
+                values.put("nearDamage", 0.8D);
+                values.put("castTime", 1.1D);
+            });
+            // ── 铁魔法 · 咒印 ──
+            defineSpec(builder, Specialization.SPELL_SOUL_SIGIL, values -> {
+                values.put("lifeSteal", 0.12D);
+                values.put("damage", 0.85D);
+                values.put("manaCost", 1.1D);
+            });
+            defineSpec(builder, Specialization.SPELL_EXECUTION_SEAL, values -> {
+                values.put("executeDamage", 2.0D);
+                values.put("executeThreshold", 0.3D);
+                values.put("manaCost", 0.9D);
+                values.put("freshDamage", 0.8D);
+            });
+            defineSpec(builder, Specialization.SPELL_SUNDER_SEAL, values -> {
+                values.put("armoredDamage", 1.7D);
+                values.put("unarmoredDamage", 0.85D);
+                values.put("castTime", 1.08D);
+            });
+            defineSpec(builder, Specialization.SPELL_ARCANE_SEAL, values -> {
+                // 血契：以血换力。不走法术等级，避免间接扩大范围
+                values.put("desperationDamage", 2.0D);
+                values.put("desperationThreshold", 0.5D);
+                values.put("desperationFloor", 0.25D);
+                values.put("manaCost", 0.85D);
+                values.put("damage", 0.88D);
+            });
+            defineSpec(builder, Specialization.SPELL_SOUL_HARVEST, values -> {
+                values.put("killHeal", 0.08D);
+                values.put("frenzyStep", 0.06D);
+                values.put("frenzyMax", 5.0D);
+                values.put("manaCost", 1.15D);
+            });
+
+            // ── 新生魔艺 · 催化 ──
+            defineSpec(builder, Specialization.GLYPH_SOURCE_GEM, values -> {
+                values.put("damage", 1.4D);
+                values.put("bulletSpeed", 1.1D);
+                values.put("manaCost", 1.35D);
+            });
+            defineSpec(builder, Specialization.GLYPH_SEARING_INK, values -> {
+                values.put("critChance", 0.18D);
+                values.put("critDamage", 1.6D);
+                values.put("manaCost", 1.2D);
+            });
+            // ── 新生魔艺 · 书写 ──
+            defineSpec(builder, Specialization.GLYPH_THRIFTY_QUILL, values -> {
+                values.put("manaCost", 0.6D);
+                values.put("damage", 0.9D);
             });
             defineSpec(builder, Specialization.GLYPH_STUDY_NOTES, values -> {
                 values.put("xpGain", 1.6D);
+                values.put("manaCost", 0.9D);
                 values.put("damage", 0.85D);
             });
-            defineSpec(builder, Specialization.GLYPH_SEARING_INK, values -> {
-                values.put("damage", 1.2D);
-                values.put("critChance", 0.1D);
-                values.put("manaCost", 1.15D);
+            // ── 新生魔艺 · 书带 ──
+            defineSpec(builder, Specialization.GLYPH_SOUL_RIBBON, values -> {
+                values.put("lifeSteal", 0.14D);
+                values.put("damage", 0.9D);
+                values.put("bulletSpeed", 0.85D);
             });
+            defineSpec(builder, Specialization.GLYPH_CHAIN_RUNE, values -> {
+                values.put("comboStep", 0.05D);
+                values.put("comboMax", 8.0D);
+                values.put("manaCost", 0.95D);
+                values.put("damage", 0.82D);
+            });
+            // ── 新生魔艺 · 书页 ──
             defineSpec(builder, Specialization.GLYPH_HUNTER_PAGE, values -> {
                 values.put("vsMobDamage", 1.3D);
+                values.put("manaCost", 0.9D);
                 values.put("vsPlayerDamage", 0.8D);
-                values.put("manaCost", 1.15D);
             });
             defineSpec(builder, Specialization.GLYPH_DUEL_PAGE, values -> {
                 values.put("vsPlayerDamage", 1.4D);
+                values.put("bulletSpeed", 1.1D);
                 values.put("vsMobDamage", 0.85D);
             });
+            defineSpec(builder, Specialization.GLYPH_FAR_PAGE, values -> {
+                values.put("farDamage", 1.35D);
+                values.put("bulletSpeed", 1.1D);
+                values.put("nearDamage", 0.8D);
+            });
+            // ── 新生魔艺 · 刻印 ──
             defineSpec(builder, Specialization.GLYPH_EXECUTE_RUNE, values -> {
-                values.put("executeDamage", 2.0D);
-                values.put("executeThreshold", 0.3D);
+                values.put("executeDamage", 1.9D);
+                values.put("executeThreshold", 0.35D);
+                values.put("bulletSpeed", 1.15D);
                 values.put("freshDamage", 0.8D);
             });
             defineSpec(builder, Specialization.GLYPH_SUNDER_RUNE, values -> {
                 values.put("armoredDamage", 1.7D);
+                values.put("pierce", 1.0D);
                 values.put("unarmoredDamage", 0.85D);
             });
+            defineSpec(builder, Specialization.GLYPH_SOURCE_SURGE, values -> {
+                values.put("frenzyStep", 0.08D);
+                values.put("frenzyMax", 4.0D);
+                values.put("bulletSpeed", 1.1D);
+                values.put("damage", 0.92D);
+            });
+            // ── 新生魔艺 · 形态 ──
+            defineSpec(builder, Specialization.GLYPH_SWIFT_FORM, values -> {
+                values.put("bulletSpeed", 1.45D);
+                values.put("damage", 0.92D);
+            });
+            defineSpec(builder, Specialization.GLYPH_PIERCING_FORM, values -> {
+                values.put("pierce", 2.0D);
+                values.put("damage", 0.88D);
+                values.put("manaCost", 1.1D);
+            });
 
+            // ── 原版剑类 · 剑身 ──
             defineSpec(builder, Specialization.SWORD_TEMPERED_EDGE, values -> {
-                values.put("damage", 1.4D);
-                values.put("critChance", 0.15D);
-                values.put("critDamage", 1.6D);
+                values.put("damage", 1.35D);
+                values.put("knockback", 1.4D);
+                values.put("reach", 1.05D);
                 values.put("attackInterval", 1.25D);
-                values.put("durability", 1.4D);
             });
             defineSpec(builder, Specialization.SWORD_LIGHT_BLADE, values -> {
                 values.put("attackInterval", 0.75D);
                 values.put("moveSpeed", 1.08D);
-                values.put("damage", 0.75D);
+                values.put("damage", 0.78D);
+                values.put("reach", 0.9D);
             });
-            defineSpec(builder, Specialization.SWORD_FULLER, values -> {
-                values.put("lifeSteal", 0.15D);
-                values.put("damage", 0.8D);
+            defineSpec(builder, Specialization.SWORD_FINE_STEEL, values -> {
+                values.put("reach", 1.2D);
+                values.put("durability", 0.7D);
+                values.put("attackInterval", 1.15D);
             });
+            // ── 原版剑类 · 剑刃 ──
             defineSpec(builder, Specialization.SWORD_SERRATED, values -> {
-                values.put("executeDamage", 2.2D);
+                values.put("executeDamage", 2.0D);
                 values.put("executeThreshold", 0.3D);
-                values.put("lifeSteal", 0.05D);
-                values.put("freshDamage", 0.75D);
+                values.put("knockback", 1.2D);
+                values.put("freshDamage", 0.8D);
             });
             defineSpec(builder, Specialization.SWORD_ARMOR_PIERCER, values -> {
-                values.put("armoredDamage", 1.8D);
-                values.put("durability", 0.7D);
+                values.put("armoredDamage", 1.75D);
+                values.put("reach", 1.05D);
                 values.put("unarmoredDamage", 0.8D);
             });
             defineSpec(builder, Specialization.SWORD_KEEN_EDGE, values -> {
-                values.put("comboStep", 0.08D);
-                values.put("comboMax", 6.0D);
-                values.put("damage", 0.8D);
-            });
-            defineSpec(builder, Specialization.SWORD_WHETSTONE, values -> {
-                values.put("xpGain", 1.6D);
-                values.put("durability", 0.5D);
+                values.put("comboStep", 0.06D);
+                values.put("comboMax", 8.0D);
+                values.put("reach", 1.05D);
                 values.put("damage", 0.85D);
             });
-            defineSpec(builder, Specialization.SWORD_FINE_STEEL, values -> {
-                values.put("damage", 1.15D);
-                values.put("durability", 0.7D);
-                values.put("attackInterval", 1.1D);
-            });
-            defineSpec(builder, Specialization.SWORD_BALANCED_POMMEL, values -> {
-                values.put("attackInterval", 0.9D);
-                values.put("damage", 1.05D);
-                values.put("durability", 1.4D);
-            });
-            defineSpec(builder, Specialization.SWORD_DUELIST, values -> {
-                values.put("vsPlayerDamage", 1.5D);
-                values.put("vsMobDamage", 0.85D);
-            });
-            defineSpec(builder, Specialization.SWORD_HUNTING_SWORD, values -> {
-                values.put("vsMobDamage", 1.3D);
-                values.put("xpGain", 1.2D);
-                values.put("vsPlayerDamage", 0.8D);
-                values.put("durability", 1.25D);
+            defineSpec(builder, Specialization.SWORD_FULLER, values -> {
+                values.put("lifeSteal", 0.12D);
+                values.put("attackInterval", 0.95D);
+                values.put("damage", 0.85D);
             });
             defineSpec(builder, Specialization.SWORD_RAPIER_POINT, values -> {
                 values.put("critChance", 0.2D);
                 values.put("critDamage", 1.5D);
-                values.put("damage", 0.9D);
+                values.put("reach", 1.1D);
+                values.put("damage", 0.88D);
             });
-            defineSpec(builder, Specialization.SWORD_BLEEDER, values -> {
-                values.put("executeDamage", 1.8D);
-                values.put("executeThreshold", 0.4D);
-                values.put("comboStep", 0.04D);
-                values.put("comboMax", 6.0D);
-                values.put("freshDamage", 0.85D);
+            defineSpec(builder, Specialization.SWORD_FLAME_EDGE, values -> {
+                values.put("igniteChance", 0.4D);
+                values.put("damage", 1.05D);
+                values.put("durability", 1.3D);
+            });
+            // ── 原版剑类 · 剑柄 ──
+            defineSpec(builder, Specialization.SWORD_BALANCED_POMMEL, values -> {
+                values.put("attackInterval", 0.85D);
+                values.put("damage", 1.05D);
+                values.put("knockback", 1.1D);
+                values.put("durability", 1.4D);
             });
             defineSpec(builder, Specialization.SWORD_QUICK_SCABBARD, values -> {
                 values.put("moveSpeed", 1.12D);
-                values.put("damage", 0.85D);
-            });
-
-            defineSpec(builder, Specialization.BOW_HEAVY_LIMBS, values -> {
-                values.put("damage", 1.35D);
-                values.put("moveSpeed", 0.9D);
-                values.put("drawSpeed", 0.9D);
-            });
-            defineSpec(builder, Specialization.BOW_FINE_STRING, values -> {
-                values.put("critChance", 0.2D);
-                values.put("critDamage", 1.5D);
+                values.put("freshDamage", 1.3D);
                 values.put("damage", 0.9D);
             });
-            defineSpec(builder, Specialization.BOW_HUNTER_QUIVER, values -> {
-                values.put("vsMobDamage", 1.3D);
-                values.put("xpGain", 1.2D);
-                values.put("vsPlayerDamage", 0.8D);
-                values.put("drawSpeed", 0.9D);
-            });
-            defineSpec(builder, Specialization.BOW_WAR_QUIVER, values -> {
+            // ── 原版剑类 · 剑术 ──
+            defineSpec(builder, Specialization.SWORD_DUELIST, values -> {
                 values.put("vsPlayerDamage", 1.4D);
+                values.put("damageTaken", 0.9D);
                 values.put("vsMobDamage", 0.85D);
             });
+            defineSpec(builder, Specialization.SWORD_HUNTING_SWORD, values -> {
+                values.put("vsMobDamage", 1.3D);
+                values.put("knockback", 1.3D);
+                values.put("vsPlayerDamage", 0.8D);
+            });
+            defineSpec(builder, Specialization.SWORD_BLEEDER, values -> {
+                values.put("damageTaken", 0.8D);
+                values.put("knockback", 1.25D);
+                values.put("damage", 0.85D);
+                values.put("moveSpeed", 0.95D);
+            });
+            defineSpec(builder, Specialization.SWORD_WHETSTONE, values -> {
+                values.put("xpGain", 1.7D);
+                values.put("attackInterval", 0.95D);
+                values.put("damage", 0.85D);
+            });
+            defineSpec(builder, Specialization.SWORD_TRIUMPH, values -> {
+                values.put("killHeal", 0.12D);
+                values.put("frenzyStep", 0.05D);
+                values.put("frenzyMax", 3.0D);
+                values.put("attackInterval", 1.1D);
+            });
+
+            // ── 弓弩 · 弓臂 ──
+            defineSpec(builder, Specialization.BOW_HEAVY_LIMBS, values -> {
+                values.put("damage", 1.3D);
+                values.put("knockback", 1.5D);
+                values.put("drawSpeed", 0.85D);
+                values.put("moveSpeed", 0.93D);
+            });
+            defineSpec(builder, Specialization.BOW_RECURVE_LIMBS, values -> {
+                values.put("drawSpeed", 1.3D);
+                values.put("bulletSpeed", 1.1D);
+                values.put("damage", 0.88D);
+            });
+            // ── 弓弩 · 弓弦 ──
+            defineSpec(builder, Specialization.BOW_FINE_STRING, values -> {
+                values.put("headShotDamage", 1.8D);
+                values.put("bulletSpeed", 1.1D);
+                values.put("bodyShotDamage", 0.85D);
+            });
+            defineSpec(builder, Specialization.BOW_BOWSTRING_WAX, values -> {
+                values.put("xpGain", 1.5D);
+                values.put("drawSpeed", 1.05D);
+                values.put("damage", 0.9D);
+            });
+            defineSpec(builder, Specialization.BOW_EAGLE_EYE, values -> {
+                values.put("farDamage", 1.45D);
+                values.put("headShotDamage", 1.1D);
+                values.put("nearDamage", 0.75D);
+            });
+            // ── 弓弩 · 箭头 ──
             defineSpec(builder, Specialization.BOW_BARBED_HEADS, values -> {
-                values.put("executeDamage", 1.8D);
+                values.put("executeDamage", 1.9D);
                 values.put("executeThreshold", 0.4D);
-                values.put("lifeSteal", 0.05D);
                 values.put("freshDamage", 0.85D);
+                values.put("drawSpeed", 0.95D);
             });
             defineSpec(builder, Specialization.BOW_BODKIN_HEADS, values -> {
                 values.put("armoredDamage", 1.8D);
                 values.put("unarmoredDamage", 0.8D);
+                values.put("drawSpeed", 0.92D);
             });
-            defineSpec(builder, Specialization.BOW_BOWSTRING_WAX, values -> {
-                values.put("durability", 0.5D);
-                values.put("xpGain", 1.4D);
+            defineSpec(builder, Specialization.BOW_BROADHEAD_HEADS, values -> {
+                values.put("unarmoredDamage", 1.35D);
+                values.put("critChance", 0.15D);
+                values.put("critDamage", 1.5D);
+                values.put("armoredDamage", 0.75D);
+            });
+            defineSpec(builder, Specialization.BOW_FIRE_ARROWS, values -> {
+                values.put("igniteChance", 0.5D);
                 values.put("damage", 0.9D);
             });
+            // ── 弓弩 · 箭杆 ──
             defineSpec(builder, Specialization.BOW_LIGHT_SHAFTS, values -> {
-                values.put("bulletSpeed", 1.25D);
-                values.put("drawSpeed", 1.3D);
+                values.put("bulletSpeed", 1.3D);
+                values.put("drawSpeed", 1.15D);
                 values.put("moveSpeed", 1.05D);
                 values.put("damage", 0.85D);
             });
             defineSpec(builder, Specialization.BOW_RAPID_SHAFTS, values -> {
                 values.put("comboStep", 0.05D);
                 values.put("comboMax", 8.0D);
-                values.put("drawSpeed", 1.15D);
+                values.put("drawSpeed", 1.1D);
                 values.put("damage", 0.85D);
+            });
+            defineSpec(builder, Specialization.BOW_PIERCE_SHAFTS, values -> {
+                values.put("pierce", 2.0D);
+                values.put("bulletSpeed", 1.1D);
+                values.put("damage", 0.88D);
+                values.put("drawSpeed", 0.9D);
+            });
+            defineSpec(builder, Specialization.BOW_FROST_SHAFTS, values -> {
+                values.put("slowChance", 0.45D);
+                values.put("bulletSpeed", 0.9D);
+                values.put("damage", 0.95D);
+            });
+            // ── 弓弩 · 箭囊 ──
+            defineSpec(builder, Specialization.BOW_HUNTER_QUIVER, values -> {
+                values.put("vsMobDamage", 1.3D);
+                values.put("ammoSave", 0.15D);
+                values.put("vsPlayerDamage", 0.8D);
+            });
+            defineSpec(builder, Specialization.BOW_WAR_QUIVER, values -> {
+                values.put("vsPlayerDamage", 1.4D);
+                values.put("drawSpeed", 1.1D);
+                values.put("vsMobDamage", 0.85D);
+            });
+            defineSpec(builder, Specialization.BOW_RECOVERY_QUIVER, values -> {
+                values.put("ammoSave", 0.4D);
+                values.put("damage", 0.93D);
+            });
+
+            // ── 匠魂 · 锻头 ──
+            defineSpec(builder, Specialization.TINKER_HEAVY_HEAD, values -> {
+                values.put("damage", 1.35D);
+                values.put("knockback", 1.35D);
+                values.put("attackInterval", 1.22D);
+            });
+            defineSpec(builder, Specialization.TINKER_KEEN_HEAD, values -> {
+                values.put("critChance", 0.2D);
+                values.put("critDamage", 1.5D);
+                values.put("damage", 0.88D);
+            });
+            defineSpec(builder, Specialization.TINKER_BROAD_HEAD, values -> {
+                values.put("reach", 1.18D);
+                values.put("damage", 1.05D);
+                values.put("attackInterval", 1.12D);
+            });
+            // ── 匠魂 · 手柄 ──
+            defineSpec(builder, Specialization.TINKER_LIGHT_HANDLE, values -> {
+                values.put("attackInterval", 0.75D);
+                values.put("moveSpeed", 1.08D);
+                values.put("damage", 0.8D);
+            });
+            defineSpec(builder, Specialization.TINKER_LONG_HANDLE, values -> {
+                values.put("reach", 1.22D);
+                values.put("knockback", 1.15D);
+                values.put("attackInterval", 1.1D);
+            });
+            defineSpec(builder, Specialization.TINKER_GRIPPED_HANDLE, values -> {
+                values.put("comboStep", 0.06D);
+                values.put("comboMax", 8.0D);
+                values.put("damage", 0.88D);
+            });
+            // ── 匠魂 · 镶嵌 ──
+            defineSpec(builder, Specialization.TINKER_SOUL_BINDING, values -> {
+                values.put("lifeSteal", 0.12D);
+                values.put("damage", 0.9D);
+            });
+            defineSpec(builder, Specialization.TINKER_STURDY_BINDING, values -> {
+                values.put("durability", 0.55D);
+                values.put("damageTaken", 0.95D);
+                values.put("attackInterval", 1.05D);
+            });
+            defineSpec(builder, Specialization.TINKER_EMBER_BINDING, values -> {
+                values.put("igniteChance", 0.4D);
+                values.put("damage", 1.05D);
+                values.put("durability", 1.3D);
+            });
+            // ── 匠魂 · 锻打 ──
+            defineSpec(builder, Specialization.TINKER_ARMOR_BREAK, values -> {
+                values.put("armoredDamage", 1.75D);
+                values.put("unarmoredDamage", 0.82D);
+            });
+            defineSpec(builder, Specialization.TINKER_EXECUTION, values -> {
+                values.put("executeDamage", 2.0D);
+                values.put("executeThreshold", 0.3D);
+                values.put("freshDamage", 0.82D);
+            });
+            defineSpec(builder, Specialization.TINKER_HUNT, values -> {
+                values.put("vsMobDamage", 1.2D);
+                values.put("vsPlayerDamage", 0.85D);
+                values.put("xpGain", 1.1D);
+            });
+            defineSpec(builder, Specialization.TINKER_FRENZY, values -> {
+                values.put("frenzyStep", 0.07D);
+                values.put("frenzyMax", 6.0D);
+                values.put("damageTaken", 1.08D);
+            });
+
+            // ── 甜蜜魔法 · 杖芯 ──
+            defineSpec(builder, Specialization.SM_DENSE_CORE, values -> {
+                values.put("damage", 1.3D);
+                values.put("manaCost", 1.25D);
+            });
+            defineSpec(builder, Specialization.SM_EFFICIENT_CORE, values -> {
+                values.put("manaCost", 0.7D);
+                values.put("damage", 0.9D);
+            });
+            defineSpec(builder, Specialization.SM_RESONANT_CORE, values -> {
+                values.put("critChance", 0.18D);
+                values.put("critDamage", 1.5D);
+                values.put("manaCost", 1.1D);
+            });
+            // ── 甜蜜魔法 · 术式 ──
+            defineSpec(builder, Specialization.SM_RAPID_FORMULA, values -> {
+                values.put("spellCooldown", 0.7D);
+                values.put("damage", 0.88D);
+            });
+            defineSpec(builder, Specialization.SM_HEAVY_FORMULA, values -> {
+                values.put("damage", 1.35D);
+                values.put("spellCooldown", 1.3D);
+            });
+            defineSpec(builder, Specialization.SM_STEADY_FORMULA, values -> {
+                values.put("damage", 1.1D);
+                values.put("manaCost", 0.92D);
+                values.put("spellCooldown", 1.1D);
+            });
+            // ── 甜蜜魔法 · 媒介 ──
+            defineSpec(builder, Specialization.SM_SIPHON_MEDIUM, values -> {
+                values.put("lifeSteal", 0.1D);
+                values.put("manaCost", 1.1D);
+            });
+            defineSpec(builder, Specialization.SM_EMBER_MEDIUM, values -> {
+                values.put("igniteChance", 0.4D);
+                values.put("damage", 1.05D);
+            });
+            defineSpec(builder, Specialization.SM_FROST_MEDIUM, values -> {
+                values.put("slowChance", 0.4D);
+                values.put("damage", 1.03D);
+            });
+            defineSpec(builder, Specialization.SM_CURSE_MEDIUM, values -> {
+                values.put("weakenChance", 0.35D);
+                values.put("damage", 1.05D);
+            });
+            // ── 甜蜜魔法 · 修习 ──
+            defineSpec(builder, Specialization.SM_HUNT, values -> {
+                values.put("vsMobDamage", 1.2D);
+                values.put("vsPlayerDamage", 0.85D);
+                values.put("xpGain", 1.1D);
+            });
+            defineSpec(builder, Specialization.SM_DUEL, values -> {
+                values.put("vsPlayerDamage", 1.25D);
+                values.put("vsMobDamage", 0.9D);
+            });
+            defineSpec(builder, Specialization.SM_PIERCE, values -> {
+                values.put("armoredDamage", 1.6D);
+                values.put("unarmoredDamage", 0.85D);
+            });
+            defineSpec(builder, Specialization.SM_SCHOLAR, values -> {
+                values.put("xpGain", 1.35D);
+                values.put("damage", 0.9D);
             });
 
             builder.pop();
 
-            builder.comment("全服专精排行榜：在专精界面左下角进入，能看全服谁练得最狠、点进去看他整个罗盘和选的流派。",
+            builder.comment("全局专精排行榜：在专精界面左下角进入，能看全局谁练得最狠、点进去看他整个罗盘和选的特化。",
                             "榜单数据存在主世界 data/albionmastery_leaderboard.dat 里，下线的玩家也在榜上。",
                             "单人世界同样可用（开局域网联机时就是一份小榜单）。")
                     .push("leaderboard");
@@ -997,6 +1531,11 @@ public final class MasteryConfig {
                     .comment("在线玩家的榜单数据多久刷新一次（秒）。登录、登出、玩家自己打开榜单时另外会立刻刷新，",
                             "所以这个值只影响「别人看到你」的延迟，调大点省性能")
                     .defineInRange("updateIntervalSeconds", 30, 5, 600);
+            this.leaderboardRetentionDays = builder
+                    .comment("多久没上线的玩家从榜单里清掉（天）。0 = 永不清理。",
+                            "榜单会把每个玩家的整份专精数据存在主世界的存档里，开服久了只增不减，",
+                            "长期运行的服务器建议留个上限。在线玩家永远不会被清")
+                    .defineInRange("retentionDays", 90, 0, 3650);
             this.leaderboardRequestCooldownSeconds = builder
                     .comment("同一名玩家两次请求榜单之间至少隔几秒（要榜单、看某个人分别计）。0 = 不限")
                     .defineInRange("requestCooldownSeconds", 2, 0, 60);
@@ -1005,7 +1544,7 @@ public final class MasteryConfig {
                             "别人看到的是「xxx 替代 yyy 成为了…」），不走聊天。只看总榜，日榜周榜月榜的变动不通知")
                     .define("broadcastTopChanges", true);
             this.leaderboardBroadcastSort = builder
-                    .comment("广播按哪种排序算前三：MAXED 满级数，LEVEL_SUM 等级总和，UNLOCKED 已解锁数")
+                    .comment("广播按哪种排序算前三：MAXED 满级数，LEVEL_SUM 等级总和，UNLOCKED 已解锁数，XP 经验总和")
                     .defineEnum("broadcastSort", LeaderboardSort.MAXED);
             builder.pop();
 
@@ -1015,13 +1554,13 @@ public final class MasteryConfig {
 
 
     /**
-     * 定义一个流派用到的数值项。
+     * 定义一个特化用到的数值项。
      *
-     * <p>只暴露这个流派真正会用的项：把二十几个维度全列出来、其中二十个写着 1.0，
+     * <p>只暴露这个特化真正会用的项：把二十几个维度全列出来、其中二十个写着 1.0，
      * 服主打开配置文件只会一脸茫然。
      *
      * @param builder  配置构建器
-     * @param spec     流派
+     * @param spec     特化
      * @param defaults 往里面塞「项名 -&gt; 默认值」
      */
     private static void defineSpec(ForgeConfigSpec.Builder builder, Specialization spec,
@@ -1045,9 +1584,20 @@ public final class MasteryConfig {
     }
 
     /**
-     * 一个流派在配置文件里的数值项。
+     * 取某个特化在配置文件里的数值项，管理指令改数值时用。
      *
-     * <p>用「项名 -&gt; 配置值」的表而不是固定字段：不同来源的流派关心的维度完全不同，
+     * @param spec 特化
+     * @return 数值项；制式之类没有数值的特化返回 null
+     */
+    @javax.annotation.Nullable
+    public static SpecEntry specEntry(Specialization spec) {
+        return SPEC_ENTRIES.get(spec);
+    }
+
+    /**
+     * 一个特化在配置文件里的数值项。
+     *
+     * <p>用「项名 -&gt; 配置值」的表而不是固定字段：不同来源的特化关心的维度完全不同，
      * 硬写成一个大 record 会留下一堆用不上的 null。
      *
      * <p>存的是 {@code ConfigValue} 而不是数字：配置在模组构造阶段还没加载完，
@@ -1061,7 +1611,7 @@ public final class MasteryConfig {
          * 取一项数值。
          *
          * @param key      项名
-         * @param fallback 这个流派没定义该项时的取值
+         * @param fallback 这个特化没定义该项时的取值
          * @return 数值
          */
         public double get(String key, double fallback) {
@@ -1140,18 +1690,20 @@ public final class MasteryConfig {
         public final double weaponDamagePerLevel;
         public final double weaponCrossDamagePerLevel;
         public final double maxTotalDamageBonus;
-        /** 原版近战 + 弓弩来源的专精伤害倍率。 */
-        public final double vanillaWeaponMasteryMultiplier;
-        /** lrtactical 近战来源的专精伤害倍率。 */
-        public final double taczMeleeMasteryMultiplier;
-        /** 铁魔法来源的专精伤害倍率。 */
-        public final double ironsSpellbooksMasteryMultiplier;
-        /** 新生魔艺来源的专精伤害倍率。 */
-        public final double arsNouveauMasteryMultiplier;
-        /** TACZ 枪械来源的专精伤害倍率。 */
-        public final double taczGunMasteryMultiplier;
-        /** 拔刀剑来源的专精伤害倍率。 */
-        public final double slashbladeMasteryMultiplier;
+        /** 每个武器来源各自的专精伤害倍率：来源 ID → 倍率。表里没有的按 1.0 算。 */
+        public final Map<String, Double> sourceMasteryMultipliers;
+        /** 法术专精折算成法力折扣的比例。 */
+        public final double spellMasteryManaShare;
+        /** 法术专精折算成冷却折扣的比例。 */
+        public final double spellMasteryCooldownShare;
+        /** 法术专精折扣的上限。 */
+        public final double spellMasteryReductionCap;
+        /** 服务端同步的范围保护总开关。 */
+        public final boolean preventMasterySpellRangeScaling;
+        /** 补录成武器的物品，格式「物品id=大类」。 */
+        public final List<String> extraWeapons;
+        /** 明确不算武器的物品 id。 */
+        public final List<String> notWeapons;
         public final double xpBase;
         public final double xpExponent;
         public final double typeXpMultiplier;
@@ -1171,16 +1723,16 @@ public final class MasteryConfig {
         /** 是否启用特化系统。 */
         public final boolean enableSpecialization;
 
-        /** 切换流派的冷却秒数。 */
+        /** 切换特化的冷却秒数。 */
         public final int specSwitchCooldownSeconds;
 
-        /** 第一流派槽的解锁进度（百分比）。 */
+        /** 第一特化槽的解锁进度（百分比）。 */
         public final int specSlot1Percent;
 
-        /** 第二流派槽的解锁进度（百分比）。 */
+        /** 第二特化槽的解锁进度（百分比）。 */
         public final int specSlot2Percent;
 
-        /** 流派键 -&gt; 数值。缺项按中性处理。 */
+        /** 特化键 -&gt; 数值。缺项按中性处理。 */
         private final Map<String, SpecializationValues> specValues;
 
         /** 单件武器的等级曲线。 */
@@ -1201,12 +1753,7 @@ public final class MasteryConfig {
          * @param weaponDamagePerLevel      单件武器每级自身伤害加成
          * @param weaponCrossDamagePerLevel 单件武器每级对同类型其它武器的伤害加成
          * @param maxTotalDamageBonus       伤害加成总上限
-         * @param vanillaWeaponMasteryMultiplier 原版近战与弓弩来源倍率
-         * @param taczMeleeMasteryMultiplier lrtactical 近战来源倍率
-         * @param ironsSpellbooksMasteryMultiplier 铁魔法来源倍率
-         * @param arsNouveauMasteryMultiplier 新生魔艺来源倍率
-         * @param taczGunMasteryMultiplier TACZ 枪械来源倍率
-         * @param slashbladeMasteryMultiplier 拔刀剑来源倍率
+         * @param sourceMasteryMultipliers  各武器来源的专精伤害倍率，来源 ID → 倍率
          * @param xpBase                    经验曲线基数
          * @param xpExponent                经验曲线指数
          * @param typeXpMultiplier          类型升级经验倍率
@@ -1216,34 +1763,52 @@ public final class MasteryConfig {
          * @param moddedDimensionXpMultiplier 模组维度经验倍率
          * @param splitMeleeByPack          近战附属是否按刀包拆分类型
          * @param enableSpecialization      是否启用特化系统
-         * @param specSwitchCooldownSeconds 切换流派的冷却秒数
-         * @param specValues                流派数值表
+         * @param specSwitchCooldownSeconds 切换特化的冷却秒数
+         * @param preventMasterySpellRangeScaling 是否启用法术范围保护
+         * @param specValues                特化数值表
+         * @param extraWeapons              补录成武器的物品
+         * @param notWeapons                明确不算武器的物品
+         * @param spellMasteryManaShare     法术专精折算成法力折扣的比例
+         * @param spellMasteryCooldownShare 法术专精折算成冷却折扣的比例
+         * @param spellMasteryReductionCap  法术专精折扣的上限
          */
         public Snapshot(int maxLevel, double overallDamagePerLevel, double typeDamagePerLevel,
                         double weaponDamagePerLevel, double weaponCrossDamagePerLevel,
                         double maxTotalDamageBonus,
-                        double vanillaWeaponMasteryMultiplier, double taczMeleeMasteryMultiplier,
-                        double ironsSpellbooksMasteryMultiplier, double arsNouveauMasteryMultiplier,
-                        double taczGunMasteryMultiplier, double slashbladeMasteryMultiplier,
+                        Map<String, Double> sourceMasteryMultipliers,
                         double xpBase, double xpExponent,
                         double typeXpMultiplier, double overallXpMultiplier,
                         double netherXpMultiplier, double endXpMultiplier,
                         double moddedDimensionXpMultiplier, boolean splitMeleeByPack,
                         boolean enableSpecialization, int specSwitchCooldownSeconds,
                         int specSlot1Percent, int specSlot2Percent,
-                        Map<String, SpecializationValues> specValues) {
+                        Map<String, SpecializationValues> specValues,
+                        boolean preventMasterySpellRangeScaling,
+                        List<String> extraWeapons, List<String> notWeapons,
+                        double spellMasteryManaShare, double spellMasteryCooldownShare,
+                        double spellMasteryReductionCap) {
+            this.extraWeapons = extraWeapons == null ? List.of() : List.copyOf(extraWeapons);
+            this.notWeapons = notWeapons == null ? List.of() : List.copyOf(notWeapons);
             this.maxLevel = Math.max(1, maxLevel);
             this.overallDamagePerLevel = overallDamagePerLevel;
             this.typeDamagePerLevel = typeDamagePerLevel;
             this.weaponDamagePerLevel = weaponDamagePerLevel;
             this.weaponCrossDamagePerLevel = weaponCrossDamagePerLevel;
             this.maxTotalDamageBonus = maxTotalDamageBonus;
-            this.vanillaWeaponMasteryMultiplier = clamp(vanillaWeaponMasteryMultiplier, 0.0D, 100.0D);
-            this.taczMeleeMasteryMultiplier = clamp(taczMeleeMasteryMultiplier, 0.0D, 100.0D);
-            this.ironsSpellbooksMasteryMultiplier = clamp(ironsSpellbooksMasteryMultiplier, 0.0D, 100.0D);
-            this.arsNouveauMasteryMultiplier = clamp(arsNouveauMasteryMultiplier, 0.0D, 100.0D);
-            this.taczGunMasteryMultiplier = clamp(taczGunMasteryMultiplier, 0.0D, 100.0D);
-            this.slashbladeMasteryMultiplier = clamp(slashbladeMasteryMultiplier, 0.0D, 100.0D);
+            // 每个来源读自己那一行，互不影响；表里没有的来源在取值时按 1.0 算
+            Map<String, Double> sourceMultipliers = new LinkedHashMap<>();
+            if (sourceMasteryMultipliers != null) {
+                sourceMasteryMultipliers.forEach((providerId, value) -> {
+                    if (providerId != null && value != null) {
+                        sourceMultipliers.put(providerId, clamp(value, 0.0D, 100.0D));
+                    }
+                });
+            }
+            this.sourceMasteryMultipliers = Collections.unmodifiableMap(sourceMultipliers);
+            // 这三项决定法术的实际法力 / 冷却，客户端要按同一个数显示，所以进快照而不是各读各的配置
+            this.spellMasteryManaShare = clamp(spellMasteryManaShare, 0.0D, 1.0D);
+            this.spellMasteryCooldownShare = clamp(spellMasteryCooldownShare, 0.0D, 1.0D);
+            this.spellMasteryReductionCap = clamp(spellMasteryReductionCap, 0.0D, 0.9D);
             this.xpBase = xpBase;
             this.xpExponent = xpExponent;
             this.typeXpMultiplier = Math.max(0.1D, typeXpMultiplier);
@@ -1257,6 +1822,7 @@ public final class MasteryConfig {
             this.specSlot1Percent = Math.max(1, Math.min(100, specSlot1Percent));
             this.specSlot2Percent = Math.max(1, Math.min(100, specSlot2Percent));
             this.specValues = Map.copyOf(specValues);
+            this.preventMasterySpellRangeScaling = preventMasterySpellRangeScaling;
             // 指数相同、只放大基数，等于把每一级的需求整体乘上倍率
             this.weaponCurve = new LevelCurve(this.maxLevel, xpBase, xpExponent);
             this.typeCurve = new LevelCurve(this.maxLevel, xpBase * this.typeXpMultiplier, xpExponent);
@@ -1266,7 +1832,7 @@ public final class MasteryConfig {
         /**
          * 按武器来源取得专精伤害倍率。
          *
-         * <p>这个倍率只放大专精等级本身算出来的加成，不碰特化 / 流派的独立倍率。
+         * <p>这个倍率只放大专精等级本身算出来的加成，不碰特化 / 特化的独立倍率。
          * 未知来源按 1.0 处理，新增 Provider 即使忘了补配置也不会莫名变强或变弱。
          *
          * @param providerId 武器来源 ID
@@ -1276,26 +1842,42 @@ public final class MasteryConfig {
             if (providerId == null) {
                 return 1.0D;
             }
-            return switch (providerId) {
-                case WeaponKeys.PROVIDER_VANILLA_MELEE, WeaponKeys.PROVIDER_BOW ->
-                        this.vanillaWeaponMasteryMultiplier;
-                case WeaponKeys.PROVIDER_LRTACTICAL_MELEE -> this.taczMeleeMasteryMultiplier;
-                case WeaponKeys.PROVIDER_IRONS_SPELLS -> this.ironsSpellbooksMasteryMultiplier;
-                case WeaponKeys.PROVIDER_ARS_NOUVEAU -> this.arsNouveauMasteryMultiplier;
-                case WeaponKeys.PROVIDER_TACZ_GUN -> this.taczGunMasteryMultiplier;
-                case WeaponKeys.PROVIDER_SLASHBLADE -> this.slashbladeMasteryMultiplier;
-                default -> 1.0D;
-            };
+            Double multiplier = this.sourceMasteryMultipliers.get(providerId);
+            if (multiplier == null) {
+                warnUnknownSource(providerId);
+                return 1.0D;
+            }
+            return multiplier;
         }
 
         /**
-         * 取一个流派的数值。
+         * 撞到一个没有独立倍率配置的来源，吼一次。
          *
-         * @param spec 流派
-         * @return 数值；表里没有（比如制式、或者服务端版本更老不认识这个流派）时返回中性值
+         * <p>新增来源忘了登记进 {@link WeaponKeys#ALL_PROVIDERS} 时，表现是「这个模组的武器
+         * 怎么调都不动」——数值上完全正常（按 1.0 走），只是服主没有那一行可以改。
+         * 不吼一声的话这种漏登记能在服里躺很久。
+         *
+         * <p>每个来源只打一次，这是伤害结算的热路径，不能每次命中都写日志。
+         *
+         * @param providerId 来源 ID
+         */
+        private void warnUnknownSource(String providerId) {
+            // 配置还没加载完时快照是空的，那不是漏登记，别误报
+            if (this.sourceMasteryMultipliers.isEmpty() || !WARNED_SOURCES.add(providerId)) {
+                return;
+            }
+            AlbionMastery.LOGGER.warn("[albionmastery] 来源「{}」没有自己的专精伤害倍率配置，按 1.0 算。"
+                    + "把它加进 WeaponKeys.ALL_PROVIDERS，配置里就会多出对应的一行。", providerId);
+        }
+
+        /**
+         * 取一个特化的数值。
+         *
+         * @param spec 特化
+         * @return 数值；表里没有（比如制式、或者服务端版本更老不认识这个特化）时返回中性值
          */
         /**
-         * 某个流派槽要求的等级（外圈和中圈都得到）。
+         * 某个特化槽要求的等级（外圈和中圈都得到）。
          *
          * @param slot 槽位，1 或 2
          * @return 等级门槛
@@ -1337,9 +1919,10 @@ public final class MasteryConfig {
          */
         public static Snapshot createDefault() {
             return new Snapshot(100, 0.005D, 0.01D, 0.02D, 0.001D, 100.0D,
-                    20.0D, 20.0D, 10.0D, 10.0D, 5.0D, 1.0D,
-                    40.0D, 1.0D, 3.0D, 10.0D, 1.5D, 2.0D, 2.0D,
-                    true, true, 3600, 50, 100, Map.of());
+                    Map.of(),
+                    80.0D, 1.0D, 3.0D, 10.0D, 1.5D, 2.0D, 2.0D,
+                    true, true, 3600, 50, 100, Map.of(), true, List.of(), List.of(),
+                    0.3D, 0.3D, 0.5D);
         }
 
         /**
@@ -1366,18 +1949,25 @@ public final class MasteryConfig {
             buf.writeVarInt(this.specSwitchCooldownSeconds);
             buf.writeVarInt(this.specSlot1Percent);
             buf.writeVarInt(this.specSlot2Percent);
-            // 协议 v3 追加：不同来源的专精伤害倍率。客户端面板必须和服务端实际结算完全一致。
-            buf.writeDouble(this.vanillaWeaponMasteryMultiplier);
-            buf.writeDouble(this.taczMeleeMasteryMultiplier);
-            buf.writeDouble(this.ironsSpellbooksMasteryMultiplier);
-            buf.writeDouble(this.arsNouveauMasteryMultiplier);
-            buf.writeDouble(this.taczGunMasteryMultiplier);
-            buf.writeDouble(this.slashbladeMasteryMultiplier);
+            // 各来源的专精伤害倍率。客户端面板必须和服务端实际结算完全一致，所以整张表照发。
+            // 写成「条数 + 键值对」而不是固定几个 double：以后加来源，包结构一个字都不用改
+            buf.writeVarInt(this.sourceMasteryMultipliers.size());
+            for (Map.Entry<String, Double> entry : this.sourceMasteryMultipliers.entrySet()) {
+                buf.writeUtf(entry.getKey(), 64);
+                buf.writeDouble(entry.getValue());
+            }
             buf.writeVarInt(this.specValues.size());
             for (Map.Entry<String, SpecializationValues> entry : this.specValues.entrySet()) {
                 buf.writeUtf(entry.getKey(), 128);
                 entry.getValue().write(buf);
             }
+            buf.writeBoolean(this.preventMasterySpellRangeScaling);
+            // 追加在最后：老版本的包读到这里就结束，不影响前面的字段
+            writeStrings(buf, this.extraWeapons);
+            writeStrings(buf, this.notWeapons);
+            buf.writeDouble(this.spellMasteryManaShare);
+            buf.writeDouble(this.spellMasteryCooldownShare);
+            buf.writeDouble(this.spellMasteryReductionCap);
         }
 
         /**
@@ -1405,12 +1995,16 @@ public final class MasteryConfig {
             int specCooldown = Math.max(0, Math.min(604800, buf.readVarInt()));
             int slot1 = Math.max(1, Math.min(100, buf.readVarInt()));
             int slot2 = Math.max(1, Math.min(100, buf.readVarInt()));
-            double vanillaWeaponMul = clamp(buf.readDouble(), 0.0D, 100.0D);
-            double taczMeleeMul = clamp(buf.readDouble(), 0.0D, 100.0D);
-            double ironsMul = clamp(buf.readDouble(), 0.0D, 100.0D);
-            double arsMul = clamp(buf.readDouble(), 0.0D, 100.0D);
-            double taczGunMul = clamp(buf.readDouble(), 0.0D, 100.0D);
-            double slashbladeMul = clamp(buf.readDouble(), 0.0D, 100.0D);
+            // 同上，条数非法直接判包坏掉，别裁剪
+            int sourceCount = buf.readVarInt();
+            if (sourceCount < 0 || sourceCount > MAX_SOURCE_ENTRIES) {
+                throw new IllegalArgumentException("AlbionMastery: 同步包里的来源倍率条数非法 " + sourceCount);
+            }
+            Map<String, Double> sourceMultipliers = new LinkedHashMap<>();
+            for (int i = 0; i < sourceCount; i++) {
+                String providerId = buf.readUtf(64);
+                sourceMultipliers.put(providerId, clamp(buf.readDouble(), 0.0D, 100.0D));
+            }
             // 条数按枚举总量封顶，异常包不至于让客户端在这里分配一张巨表
             int specCount = Math.max(0, Math.min(Specialization.values().length, buf.readVarInt()));
             Map<String, SpecializationValues> specValues = new HashMap<>();
@@ -1418,10 +2012,75 @@ public final class MasteryConfig {
                 String key = buf.readUtf(128);
                 specValues.put(key, SpecializationValues.read(buf));
             }
+            boolean preventRangeScaling = buf.readBoolean();
+            List<String> extraWeapons = readStrings(buf);
+            List<String> notWeapons = readStrings(buf);
+            double manaShare = clamp(buf.readDouble(), 0.0D, 1.0D);
+            double cooldownShare = clamp(buf.readDouble(), 0.0D, 1.0D);
+            double reductionCap = clamp(buf.readDouble(), 0.0D, 0.9D);
             return new Snapshot(maxLevel, overallDmg, typeDmg, wpnDmg, crossDmg,
-                    maxBonus, vanillaWeaponMul, taczMeleeMul, ironsMul, arsMul, taczGunMul, slashbladeMul,
+                    maxBonus, sourceMultipliers,
                     xpBase, xpExp, typeMul, overallMul, netherMul, endMul, moddedMul,
-                    splitMelee, enableSpec, specCooldown, slot1, slot2, specValues);
+                    splitMelee, enableSpec, specCooldown, slot1, slot2, specValues, preventRangeScaling,
+                    extraWeapons, notWeapons, manaShare, cooldownShare, reductionCap);
+        }
+
+        /** 已经吼过「没有独立倍率配置」的来源，每个只吼一次。 */
+        private static final Set<String> WARNED_SOURCES = ConcurrentHashMap.newKeySet();
+
+        /** 一份物品清单最多同步多少条。写端超了会截断并告警，读端读到超限的条数直接判包非法。 */
+        private static final int MAX_STRING_ENTRIES = 4096;
+
+        /** 来源倍率最多同步多少条。 */
+        private static final int MAX_SOURCE_ENTRIES = 256;
+
+        /**
+         * 写一串字符串。
+         *
+         * <p>太长的条目直接跳过而不是写进去：{@code writeUtf} 超长会抛异常，
+         * 那一抛整个全量同步包就编码失败，所有人登录后拿不到任何专精数据、界面全是 0 级。
+         * 服主把一串物品 id 粘成一行是很容易发生的事，不能让它把整个模组打瘫。
+         *
+         * @param buf     目标缓冲区
+         * @param entries 条目
+         */
+        private static void writeStrings(FriendlyByteBuf buf, List<String> entries) {
+            List<String> valid = new ArrayList<>(entries.size());
+            for (String entry : entries) {
+                if (entry != null && entry.length() <= 256) {
+                    valid.add(entry);
+                }
+            }
+            if (valid.size() > MAX_STRING_ENTRIES) {
+                // 截断在写端做，两端的条数才对得上；读端遇到超限只能判包非法
+                AlbionMastery.LOGGER.warn("[albionmastery] 配置里的物品清单有 {} 条，只有前 {} 条会同步给客户端",
+                        valid.size(), MAX_STRING_ENTRIES);
+                valid = valid.subList(0, MAX_STRING_ENTRIES);
+            }
+            buf.writeVarInt(valid.size());
+            for (String entry : valid) {
+                buf.writeUtf(entry, 256);
+            }
+        }
+
+        /**
+         * 读一串字符串。
+         *
+         * @param buf 源缓冲区
+         * @return 读出来的列表
+         */
+        private static List<String> readStrings(FriendlyByteBuf buf) {
+            int count = buf.readVarInt();
+            // 条数是长度前缀，只能「认」或者「炸」：悄悄改小的话，多出来的那几条字节还留在包里，
+            // 后面每一个字段都从错误的位置开始读，最后整包解码失败，症状是所有人一进服就掉线
+            if (count < 0 || count > MAX_STRING_ENTRIES) {
+                throw new IllegalArgumentException("AlbionMastery: 同步包里的物品清单条数非法 " + count);
+            }
+            List<String> out = new java.util.ArrayList<>(Math.min(count, 64));
+            for (int i = 0; i < count; i++) {
+                out.add(buf.readUtf(256));
+            }
+            return List.copyOf(out);
         }
 
         /**
@@ -1440,5 +2099,3 @@ public final class MasteryConfig {
         }
     }
 }
-
-

@@ -43,22 +43,33 @@ public class S2CLeaderboardPacket {
     private final LeaderboardPeriod period;
     private final LeaderboardSort sort;
     private final List<LeaderboardRow> rows;
+    /** 每一行在整张榜上的名次，只有搜索时才带；null 表示名次就是下标 + 1。 */
+    @Nullable
+    private final int[] ranks;
     private final int selfRank;
     @Nullable
     private final LeaderboardRow selfRow;
     private final int total;
+    /** 这批行是按什么搜出来的，空串表示整张榜。 */
+    private final String query;
+    /** 搜到多少人，可能比 rows 多。 */
+    private final int matched;
 
     private S2CLeaderboardPacket(Status status, boolean periodsEnabled, LeaderboardPeriod period,
-                                 LeaderboardSort sort, List<LeaderboardRow> rows, int selfRank,
-                                 @Nullable LeaderboardRow selfRow, int total) {
+                                 LeaderboardSort sort, List<LeaderboardRow> rows, @Nullable int[] ranks,
+                                 int selfRank, @Nullable LeaderboardRow selfRow, int total,
+                                 String query, int matched) {
         this.status = status;
         this.periodsEnabled = periodsEnabled;
         this.period = period;
         this.sort = sort;
         this.rows = rows;
+        this.ranks = ranks;
         this.selfRank = selfRank;
         this.selfRow = selfRow;
         this.total = total;
+        this.query = query;
+        this.matched = matched;
     }
 
     /**
@@ -70,7 +81,8 @@ public class S2CLeaderboardPacket {
      */
     public static S2CLeaderboardPacket ok(MasteryLeaderboard.Result result, boolean periodsEnabled) {
         return new S2CLeaderboardPacket(Status.OK, periodsEnabled, result.period(), result.sort(),
-                result.rows(), result.selfRank(), result.selfRow(), result.total());
+                result.rows(), result.ranks(), result.selfRank(), result.selfRow(), result.total(),
+                result.query(), result.matched());
     }
 
     /**
@@ -78,7 +90,7 @@ public class S2CLeaderboardPacket {
      */
     public static S2CLeaderboardPacket disabled() {
         return new S2CLeaderboardPacket(Status.DISABLED, false, LeaderboardPeriod.ALL,
-                LeaderboardSort.MAXED, List.of(), 0, null, 0);
+                LeaderboardSort.MAXED, List.of(), null, 0, null, 0, "", 0);
     }
 
     /**
@@ -86,7 +98,7 @@ public class S2CLeaderboardPacket {
      */
     public static S2CLeaderboardPacket tooFast() {
         return new S2CLeaderboardPacket(Status.TOO_FAST, false, LeaderboardPeriod.ALL,
-                LeaderboardSort.MAXED, List.of(), 0, null, 0);
+                LeaderboardSort.MAXED, List.of(), null, 0, null, 0, "", 0);
     }
 
     /**
@@ -109,6 +121,15 @@ public class S2CLeaderboardPacket {
             this.selfRow.write(buf);
         }
         buf.writeVarInt(this.total);
+        buf.writeUtf(this.query, C2SRequestLeaderboardPacket.MAX_QUERY);
+        buf.writeVarInt(this.matched);
+        buf.writeBoolean(this.ranks != null);
+        if (this.ranks != null) {
+            // 和 rows 一一对应，长度不用单独写
+            for (int rank : this.ranks) {
+                buf.writeVarInt(rank);
+            }
+        }
     }
 
     /**
@@ -133,7 +154,17 @@ public class S2CLeaderboardPacket {
         int selfRank = Math.max(0, buf.readVarInt());
         LeaderboardRow selfRow = buf.readBoolean() ? LeaderboardRow.read(buf) : null;
         int total = Math.max(0, buf.readVarInt());
-        return new S2CLeaderboardPacket(status, periodsEnabled, period, sort, rows, selfRank, selfRow, total);
+        String query = buf.readUtf(C2SRequestLeaderboardPacket.MAX_QUERY);
+        int matched = Math.max(0, buf.readVarInt());
+        int[] ranks = null;
+        if (buf.readBoolean()) {
+            ranks = new int[size];
+            for (int i = 0; i < size; i++) {
+                ranks[i] = Math.max(1, buf.readVarInt());
+            }
+        }
+        return new S2CLeaderboardPacket(status, periodsEnabled, period, sort, rows, ranks, selfRank, selfRow,
+                total, query, matched);
     }
 
     /**
@@ -145,7 +176,8 @@ public class S2CLeaderboardPacket {
         NetworkEvent.Context ctx = context.get();
         ctx.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> () -> ClientLeaderboardHandler.acceptRows(this.status, this.periodsEnabled,
-                        this.period, this.sort, this.rows, this.selfRank, this.selfRow, this.total)));
+                        this.period, this.sort, this.rows, this.ranks, this.selfRank, this.selfRow, this.total,
+                        this.query, this.matched)));
         ctx.setPacketHandled(true);
     }
 }

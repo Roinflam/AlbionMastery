@@ -88,12 +88,31 @@ public final class RenderUtil {
     public static float[][] hexagon(float cx, float cy, float radius) {
         float[][] points = new float[6][2];
         for (int i = 0; i < 6; i++) {
-            // 偏移 30 度得到平顶六边形
-            double angle = Math.PI / 6.0D + Math.PI / 3.0D * i;
-            points[i][0] = cx + (float) (Math.cos(angle) * radius);
-            points[i][1] = cy + (float) (Math.sin(angle) * radius);
+            points[i][0] = cx + UNIT_COS[i] * radius;
+            points[i][1] = cy + UNIT_SIN[i] * radius;
         }
         return points;
+    }
+
+    /** 单位六边形六个角的余弦，偏移 30 度得到平顶六边形。整张图每帧要画上万次，现算三角函数太亏。 */
+    private static final float[] UNIT_COS = unitHexagon(true);
+
+    /** 单位六边形六个角的正弦。 */
+    private static final float[] UNIT_SIN = unitHexagon(false);
+
+    /**
+     * 算单位六边形的角点分量。
+     *
+     * @param cosine true 取余弦，false 取正弦
+     * @return 六个分量
+     */
+    private static float[] unitHexagon(boolean cosine) {
+        float[] out = new float[6];
+        for (int i = 0; i < 6; i++) {
+            double angle = Math.PI / 6.0D + Math.PI / 3.0D * i;
+            out[i] = (float) (cosine ? Math.cos(angle) : Math.sin(angle));
+        }
+        return out;
     }
 
     /**

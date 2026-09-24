@@ -12,6 +12,7 @@ import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
@@ -26,7 +27,10 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
@@ -52,7 +56,7 @@ public final class MasteryCommand {
      * @param dispatcher 指令分发器
      */
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(Commands.literal("albionmastery")
+        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("albionmastery")
                 .requires(source -> source.hasPermission(PERMISSION_LEVEL))
                 // 只敲根指令就把所有用法列出来，不用去翻文档或者靠 Tab 一层层试
                 .executes(MasteryCommand::executeHelp)
@@ -102,12 +106,12 @@ public final class MasteryCommand {
                                                 .executes(MasteryCommand::executeStudySet))))
                         .then(Commands.literal("reset")
                                 .then(Commands.argument("targets", EntityArgument.players())
-                                        .executes(MasteryCommand::executeStudyReset)))));
+                                        .executes(MasteryCommand::executeStudyReset))));
+        // 批量满级、发武器、改特化、改配置这些管理指令放在另一个类里，挂到同一个根下面
+        MasteryAdminCommand.attach(root);
+        dispatcher.register(root);
     }
 
-    /**
-     * 指令作用范围。
-     */
     /**
      * 所有子指令的用法与说明。
      *
@@ -137,7 +141,9 @@ public final class MasteryCommand {
     private static int executeHelp(CommandContext<CommandSourceStack> context) {
         context.getSource().sendSuccess(() -> Component.translatable(
                 "command.albionmastery.help_title").withStyle(ChatFormatting.GOLD), false);
-        for (String[] entry : HELP_ENTRIES) {
+        List<String[]> entries = new ArrayList<>(Arrays.asList(HELP_ENTRIES));
+        entries.addAll(Arrays.asList(MasteryAdminCommand.HELP));
+        for (String[] entry : entries) {
             // 用法用可点击的建议：点一下直接填进聊天框，省得手敲长指令
             Component line = Component.literal(entry[0])
                     .withStyle(style -> style.withColor(ChatFormatting.YELLOW)
@@ -148,7 +154,7 @@ public final class MasteryCommand {
                     .append(Component.translatable(entry[1]).withStyle(ChatFormatting.GRAY));
             context.getSource().sendSuccess(() -> line, false);
         }
-        return HELP_ENTRIES.length;
+        return entries.size();
     }
 
     /**
@@ -372,6 +378,9 @@ public final class MasteryCommand {
                 .replaceAll("0+$", "").replaceAll("\\.$", "");
     }
 
+    /**
+     * 指令作用范围。
+     */
     private enum Scope {
         /** 只设定单件武器。 */
         WEAPON,

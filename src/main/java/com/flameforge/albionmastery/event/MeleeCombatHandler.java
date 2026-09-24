@@ -6,6 +6,7 @@ import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.config.SpecializationValues;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.mastery.spec.ComboTracker;
+import com.flameforge.albionmastery.mastery.spec.SpecKnockback;
 import com.flameforge.albionmastery.mastery.spec.SpecializationEffects;
 import com.flameforge.albionmastery.weapon.ResolvedWeapon;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
@@ -19,6 +20,7 @@ import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import com.flameforge.albionmastery.mastery.spec.DamageAttribution;
 
 /**
  * 近战伤害处理。
@@ -56,8 +58,9 @@ public final class MeleeCombatHandler {
         if (!(source.getEntity() instanceof ServerPlayer player) || player.isSpectator()) {
             return;
         }
-        // 关键守卫：只处理玩家本体直接造成的伤害
-        if (source.getDirectEntity() != player) {
+        // 关键守卫：只处理玩家亲手挥出去的那一下。直接来源是玩家本人还不够——
+        // 铁魔法不少法术、新生魔艺的全部伤害、荆棘反伤，直接来源也是他本人，得再看伤害类型
+        if (!DamageAttribution.isMeleeSwing(player, source)) {
             return;
         }
 
@@ -70,9 +73,13 @@ public final class MeleeCombatHandler {
         if (target == player || !target.isAlive()) {
             return;
         }
-        if (target instanceof Player && !MasteryConfig.COMMON.xpFromPlayerDamage.get()) {
+        // 横扫余伤和模组的溅射伤害不算一次挥砍：不然一刀扫到五个怪，
+        // 专精倍率就乘了五遍、经验也发了五份（见 MeleeSwingTracker）
+        if (DamageAttribution.isSplashHit(player, source, target)) {
             return;
         }
+        // 关掉「打玩家给经验」只是不给经验，伤害加成和特化照常生效，和枪械那边一致
+        boolean giveXp = !(target instanceof Player) || MasteryConfig.COMMON.xpFromPlayerDamage.get();
 
         ItemStack stack = player.getMainHandItem();
         ResolvedWeapon weapon = WeaponResolver.resolve(stack);
@@ -85,9 +92,10 @@ public final class MeleeCombatHandler {
         if (WeaponKeys.PROVIDER_SLASHBLADE.equals(weapon.providerId())) {
             return;
         }
-        // 拿着法术书 / 法杖抡人不是施法，法术的专精不该算在这一下上
-        if (WeaponKeys.PROVIDER_IRONS_SPELLS.equals(weapon.providerId())
-                || WeaponKeys.PROVIDER_ARS_NOUVEAU.equals(weapon.providerId())) {
+        // 拿着法术书 / 法杖抡人不是施法，拿着弓弩空手打人、用枪托砸人也不是射击，
+        // 拿魔法卷轴敲人更不是：这些武器的专精和特化（重型弹药 2.2 倍之类）都不该算在这一下上。
+        // 写成「只认近战来源」而不是「排除这几个来源」：以后新增的远程来源默认就不会漏进来
+        if (!WeaponKeys.isMeleeProvider(weapon.providerId())) {
             return;
         }
 
@@ -100,7 +108,7 @@ public final class MeleeCombatHandler {
 
         // 先按加成生效前的伤害发经验，避免加成 -> 经验 -> 更多加成的正反馈
         double perDamage = MasteryConfig.COMMON.xpPerDamage.get();
-        if (perDamage > 0.0D) {
+        if (giveXp && perDamage > 0.0D) {
             double raw = Math.min(amount * perDamage, MasteryConfig.COMMON.maxXpPerHit.get());
             MasteryHelper.awardXp(data, weapon, Math.max(1L, Math.round(raw)), snapshot);
         }
@@ -119,6 +127,8 @@ public final class MeleeCombatHandler {
         if (Math.abs(multiplier - 1.0D) > 1.0E-6D) {
             event.setAmount((float) (amount * multiplier));
         }
+        // 击退在伤害之后才结算，先把倍率登记上
+        SpecKnockback.mark(target, player.getUUID(), spec.knockback());
 
     }
 }

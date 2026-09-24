@@ -132,7 +132,7 @@ public final class MasteryToastManager {
      *
      * <p>优先级排在所有升级提示前面：这种事一天不会有几次，来了就该第一个看到。
      *
-     * @param title    标题（「全服第一」这种）
+     * @param title    标题（「全局第一」这种）
      * @param detail   第二行文案
      * @param face     头像用谁的皮肤
      * @param faceName 他的名字，离线时靠它拉皮肤
@@ -307,9 +307,9 @@ public final class MasteryToastManager {
             String badge = "\u00D7" + toast.studyText();
             int badgeWidth = minecraft.font.width(badge);
             int badgeX = width - badgeWidth - 6;
-            guiGraphics.fill(badgeX - 3, 5, width - 3, 16,
+            guiGraphics.fill(badgeX - 3, 4, width - 3, 15,
                     alphaOf(toast.study() > 1.0D ? MasteryPalette.GOLD_DARK : 0xFF5A3316, alpha));
-            guiGraphics.drawString(minecraft.font, badge, badgeX, 7,
+            guiGraphics.drawString(minecraft.font, badge, badgeX, 6,
                     alphaOf(MasteryPalette.GOLD_BRIGHT, alpha), false);
         }
 

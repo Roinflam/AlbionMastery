@@ -13,6 +13,10 @@ import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
 import java.util.List;
+import com.flameforge.albionmastery.weapon.compat.TinkersSupport;
+import com.flameforge.albionmastery.weapon.compat.SweetMagicSupport;
+import com.flameforge.albionmastery.weapon.compat.WeaponOverrides;
+import net.minecraftforge.registries.ForgeRegistries;
 
 /**
  * 物品堆 -&gt; 专精定位的统一入口（双端可用）。
@@ -41,6 +45,12 @@ public final class WeaponResolver {
     /** 新生魔艺的 modid。 */
     public static final String ARS_MOD_ID = "ars_nouveau";
 
+    /** 匠魂的模组 ID。 */
+    public static final String TCONSTRUCT_MOD_ID = "tconstruct";
+
+    /** 甜蜜魔法的模组 ID。 */
+    public static final String SWEETMAGIC_MOD_ID = "sweetmagic";
+
     /** lrtactical 是否已安装，首次查询后缓存。 */
     private static Boolean lrTacticalLoaded;
 
@@ -52,6 +62,12 @@ public final class WeaponResolver {
     private static Boolean taczLoaded;
 
     private static Boolean arsLoaded;
+
+    /** 匠魂装没装的缓存。 */
+    private static Boolean tinkersLoaded;
+
+    /** 甜蜜魔法装没装的缓存。 */
+    private static Boolean sweetMagicLoaded;
 
     private WeaponResolver() {
     }
@@ -72,6 +88,30 @@ public final class WeaponResolver {
      * 判断拔刀剑是否已安装。
      *
      * @return 已安装返回 true
+     */
+    public static boolean isSweetMagicLoaded() {
+        if (sweetMagicLoaded == null) {
+            sweetMagicLoaded = ModList.get().isLoaded(SWEETMAGIC_MOD_ID);
+        }
+        return sweetMagicLoaded;
+    }
+
+    /**
+     * 匠魂装没装。
+     *
+     * @return 装了返回 true
+     */
+    public static boolean isTinkersLoaded() {
+        if (tinkersLoaded == null) {
+            tinkersLoaded = ModList.get().isLoaded(TCONSTRUCT_MOD_ID);
+        }
+        return tinkersLoaded;
+    }
+
+    /**
+     * 拔刀剑装没装。
+     *
+     * @return 装了返回 true
      */
     public static boolean isSlashBladeLoaded() {
         if (slashBladeLoaded == null) {
@@ -146,14 +186,30 @@ public final class WeaponResolver {
         if (stack.isEmpty()) {
             return List.of();
         }
+        List<ResolvedWeapon> spells = List.of();
         if (isIronsLoaded() && IronsSpellsSupport.isContainer(stack)) {
-            return IronsSpellsSupport.resolveAll(stack);
+            spells = IronsSpellsSupport.resolveAll(stack);
+        } else if (isArsLoaded() && ArsNouveauSupport.isCaster(stack)) {
+            spells = ArsNouveauSupport.resolveAll(stack);
         }
-        if (isArsLoaded() && ArsNouveauSupport.isCaster(stack)) {
-            return ArsNouveauSupport.resolveAll(stack);
+        if (spells.isEmpty()) {
+            ResolvedWeapon single = resolve(stack, splitMeleeByPack);
+            return single == null ? List.of() : List.of(single);
         }
-        ResolvedWeapon single = resolve(stack, splitMeleeByPack);
-        return single == null ? List.of() : List.of(single);
+        // 已经拿到法术了，这一趟只问「它自己是不是一件近战 / 弓弩武器」，
+        // 必须跳过法术那两个分支：它们内部会把整份法术 NBT 重新解析一遍，
+        // 而算出来的结果在下面必然被丢掉——这条路就在击杀经验的热路径上，群体击杀会被乘上去
+        ResolvedWeapon single = resolve(stack, splitMeleeByPack, true);
+        // 这件物品自己也是一件近战 / 弓弩武器（奥术铁砧附过法术的剑、魔艺的附魔师之剑）：
+        // resolve() 把它认成近战，近战伤害也是按那个键放大的，经验就必须发到同一个键上。
+        // 两边口径不一致的话，这把剑的武器节点永远涨不了，可伤害偏偏按它的等级算
+        if (single == null) {
+            return spells;
+        }
+        List<ResolvedWeapon> all = new java.util.ArrayList<>(spells.size() + 1);
+        all.add(single);
+        all.addAll(spells);
+        return List.copyOf(all);
     }
 
     @Nullable
@@ -174,7 +230,28 @@ public final class WeaponResolver {
      */
     @Nullable
     public static ResolvedWeapon resolve(ItemStack stack, boolean splitMeleeByPack) {
+        return resolve(stack, splitMeleeByPack, false);
+    }
+
+    /**
+     * 解析武器，可以跳过法术那两个来源。
+     *
+     * @param stack              物品堆
+     * @param splitMeleeByPack   近战是否按刀包拆分类型
+     * @param skipSpellProviders 跳过铁魔法 / 新生魔艺：{@link #resolveAll} 已经单独拿过法术了，
+     *                           再走一遍等于把整份法术 NBT 白解析一次
+     * @return 解析结果；不是可专精武器时返回 null
+     */
+    @Nullable
+    private static ResolvedWeapon resolve(ItemStack stack, boolean splitMeleeByPack,
+                                          boolean skipSpellProviders) {
         if (stack.isEmpty()) {
+            return null;
+        }
+
+        // 排除表在这里统一拦一道：TACZ、拔刀剑、铁魔法这些是按 NBT 认身份的，
+        // 各自的 support 里不查这张表，只在这儿拦才对所有来源都成立
+        if (WeaponOverrides.isExcluded(ForgeRegistries.ITEMS.getKey(stack.getItem()))) {
             return null;
         }
 
@@ -200,7 +277,39 @@ public final class WeaponResolver {
             }
         }
 
-        if (isIronsLoaded()) {
+        if (isSweetMagicLoaded()) {
+            resolved = SweetMagicSupport.resolve(stack);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+
+        // 匠魂排在拔刀剑之后、通用近战之前：匠魂拔刀的刀要先归拔刀剑，
+        // 而匠魂自己的剑、匕首、巨刃被它塞进了原版的 minecraft:swords 标签，不先认走就会被当成通用剑
+        if (isTinkersLoaded()) {
+            resolved = TinkersSupport.resolve(stack);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+
+        // 原版剑、斧、三叉戟、弓弩排在法术之前：铁魔法按 NBT 认法术容器，奥术铁砧附过法术的剑也会被认成法术，
+        // 那样近战命中拿不到任何加成、剑的攻速和攻击距离特化也被摘掉。附进去的法术照样能放，
+        // 施法时的法术专精按施放的那个法术算，不经过这里
+        if (VanillaMeleeSupport.isVanillaMelee(stack)) {
+            resolved = VanillaMeleeSupport.resolve(stack);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+        if (BowSupport.isBowOrCrossbow(stack)) {
+            resolved = BowSupport.resolve(stack);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+
+        if (!skipSpellProviders && isIronsLoaded()) {
             // 法术容器只认第一个法术；要全部的走 resolveAll
             resolved = IronsSpellsSupport.resolve(stack);
             if (resolved != null) {
@@ -208,7 +317,7 @@ public final class WeaponResolver {
             }
         }
 
-        if (isArsLoaded()) {
+        if (!skipSpellProviders && isArsLoaded()) {
             resolved = ArsNouveauSupport.resolve(stack);
             if (resolved != null) {
                 return resolved;

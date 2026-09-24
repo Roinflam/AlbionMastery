@@ -15,14 +15,14 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 
 /**
- * 按流派缩放武器的耐久消耗。
+ * 按特化缩放武器的耐久消耗。
  *
  * <p>补的是什么：原版所有耐久扣减最终都走 {@code ItemStack.hurt(amount, random, user)}
  * （{@code hurtAndBreak} 也是先调它）。近战附属和拔刀剑都是靠这条路扣耐久的，
- * 所以在这个方法的入口把 {@code amount} 参数按流派倍率缩放一下就够，不用去碰两个模组各自的代码。
+ * 所以在这个方法的入口把 {@code amount} 参数按特化倍率缩放一下就够，不用去碰两个模组各自的代码。
  * TACZ 枪械没有耐久概念，解析出来是枪械就不动。
  *
- * <p>只在带 {@code user} 的调用上生效：没有玩家就没有流派，也就没什么可缩放的。
+ * <p>只在带 {@code user} 的调用上生效：没有玩家就没有特化，也就没什么可缩放的。
  *
  * <p>倍率乘出来带小数时用<b>概率取整</b>而不是四舍五入：近战每砍一下扣 1 点，倍率 0.6
  * 四舍五入永远是 1，等于没生效；改成「60% 概率扣 1、40% 概率扣 0」，长期平均正好是 0.6。

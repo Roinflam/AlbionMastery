@@ -9,11 +9,11 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 
 /**
- * 后座按流派缩放。
+ * 后座按特化缩放。
  *
  * <p>补的是什么：TACZ 每次开枪在客户端 {@code CameraSetupEvent.initialCameraRecoil} 里生成镜头后座曲线，
  * 俯仰和偏航各调一次 {@code GunRecoil.genXxxSplineFunction(修正系数)}，那个系数就是后座的总倍率
- * （配件、趴下都往这里乘）。把它再乘上流派的后座倍率就行，和 KuvaLich 的做法一样。
+ * （配件、趴下都往这里乘）。把它再乘上特化的后座倍率就行，和 KuvaLich 的做法一样。
  *
  * <p>只对本地玩家生效（这个事件本来就只为本机镜头触发）。纯客户端类。
  */
@@ -24,7 +24,7 @@ public abstract class GunRecoilMixin {
      * 俯仰后座。
      *
      * @param modifier 原始修正系数
-     * @return 乘上流派后座倍率
+     * @return 乘上特化后座倍率
      */
     @ModifyArg(
             method = "initialCameraRecoil",
@@ -41,7 +41,7 @@ public abstract class GunRecoilMixin {
      * 偏航后座。
      *
      * @param modifier 原始修正系数
-     * @return 乘上流派后座倍率
+     * @return 乘上特化后座倍率
      */
     @ModifyArg(
             method = "initialCameraRecoil",

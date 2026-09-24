@@ -1,12 +1,22 @@
 package com.flameforge.albionmastery.weapon.compat;
 
 import com.flameforge.albionmastery.weapon.ResolvedWeapon;
+import com.flameforge.albionmastery.weapon.WeaponCatalog;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
+import mods.flammpfeil.slashblade.SlashBlade;
 import mods.flammpfeil.slashblade.item.ItemSlashBlade;
+import mods.flammpfeil.slashblade.registry.slashblade.SlashBladeDefinition;
+import net.minecraft.core.Registry;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
+import java.util.List;
+import mods.flammpfeil.slashblade.entity.EntityAbstractSummonedSword;
+import net.minecraft.world.entity.Entity;
+import net.minecraftforge.registries.ForgeRegistries;
+import com.flameforge.albionmastery.weapon.WeaponResolver;
 
 /**
  * 拔刀剑的双端解析支持。
@@ -60,5 +70,51 @@ public final class SlashBladeSupport {
             return null;
         }
         return ResolvedWeapon.of(WeaponKeys.PROVIDER_SLASHBLADE, id, id.getNamespace());
+    }
+
+    /**
+     * 把全部具名拔刀剑列进清单。拔刀剑的定义是数据包注册表，得从世界里拿。
+     *
+     * @param out   输出
+     * @param level 任意一个服务端世界
+     */
+    public static void catalog(List<WeaponCatalog.Entry> out, Level level) {
+        Registry<SlashBladeDefinition> registry = SlashBlade.getSlashBladeDefinitionRegistry(level);
+        if (registry == null) {
+            return;
+        }
+        for (SlashBladeDefinition definition : registry) {
+            if (definition == null) {
+                continue;
+            }
+            ResourceLocation id = definition.getName();
+            if (id == null || id.getPath().isEmpty()) {
+                continue;
+            }
+            // 类型和 resolve() 一样取命名空间
+            ResolvedWeapon weapon = ResolvedWeapon.of(WeaponKeys.PROVIDER_SLASHBLADE, id, id.getNamespace());
+            out.add(new WeaponCatalog.Entry(weapon, () -> {
+                ItemStack stack = definition.getBlade();
+                return stack == null ? List.of() : List.of(stack);
+            }));
+        }
+    }
+
+    /**
+     * 直接造成伤害的实体算不算拔刀剑打出来的：斩击特效、各种召唤剑、Drive、审判斩，
+     * 以及附属包里继承召唤剑的实体。手里拿着刀却用弓射出去的箭不算。
+     *
+     * @param direct 直接来源
+     * @return 算返回 true
+     */
+    public static boolean isBladeEntity(@Nullable Entity direct) {
+        if (direct == null) {
+            return false;
+        }
+        if (direct instanceof EntityAbstractSummonedSword) {
+            return true;
+        }
+        ResourceLocation typeId = ForgeRegistries.ENTITY_TYPES.getKey(direct.getType());
+        return typeId != null && WeaponResolver.SLASHBLADE_MOD_ID.equals(typeId.getNamespace());
     }
 }

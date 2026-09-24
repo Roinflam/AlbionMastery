@@ -23,7 +23,7 @@ import org.spongepowered.asm.mixin.injection.At;
  *
  * <p>为什么用 MixinExtras 的 {@code @ModifyExpressionValue} / {@code @ModifyReturnValue}
  * 而不是 {@code @Redirect}：这两个注解是可叠加的，多个模组挂在同一处会串成一条链，
- * 各改各的。同一台服务器上如果还有别的模组改 TACZ 的弹匣（比如自家的 KuvaLich），
+ * 各改各的。同一台服务端上如果还有别的模组改 TACZ 的弹匣（比如自家的 KuvaLich），
  * 用 {@code @Redirect} 就会抢同一个调用点直接崩，用这两个则是乘上去，谁也不妨碍谁。
  *
  * <p>目标是第三方模组的类，名称不参与 SRG 映射，因此整个 Mixin 使用 {@code remap = false}。

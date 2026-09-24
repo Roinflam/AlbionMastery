@@ -7,6 +7,7 @@ import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.weapon.ResolvedWeapon;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
@@ -48,6 +49,9 @@ public final class SpecializationEffects {
             return SpecializationValues.NEUTRAL;
         }
         boolean client = player.level().isClientSide();
+        if (client && !isLocalPlayer(player)) {
+            return SpecializationValues.NEUTRAL;
+        }
         MasteryConfig.Snapshot snapshot = client ? clientSnapshot() : MasteryConfig.serverSnapshot();
         ResolvedWeapon weapon = WeaponResolver.resolve(stack, snapshot.splitMeleeByPack);
         if (weapon == null) {
@@ -58,10 +62,19 @@ public final class SpecializationEffects {
     }
 
     /**
-     * 从客户端同步缓存取数据。
+     * 这个实体的特化数值在本端算得出来吗。
      *
-     * @return 客户端数据；不在客户端时返回 null
+     * <p>服务端对谁都算得出来；客户端只有自己的专精数据，别人的一律算不出（返回中性值）。
+     * 需要「本机算不出来就退回同步属性」的地方靠它分流。
+     *
+     * @param entity 实体
+     * @return 算得出来返回 true
      */
+    public static boolean hasLocalData(@Nullable LivingEntity entity) {
+        return entity instanceof Player player
+                && (!player.level().isClientSide() || isLocalPlayer(player));
+    }
+
     /**
      * 按已经解析好的武器取当前生效的数值，两端通用。
      *
@@ -78,9 +91,29 @@ public final class SpecializationEffects {
             return SpecializationValues.NEUTRAL;
         }
         boolean client = player.level().isClientSide();
+        if (client && !isLocalPlayer(player)) {
+            return SpecializationValues.NEUTRAL;
+        }
         MasteryConfig.Snapshot snapshot = client ? clientSnapshot() : MasteryConfig.serverSnapshot();
         MasteryData data = client ? clientData() : MasteryHelper.get(player);
         return forData(data, weapon, snapshot);
+    }
+
+    /**
+     * 某件武器此刻用的是哪一份配置（它自己的独立配置，或所属类型的通用配置），两端通用。
+     * 一个法术里好几个符文属于同一份配置时，靠它去重。
+     *
+     * @param entity 玩家
+     * @param weapon 武器
+     * @return 配置键；拿不到数据时返回类型键
+     */
+    public static String configKeyFor(@Nullable LivingEntity entity, ResolvedWeapon weapon) {
+        if (!(entity instanceof Player player)) {
+            return weapon.typeKey();
+        }
+        boolean client = player.level().isClientSide();
+        MasteryData data = client ? (isLocalPlayer(player) ? clientData() : null) : MasteryHelper.get(player);
+        return data == null ? weapon.typeKey() : data.specConfigKey(weapon.typeKey(), weapon.weaponKey());
     }
 
     /**
@@ -97,6 +130,9 @@ public final class SpecializationEffects {
             return null;
         }
         boolean client = player.level().isClientSide();
+        if (client && !isLocalPlayer(player)) {
+            return null;
+        }
         MasteryConfig.Snapshot snapshot = client ? clientSnapshot() : MasteryConfig.serverSnapshot();
         MasteryData data = client ? clientData() : MasteryHelper.get(player);
         if (data == null) {
@@ -105,6 +141,26 @@ public final class SpecializationEffects {
         return MasteryHelper.computeBonus(data, weapon, snapshot);
     }
 
+    /**
+     * 客户端上这个玩家是不是本机玩家。
+     *
+     * <p>客户端缓存里只有本机玩家自己的数据。别的玩家在你屏幕上开枪、拉栓、开镜时，
+     * TACZ 同样会走进那些被特化改过的方法；这时拿你的特化去套他，他的动画、射速预测就全乱了，
+     * 所以一律按中性值处理——他真实的效果在服务端算。
+     *
+     * @param player 玩家
+     * @return 是本机玩家返回 true
+     */
+    private static boolean isLocalPlayer(Player player) {
+        return Boolean.TRUE.equals(DistExecutor.unsafeCallWhenOn(Dist.CLIENT,
+                () -> () -> com.flameforge.albionmastery.client.ClientMasteryCache.isLocalPlayer(player)));
+    }
+
+    /**
+     * 从客户端同步缓存取数据。
+     *
+     * @return 客户端数据；不在客户端时返回 null
+     */
     @Nullable
     private static MasteryData clientData() {
         return DistExecutor.unsafeCallWhenOn(Dist.CLIENT,
@@ -123,10 +179,24 @@ public final class SpecializationEffects {
     }
 
     /**
+     * 按端取配置快照：客户端用服务端下发的那一份，服务端用自己的。
+     *
+     * <p>凡是「显示的价格」和「实际扣的价格」必须一致的地方都要走这个方法：
+     * COMMON 配置在专用服务端和客户端上是两份独立文件，直接读本端配置，
+     * 轮盘上写的法力和真正扣的法力就可能是两个数。
+     *
+     * @param player 玩家
+     * @return 这一端该用的快照
+     */
+    public static MasteryConfig.Snapshot snapshotFor(Player player) {
+        return player.level().isClientSide() ? clientSnapshot() : MasteryConfig.serverSnapshot();
+    }
+
+    /**
      * 取某个<b>武器类型</b>上生效的数值。
      *
      * <p>特化是按类型选的，不是按来源：枪械底下的步枪和霰弹枪玩法差得远，
-     * 让它们共用一个流派没有意义。所以这里的键是类型键。
+     * 让它们共用一个特化没有意义。所以这里的键是类型键。
      *
      * @param data     专精数据，可为 null
      * @param typeKey  类型键
@@ -169,21 +239,52 @@ public final class SpecializationEffects {
             return SpecializationValues.NEUTRAL;
         }
         SpecializationValues result = null;
+        Specialization applied = null;
         for (int slot = 1; slot <= WeaponKeys.SPEC_SLOTS; slot++) {
-            if (!isSlotActive(data, typeKey, weaponKey, slot, snapshot)) {
+            Specialization spec = activeSpec(data, typeKey, weaponKey, slot, snapshot);
+            if (spec == null) {
                 continue;
             }
-            Specialization spec = Specialization.byKey(data.getSpecialization(typeKey, slot));
-            // 流派归属的来源必须和这个类型键的来源对得上，
-            // 否则就是存档里留下的脏数据（比如类型被重新分过组）
-            if (spec == null || spec.isStandard()
-                    || !spec.sourceId().equals(WeaponKeys.providerOf(typeKey))) {
+            // 同系的两个特化只吃前一个：新规则之前存下来的「扩容弹匣 + 弹鼓」这类组合，
+            // 第二槽照样留在存档里，但不生效，界面上会标出来
+            if (spec.conflictsWith(applied)) {
                 continue;
             }
             SpecializationValues values = snapshot.specValues(spec);
             result = result == null ? values : SpecializationValues.combine(result, values);
+            applied = spec;
         }
         return result == null ? SpecializationValues.NEUTRAL : result;
+    }
+
+    /**
+     * 某个槽上此刻真正生效的特化：槽解锁了、选的不是制式、特化属于这个来源。
+     *
+     * <p>不管同系冲突，冲突在 {@link #forData(MasteryData, String, String, MasteryConfig.Snapshot)} 里按槽位顺序处理。
+     *
+     * @param data      玩家数据
+     * @param typeKey   类型键
+     * @param weaponKey 武器键，可为 null
+     * @param slot      槽位
+     * @param snapshot  配置快照
+     * @return 特化；这个槽不生效时返回 null
+     */
+    @Nullable
+    public static Specialization activeSpec(MasteryData data, String typeKey, @Nullable String weaponKey,
+                                            int slot, MasteryConfig.Snapshot snapshot) {
+        if (!isSlotActive(data, typeKey, weaponKey, slot, snapshot)) {
+            return null;
+        }
+        // 外圈的独立配置优先，没有才用中圈的通用配置
+        Specialization spec = Specialization.byKey(
+                data.getSpecialization(data.specConfigKey(typeKey, weaponKey), slot));
+        // 特化归属的来源必须和这个类型键的来源对得上，
+        // 否则就是存档里留下的脏数据（比如类型被重新分过组）
+        if (spec == null || spec.isStandard()
+                || !spec.sourceId().equals(WeaponKeys.providerOf(typeKey))) {
+            return null;
+        }
+        return spec;
     }
 
     /**
@@ -199,7 +300,7 @@ public final class SpecializationEffects {
     public static boolean isSlotActive(MasteryData data, String typeKey, @Nullable String weaponKey,
                                        int slot, MasteryConfig.Snapshot snapshot) {
         // 只看中圈（类型）和内圈（来源），外圈（单件武器）不设门槛：
-        // 类型和来源练到了，这一类下面的每件武器都吃到流派
+        // 类型和来源练到了，这一类下面的每件武器都吃到特化
         return isSlotUnlocked(data, typeKey, slot, snapshot);
     }
 
@@ -252,24 +353,97 @@ public final class SpecializationEffects {
         double multiplier = 1.0D;
 
         if (target != null) {
-            multiplier *= target instanceof Player ? values.vsPlayerDamage() : values.vsMobDamage();
-            // 有没有护甲，直接看护甲值。护甲为 0 的目标吃不到「贯甲」的好处，
-            // 这正是那个流派的代价，不是漏算
-            multiplier *= target.getArmorValue() > 0.0F
-                    ? values.armoredDamage() : values.unarmoredDamage();
-
-            double ratio = healthRatio(target);
-            if (ratio <= values.executeThreshold()) {
-                multiplier *= values.executeDamage();
-            } else if (ratio >= FRESH_RATIO) {
-                multiplier *= values.freshDamage();
-            }
+            multiplier *= targetMultiplier(values, attacker, target);
         }
 
         if (headShot != null) {
             multiplier *= headShot ? values.headShotDamage() : values.bodyShotDamage();
         }
 
+        multiplier *= selfMultiplier(values, attacker);
+        return Math.max(0.0D, multiplier);
+    }
+
+    /**
+     * 只看目标的那几层：对人 / 对怪、有没有甲、残血 / 满血、是不是从背后打的。
+     *
+     * <p>单独拿出来是给拔刀剑用的：它的刀身斩击在「挥出去之前」的事件里结算，那时还不知道砍中谁，
+     * 只能先乘和目标无关的部分，等真正命中时再补这一层。
+     *
+     * @param values   当前生效的特化数值
+     * @param attacker 攻击者，可为 null（为 null 时不算背刺）
+     * @param target   目标
+     * @return 倍率
+     */
+    public static double targetMultiplier(SpecializationValues values, @Nullable LivingEntity attacker,
+                                          LivingEntity target) {
+        double multiplier = target instanceof Player ? values.vsPlayerDamage() : values.vsMobDamage();
+        // 有没有护甲，直接看护甲值。护甲为 0 的目标吃不到「贯甲」的好处，
+        // 这正是那个特化的代价，不是漏算
+        multiplier *= target.getArmorValue() > 0.0F
+                ? values.armoredDamage() : values.unarmoredDamage();
+
+        double ratio = healthRatio(target);
+        if (ratio <= values.executeThreshold()) {
+            multiplier *= values.executeDamage();
+        } else if (ratio >= FRESH_RATIO) {
+            multiplier *= values.freshDamage();
+        }
+
+        if (attacker != null && values.backstabDamage() != 1.0D && isBehind(attacker, target)) {
+            multiplier *= values.backstabDamage();
+        }
+        if (attacker != null && (values.nearDamage() != 1.0D || values.farDamage() != 1.0D)) {
+            // 按攻击者和目标的直线距离分三档：近（霰弹、近身）吃 near，远（狙击、远射）吃 far，中间不变
+            double distanceSq = attacker.distanceToSqr(target);
+            if (distanceSq <= NEAR_DISTANCE * NEAR_DISTANCE) {
+                multiplier *= values.nearDamage();
+            } else if (distanceSq >= FAR_DISTANCE * FAR_DISTANCE) {
+                multiplier *= values.farDamage();
+            }
+        }
+        return Math.max(0.0D, multiplier);
+    }
+
+    /** 「近距离」的范围（格）。 */
+    public static final double NEAR_DISTANCE = 6.0D;
+
+    /** 「远距离」的起点（格）。 */
+    public static final double FAR_DISTANCE = 24.0D;
+
+    /**
+     * 攻击者在不在目标背后：以目标的朝向为准，攻击者落在身后约 120° 的扇形里算背刺。
+     *
+     * <p>只看水平面，站高站低不影响；朝向用头的朝向（生物转头比转身快，看的是它「在看哪」）。
+     *
+     * @param attacker 攻击者
+     * @param target   目标
+     * @return 在背后返回 true
+     */
+    public static boolean isBehind(LivingEntity attacker, LivingEntity target) {
+        double dx = attacker.getX() - target.getX();
+        double dz = attacker.getZ() - target.getZ();
+        double length = Math.sqrt(dx * dx + dz * dz);
+        if (length < 1.0E-4D) {
+            return false;
+        }
+        double yaw = Math.toRadians(target.getYHeadRot());
+        // Minecraft 的朝向：yaw = 0 面朝 +Z，向 -X 转为正
+        double lookX = -Math.sin(yaw);
+        double lookZ = Math.cos(yaw);
+        // 攻击者方向和目标朝向的夹角余弦 < -0.5，即夹角大于 120°，算在背后
+        return (dx * lookX + dz * lookZ) / length < -0.5D;
+    }
+
+    /**
+     * 只看攻击者自己的那一层：背水（自己血越少越狠）、嗜战（击杀叠起来的层数）。
+     *
+     * @param values   当前生效的特化数值
+     * @param attacker 攻击者，可为 null
+     * @return 倍率
+     */
+    public static double selfMultiplier(SpecializationValues values, @Nullable LivingEntity attacker) {
+        double multiplier = 1.0D;
         if (attacker != null && values.desperationDamage() != 1.0D) {
             double ratio = healthRatio(attacker);
             double threshold = values.desperationThreshold();
@@ -284,6 +458,10 @@ public final class SpecializationEffects {
                 multiplier *= 1.0D + (values.desperationDamage() - 1.0D) * t;
             }
         }
+        // 嗜战：击杀叠起来的层数（只在服务端记）
+        if (attacker instanceof ServerPlayer player) {
+            multiplier *= FrenzyTracker.multiplier(player, values);
+        }
         return Math.max(0.0D, multiplier);
     }
 
@@ -291,7 +469,7 @@ public final class SpecializationEffects {
      * 掷一次暴击。
      *
      * <p>暴击和「看情况」的那些倍率是独立的一层：先算条件倍率，再乘暴击，
-     * 三个来源的战斗处理器各自在改伤害之前调一次。概率为 0 的流派直接返回 1.0，不消耗随机数。
+     * 三个来源的战斗处理器各自在改伤害之前调一次。概率为 0 的特化直接返回 1.0，不消耗随机数。
      *
      * @param values 当前生效的特化数值
      * @param random 随机源，用攻击者自己的 {@code getRandom()}
@@ -324,7 +502,7 @@ public final class SpecializationEffects {
      *
      * <p>两个条件都要满足：该来源的<b>总体专精</b>满级，<b>并且</b>这个类型自己也满级。
      * 前者代表「你把这个模组玩透了」，后者代表「你把这一类武器玩透了」，
-     * 缺一个都不该拿到只属于这一类的流派。
+     * 缺一个都不该拿到只属于这一类的特化。
      *
      * <p>上限取配置里的 maxLevel，调低了解锁也跟着变早，不是写死的 100 级。
      *

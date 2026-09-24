@@ -18,7 +18,7 @@ import org.spongepowered.asm.mixin.injection.At;
  * 攻击间隔（{@code getAttackCoolDown}，决定多久能再挥一次）和出手延迟
  * （{@code getAttackDelay}，决定挥出去多久判定命中）。
  *
- * <p><b>两个都要按同一个倍率缩放</b>。只改间隔不改延迟的话，疾风流派把间隔压到 0.6 倍之后，
+ * <p><b>两个都要按同一个倍率缩放</b>。只改间隔不改延迟的话，疾风特化把间隔压到 0.6 倍之后，
  * 有可能出现「间隔比延迟还短」——上一刀的判定还没落地，下一刀已经能出手了，
  * 动画和判定会脱节。按同比例缩放则保持原有的节奏关系。
  *
@@ -84,14 +84,35 @@ public abstract class MeleeAttackSpeedMixin {
      * @param original 原始 tick 数
      * @return 缩放后的 tick 数，至少 1
      */
+    /**
+     * 突进延迟：有些刀的配置里带一段向前的突进，按原本的 tick 偏移触发。
+     * 挥砍变快了突进还在老位置，就会出现「刀已经收了人才冲出去」。
+     *
+     * @param original 原延迟
+     * @return 缩放后的延迟
+     */
+    @ModifyExpressionValue(
+            method = "preAttack",
+            at = @At(value = "INVOKE",
+                    target = "Lme/xjqsh/lrtactical/item/melee/CombatData$MeleeMovement;getDelay()I"),
+            require = 0
+    )
+    private int albionmastery$scaleMoveDelay(int original) {
+        return scale(original);
+    }
+
     private int scale(int original) {
         // 用主手那把：preAttack 本身不带物品，而近战一定是主手挥出去的
         SpecializationValues values = SpecializationEffects.forStack(
                 this.entity, this.entity.getMainHandItem());
-        if (values.attackInterval() == 1.0D) {
+        // 原来就是 0（出手即判定、没有冷却）的不去动：强行改成 1 反而把立即命中推迟了一 tick
+        if (values.attackInterval() == 1.0D || original <= 0) {
             return original;
         }
-        // 至少留 1 tick：0 会让上层的「冷却结束了吗」判断永远为真，等于无限连击
-        return Math.max(1, (int) Math.round(original * values.attackInterval()));
+        // 整数 tick 按倍率的方向取整：变快往下取、变慢往上取。四舍五入的话 0.95 倍在 10 tick 上是 9.5，
+        // 又回到 10，等于没效果。至少留 1 tick：0 会让「冷却结束了吗」永远为真，等于无限连击
+        double scaled = original * values.attackInterval();
+        int rounded = values.attackInterval() < 1.0D ? (int) Math.floor(scaled) : (int) Math.ceil(scaled);
+        return Math.max(1, rounded);
     }
 }

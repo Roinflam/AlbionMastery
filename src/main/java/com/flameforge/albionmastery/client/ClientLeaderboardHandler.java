@@ -9,6 +9,7 @@ import com.flameforge.albionmastery.leaderboard.LeaderboardRow;
 import com.flameforge.albionmastery.leaderboard.LeaderboardSort;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.network.S2CLeaderboardPacket;
+import com.flameforge.albionmastery.network.S2CPlayerMasteryPacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
@@ -51,17 +52,21 @@ public final class ClientLeaderboardHandler {
      * @param periodsEnabled 这个服务端有没有日 / 周 / 月榜
      * @param period         服务端按哪个时间范围算的
      * @param sort           服务端按哪种方式排的
-     * @param rows           前若干名
+     * @param rows           前若干名（搜索时是匹配到的）
+     * @param ranks          每一行在整张榜上的名次，null 表示就是下标 + 1
      * @param selfRank       自己的名次，0 表示没上榜
      * @param selfRow        自己那一行，没上榜时为 null
      * @param total          榜上总人数
+     * @param query          这批行是按什么搜出来的，空串表示整张榜
+     * @param matched        搜到多少人
      */
     public static void acceptRows(S2CLeaderboardPacket.Status status, boolean periodsEnabled,
                                   LeaderboardPeriod period, LeaderboardSort sort,
-                                  List<LeaderboardRow> rows, int selfRank,
-                                  @Nullable LeaderboardRow selfRow, int total) {
+                                  List<LeaderboardRow> rows, @Nullable int[] ranks, int selfRank,
+                                  @Nullable LeaderboardRow selfRow, int total, String query, int matched) {
         if (Minecraft.getInstance().screen instanceof LeaderboardScreen screen) {
-            screen.onRowsReceived(status, periodsEnabled, period, sort, rows, selfRank, selfRow, total);
+            screen.onRowsReceived(status, periodsEnabled, period, sort, rows, ranks, selfRank, selfRow, total,
+                    query, matched);
         }
     }
 
@@ -85,7 +90,11 @@ public final class ClientLeaderboardHandler {
         }
         if (!found) {
             reset();
-            screen.onPlayerMissing(uuid);
+            if (transfer == S2CPlayerMasteryPacket.TRANSFER_TOO_FAST) {
+                screen.onPlayerTooFast(uuid);
+            } else {
+                screen.onPlayerMissing(uuid);
+            }
             return;
         }
         // 新的一次传输：不管上一次拼到哪了，从头开始
@@ -131,7 +140,7 @@ public final class ClientLeaderboardHandler {
      */
     private static void openPlayer(Minecraft minecraft, LeaderboardScreen screen, UUID uuid,
                                    String name, CompoundTag data) {
-        // 走和读档同一条路：键校验、流派校验都在 deserializeNBT 里，
+        // 走和读档同一条路：键校验、特化校验都在 deserializeNBT 里，
         // 再按服务端下发的曲线把等级算出来，界面上的数字就和他本人看到的一样
         MasteryData parsed = new MasteryData();
         parsed.deserializeNBT(data);
@@ -139,7 +148,7 @@ public final class ClientLeaderboardHandler {
         parsed.recomputeLevels(snapshot.weaponCurve(), snapshot.typeCurve(), snapshot.overallCurve());
         parsed.clearDirty();
         screen.onPlayerLoaded(uuid);
-        // 前十的人名字后面挂上徽章：点进全服第一的罗盘，标题上就写着「全服第一」
+        // 前十的人名字后面挂上徽章：点进全局第一的罗盘，标题上就写着「全局第一」
         MutableComponent owner = Component.literal(name);
         Component badge = screen.badgeOf(uuid);
         if (badge != null) {
@@ -169,7 +178,7 @@ public final class ClientLeaderboardHandler {
             detail = Component.translatable("msg.albionmastery.leaderboard.replaced", newcomerName,
                     displacedName, rankWord);
         }
-        // 标题就是榜单上那块徽章的字：「全服第一」
+        // 标题就是榜单上那块徽章的字：「全局第一」
         Component title = Component.translatable("gui.albionmastery.leaderboard.badge_" + rank,
                 Component.translatable(LeaderboardPeriod.ALL.labelKey()));
         MasteryToastManager.pushRank(title, detail, newcomer, newcomerName, self);

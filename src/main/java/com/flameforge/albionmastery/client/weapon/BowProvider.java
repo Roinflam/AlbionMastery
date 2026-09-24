@@ -14,6 +14,7 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.List;
 import java.util.Map;
+import net.minecraft.resources.ResourceKey;
 
 /**
  * 通用弓弩的客户端来源：遍历物品注册表，弓一类、弩一类。被别的来源认走的不重复列。
@@ -43,18 +44,18 @@ public final class BowProvider implements IWeaponProvider {
     @Override
     public void collect(List<WeaponEntry> out) {
         int sort = 0;
-        for (Map.Entry<ResourceLocation, Item> entry : ForgeRegistries.ITEMS.getEntries()
-                .stream().map(e -> Map.entry(e.getKey().location(), e.getValue())).toList()) {
+        // 直接遍历注册表本身，不再复制一份临时表
+        for (Map.Entry<ResourceKey<Item>, Item> entry : ForgeRegistries.ITEMS.getEntries()) {
             Item item = entry.getValue();
-            if (!(item instanceof BowItem) && !(item instanceof CrossbowItem)) {
+            ItemStack stack = new ItemStack(item);
+            if (!BowSupport.isBowOrCrossbow(stack)) {
                 continue;
             }
-            ItemStack stack = new ItemStack(item);
             ResolvedWeapon resolved = WeaponResolver.resolve(stack, false);
             if (resolved == null || !WeaponKeys.PROVIDER_BOW.equals(resolved.providerId())) {
                 continue;
             }
-            ResourceLocation id = entry.getKey();
+            ResourceLocation id = entry.getKey().location();
             out.add(new WeaponEntry(
                     resolved.weaponKey(),
                     resolved.typeKey(),

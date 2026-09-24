@@ -1,6 +1,7 @@
 package com.flameforge.albionmastery.mixin;
 
 import com.flameforge.albionmastery.weapon.compat.IronsSpellsSupport;
+import com.flameforge.albionmastery.weapon.compat.SpellRangeProtection;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -11,7 +12,10 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * 把专精加成乘进铁魔法的「法术强度」。
+ * 把专精加成乘进铁魔法的「法术强度」，但在范围计算上下文中跳过。
+ *
+ * <p>范围 Mixin 只在计算半径、距离等尺寸时进入保护上下文；本类检查该标记，
+ * 防止伤害倍率被用于扩张实体搜索范围、方块遍历和粒子尺寸。伤害与治疗计算仍按原方式加成。
  *
  * <p>补的是什么：铁魔法的法术数值有两个源头，两个都挂：
  * <ul>
@@ -64,7 +68,7 @@ public abstract class AbstractSpellPowerMixin {
      * @param callbackInfo 回调
      */
     private void albionmastery$scale(Entity caster, CallbackInfoReturnable<Float> callbackInfo) {
-        if (!(caster instanceof Player player)) {
+        if (SpellRangeProtection.isSuppressed() || !(caster instanceof Player player)) {
             return;
         }
         double multiplier = IronsSpellsSupport.powerMultiplier(player, (AbstractSpell) (Object) this);

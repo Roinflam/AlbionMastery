@@ -60,7 +60,8 @@ public final class NpcExperienceReader {
             }
             int min = (int) expMinHandle.invoke(inventory);
             int max = (int) expMaxHandle.invoke(inventory);
-            return OptionalDouble.of(Math.max(0.0D, (min + max) / 2.0D));
+            // 先转成 double 再加：两个很大的 int 直接相加会溢出成负数，被当成「配置为 0」
+            return OptionalDouble.of(Math.max(0.0D, ((double) min + (double) max) / 2.0D));
         } catch (Throwable throwable) {
             failedClass = type;
             cachedClass = null;

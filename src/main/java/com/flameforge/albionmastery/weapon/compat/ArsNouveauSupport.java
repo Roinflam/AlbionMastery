@@ -5,8 +5,10 @@ import com.flameforge.albionmastery.config.SpecializationValues;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.mastery.spec.SpecializationEffects;
 import com.flameforge.albionmastery.weapon.ResolvedWeapon;
+import com.flameforge.albionmastery.weapon.WeaponCatalog;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import com.hollingsworth.arsnouveau.api.item.ICasterTool;
+import com.hollingsworth.arsnouveau.api.registry.GlyphRegistry;
 import com.hollingsworth.arsnouveau.api.spell.AbstractAugment;
 import com.hollingsworth.arsnouveau.api.spell.AbstractCastMethod;
 import com.hollingsworth.arsnouveau.api.spell.AbstractEffect;
@@ -24,6 +26,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -179,7 +182,30 @@ public final class ArsNouveauSupport {
     }
 
     /**
-     * 一个法术的「强度」倍率：所有符文各自的（专精加成 × 流派强度倍率）取平均。
+     * 一个法术用到的所有符文的特化，合在一起算：同一份配置（同一个类型、或同一件单独配置的符文）只算一次，
+     * 不同的配置按特化叠加的规则合并（倍率相乘、概率相加）。
+     *
+     * <p>以前伤害倍率、法力倍率按符文平均，一个三种类型的法术里，某个类型的特化只剩三分之一的效果；
+     * 暴击、吸血、连击这些又只看主效果符文那一个类型，装在形态、增幅类型上的特化收益完全不生效，代价却照扣。
+     * 现在每个特化都按卡片上写的数值完整生效一次。
+     *
+     * @param caster 施法者
+     * @param spell  法术
+     * @return 合并后的数值
+     */
+    public static SpecializationValues spellSpec(@Nullable LivingEntity caster, @Nullable Spell spell) {
+        SpecializationValues result = SpecializationValues.NEUTRAL;
+        Set<String> seen = new java.util.HashSet<>();
+        for (ResolvedWeapon part : partsOf(spell)) {
+            if (seen.add(SpecializationEffects.configKeyFor(caster, part))) {
+                result = SpecializationValues.combine(result, SpecializationEffects.forWeapon(caster, part));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 一个法术的「强度」倍率：所有符文各自的（专精加成 × 特化强度倍率）取平均。
      *
      * <p>两端都能调（客户端算法力显示，服务端算实际效果）。客户端关掉
      * {@code overrideDamageDisplay} 时返回 1，让显示保持原样。
@@ -189,6 +215,22 @@ public final class ArsNouveauSupport {
      * @return 倍率；没符文或没数据时 1.0
      */
     public static double spellStrength(@Nullable LivingEntity caster, @Nullable Spell spell) {
+        return spellStrength(caster, spell, null);
+    }
+
+    /**
+     * 同上，但可以把已经算好的特化数值传进来复用。
+     *
+     * <p>一次法术伤害里「合并出这个法术的特化」要遍历所有符文、逐个解析武器、再合并数值，
+     * 是这条路上最贵的一步。伤害处理那边本来就已经算过一次，别在这里再算一遍。
+     *
+     * @param caster 施法者
+     * @param spell  法术
+     * @param cached 已经算好的特化数值，没有就传 null
+     * @return 强度倍率
+     */
+    public static double spellStrength(@Nullable LivingEntity caster, @Nullable Spell spell,
+                                       @Nullable SpecializationValues cached) {
         if (!(caster instanceof Player player)) {
             return 1.0D;
         }
@@ -199,18 +241,20 @@ public final class ArsNouveauSupport {
         if (parts.isEmpty()) {
             return 1.0D;
         }
+        // 专精加成按符文平均（它是练级练出来的，一个符文练得高不该让整个法术翻倍），
+        // 特化的伤害倍率按合并后的完整值乘一次
         double sum = 0.0D;
         for (ResolvedWeapon part : parts) {
             MasteryHelper.Bonus bonus = SpecializationEffects.bonusFor(player, part);
-            SpecializationValues spec = SpecializationEffects.forWeapon(player, part);
-            sum += (bonus == null ? 1.0D : bonus.multiplier()) * spec.damage();
+            sum += bonus == null ? 1.0D : bonus.multiplier();
         }
-        double average = sum / parts.size();
-        return average <= 0.0D ? 1.0D : average;
+        double strength = sum / parts.size()
+                * (cached != null ? cached : spellSpec(player, spell)).damage();
+        return strength <= 0.0D ? 1.0D : strength;
     }
 
     /**
-     * 一个法术的专精加成平均值（不含流派），给冷却 / 法力折扣用。
+     * 一个法术的专精加成平均值（不含特化），给冷却 / 法力折扣用。
      *
      * @param caster 施法者
      * @param spell  法术
@@ -233,7 +277,7 @@ public final class ArsNouveauSupport {
     }
 
     /**
-     * 一个法术的法力消耗倍率：所有符文所在流派的法力倍率取平均，再乘专精折扣。
+     * 一个法术的法力消耗倍率：所有符文所在特化的法力倍率取平均，再乘专精折扣。
      *
      * @param caster 施法者
      * @param spell  法术
@@ -247,21 +291,59 @@ public final class ArsNouveauSupport {
         if (parts.isEmpty()) {
             return 1.0D;
         }
-        double sum = 0.0D;
-        for (ResolvedWeapon part : parts) {
-            sum += SpecializationEffects.forWeapon(player, part).manaCost();
-        }
-        double factor = sum / parts.size();
-        double share = MasteryConfig.COMMON.spellMasteryManaShare.get();
-        double reduction = Math.min(MasteryConfig.COMMON.spellMasteryReductionCap.get(),
-                averageBonus(player, spell) * share);
+        double factor = spellSpec(player, spell).manaCost();
+        // 按端取快照：客户端算显示的法力、服务端算真正扣的法力，两边必须是同一个数
+        MasteryConfig.Snapshot snapshot = SpecializationEffects.snapshotFor(player);
+        double reduction = Math.min(snapshot.spellMasteryReductionCap,
+                averageBonus(player, spell) * snapshot.spellMasteryManaShare);
         return Math.max(0.05D, factor * (1.0D - reduction));
     }
 
     /**
-     * 一个法术「主效果」所在流派的数值，给暴击 / 连击 / 吸血这些不好平均的项用。
+     * 管投射物（飞行速度、穿透）的特化数值：法术形态符文所属类型上的特化，叠上主效果特化。
+     *
+     * <p>魔艺的特化是按符文类型分开选的。飞多快、能穿几个，本来是「形态」的事，所以形态类型上选的特化
+     * 一定要算进来，不然给形态选特化就没意义了；主效果那边也叠上，是为了在学派上选了「疾咒形态」的玩家
+     * 同样有感觉。两边都选的话效果叠加，代价（强度、法力）也会在两个符文上各付一次，不会白拿。
+     *
+     * @param caster 施法者
+     * @param spell  法术
+     * @return 数值
+     */
+    public static SpecializationValues projectileSpec(@Nullable LivingEntity caster, @Nullable Spell spell) {
+        return spellSpec(caster, spell);
+    }
+
+    /**
+     * 一个法术「主效果」所在特化的数值，给暴击 / 连击 / 吸血这些不好平均的项用。
      *
      * <p>主效果 = 法术里第一个效果符文；没有效果符文（纯形态 + 增幅）就是中性值。
+     *
+     * @param caster 施法者
+     * @param spell  法术
+     * @return 数值
+     */
+    /**
+     * 法术主效果（第一个效果符文）对应的武器：命中后的特化效果按它算，和伤害那边一致。
+     *
+     * @param spell 法术
+     * @return 武器；法术里没有效果符文返回 null
+     */
+    @Nullable
+    public static ResolvedWeapon primaryWeapon(@Nullable Spell spell) {
+        if (spell == null || spell.recipe == null) {
+            return null;
+        }
+        for (AbstractSpellPart part : spell.recipe) {
+            if (part instanceof AbstractEffect) {
+                return ofPart(part);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 法术主效果（第一个效果符文）对应的特化数值。
      *
      * @param caster 施法者
      * @param spell  法术
@@ -277,5 +359,35 @@ public final class ArsNouveauSupport {
             }
         }
         return SpecializationValues.NEUTRAL;
+    }
+
+    /**
+     * 把全部启用的符文列进清单，物品就是符文本身。
+     *
+     * @param out 输出
+     */
+    public static void catalog(List<WeaponCatalog.Entry> out) {
+        for (Map.Entry<ResourceLocation, AbstractSpellPart> entry : GlyphRegistry.getSpellpartMap().entrySet()) {
+            AbstractSpellPart part = entry.getValue();
+            if (part == null || !part.isEnabled()) {
+                continue;
+            }
+            ResolvedWeapon weapon = ofPart(part);
+            if (weapon == null) {
+                continue;
+            }
+            out.add(new WeaponCatalog.Entry(weapon,
+                    () -> part.getGlyph() == null ? List.of() : List.of(new ItemStack(part.getGlyph()))));
+        }
+    }
+
+    /**
+     * 这次伤害是不是新生魔艺的法术打的。
+     *
+     * @param source 伤害源
+     * @return 是返回 true
+     */
+    public static boolean isSpellDamage(net.minecraft.world.damagesource.DamageSource source) {
+        return source instanceof com.hollingsworth.arsnouveau.api.util.DamageUtil.SpellDamageSource;
     }
 }

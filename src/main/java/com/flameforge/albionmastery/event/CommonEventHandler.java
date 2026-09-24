@@ -12,21 +12,32 @@ import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.network.NetworkHandler;
 import com.flameforge.albionmastery.network.S2CSyncMasteryPacket;
 import com.flameforge.albionmastery.network.S2CUpdateMasteryPacket;
+import com.flameforge.albionmastery.weapon.WeaponCatalog;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.AttachCapabilitiesEvent;
+import net.minecraftforge.event.OnDatapackSyncEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.common.capabilities.RegisterCapabilitiesEvent;
 
 import java.util.HashMap;
 import java.util.Map;
+import com.flameforge.albionmastery.mastery.spec.SpecVisualAttributes;
+import com.flameforge.albionmastery.weapon.compat.BowSupport;
+import net.minecraftforge.event.entity.EntityAttributeModificationEvent;
+import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
+import com.flameforge.albionmastery.weapon.compat.SweetMagicSupport;
+import com.flameforge.albionmastery.weapon.WeaponResolver;
+import com.flameforge.albionmastery.mastery.spec.MeleeSwingTracker;
+import net.minecraftforge.event.entity.player.AttackEntityEvent;
 
 /**
  * 通用（双端）事件处理。
@@ -36,7 +47,7 @@ import java.util.Map;
  *     <li>注册并挂载专精 Capability</li>
  *     <li>死亡重生 / 切维度时继承与重新同步专精数据</li>
  *     <li>把战斗中产生的大量小改动合并成定时增量同步</li>
- *     <li>在登录 / 登出 / 定时刷新时把玩家数据记进全服排行榜</li>
+ *     <li>在登录 / 登出 / 定时刷新时把玩家数据记进全局排行榜</li>
  * </ul>
  */
 @Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID)
@@ -75,6 +86,59 @@ public final class CommonEventHandler {
         public static void onRegisterCapabilities(RegisterCapabilitiesEvent event) {
             event.register(MasteryData.class);
         }
+
+        /**
+         * 给玩家加上「动作该放多快」的几个属性。
+         *
+         * @param event 属性补充事件
+         */
+        @SubscribeEvent
+        public static void onAttributeModification(EntityAttributeModificationEvent event) {
+            SpecVisualAttributes.onAttributeModification(event);
+        }
+    }
+
+    /**
+     * 开始拉弓 / 上弦：按真正在用的那把弓刷新拉弓倍速。
+     *
+     * <p>上面那条按主手算，副手也能拉弓，所以开始使用的那一刻再按这把弓重挂一次。
+     *
+     * @param event 开始使用事件
+     */
+    @SubscribeEvent
+    public static void onUseItemStart(LivingEntityUseItemEvent.Start event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            SpecMoveSpeed.refreshDrawSpeed(player, event.getItem());
+        }
+    }
+
+    /**
+     * 停止拉弓：倍速按主手重算回去。
+     *
+     * @param event 停止使用事件
+     */
+    @SubscribeEvent
+    public static void onUseItemStop(LivingEntityUseItemEvent.Stop event) {
+        if (event.getEntity() instanceof ServerPlayer player
+                && BowSupport.isBowOrCrossbow(event.getItem())) {
+            SpecMoveSpeed.refresh(player);
+        }
+    }
+
+    /**
+     * 每 tick 末尾兜底清一次甜蜜魔法的施法窗口。
+     *
+     * <p>窗口本该在施法方法返回时关掉，可一旦施法链路里有谁抛了异常，那一步就被跳过了，
+     * 窗口会一直开着：之后所有人的法力消耗、冷却都按这个人的特化算，他射的箭还会被写上魔法归属。
+     * 窗口的生命周期本来就不跨 tick，每 tick 末清一次是完全安全的兜底。
+     *
+     * @param event tick 事件
+     */
+    @SubscribeEvent
+    public static void onServerTickEndSweetMagic(TickEvent.ServerTickEvent event) {
+        if (event.phase == TickEvent.Phase.END && WeaponResolver.isSweetMagicLoaded()) {
+            SweetMagicSupport.endCast();
+        }
     }
 
     /**
@@ -97,6 +161,28 @@ public final class CommonEventHandler {
     @SubscribeEvent
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         MasteryCommand.register(event.getDispatcher());
+    }
+
+    /**
+     * 数据包重载（{@code /reload}）后丢掉服务端武器清单的缓存：拔刀剑的定义就在数据包里。
+     *
+     * @param event 数据包同步事件，重载完成后会对全体玩家触发一次
+     */
+    @SubscribeEvent
+    public static void onDatapackSync(OnDatapackSyncEvent event) {
+        if (event.getPlayer() == null) {
+            WeaponCatalog.invalidate();
+        }
+    }
+
+    /**
+     * 服务端关闭时丢掉武器清单缓存，别让单人世界退出后还攥着上一个服务端。
+     *
+     * @param event 服务端已关闭事件
+     */
+    @SubscribeEvent
+    public static void onServerStopped(ServerStoppedEvent event) {
+        WeaponCatalog.invalidate();
     }
 
     /**
@@ -144,6 +230,22 @@ public final class CommonEventHandler {
     public static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             recordLeaderboard(player);
+            MeleeSwingTracker.forget(player);
+        }
+    }
+
+    /**
+     * 记下这一 tick 玩家真正点的是谁。
+     *
+     * <p>这个事件只对玩家亲手点中的那个目标触发，横扫余伤和模组的溅射都不会触发它，
+     * 正好用来把「一次挥砍」和「顺带扫到的」分开（见 {@link MeleeSwingTracker}）。
+     *
+     * @param event 攻击事件
+     */
+    @SubscribeEvent
+    public static void onAttackEntity(AttackEntityEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            MeleeSwingTracker.mark(player, event.getTarget());
         }
     }
 
@@ -260,6 +362,9 @@ public final class CommonEventHandler {
         data.clearDirty();
         NetworkHandler.sendTo(player, S2CSyncMasteryPacket.of(data, snapshot));
         markLeaderboardChanged(player);
+        // 等级、特化或配置变了，特化槽可能刚解锁 / 刚失效：挂在玩家属性上的移速、攻速、攻击距离跟着重算，
+        // 不然要等换一次主手才生效
+        SpecMoveSpeed.refresh(player);
     }
 
     /**
@@ -311,7 +416,12 @@ public final class CommonEventHandler {
         for (String key : data.getDirtyOveralls()) {
             overalls.put(key, data.getOverallXp(key));
         }
+        // 类型或来源的等级涨了，可能正好跨过特化槽的门槛；值没变时 refresh 什么都不做
+        boolean slotsMayChange = !types.isEmpty() || !overalls.isEmpty();
         data.clearDirty();
+        if (slotsMayChange) {
+            SpecMoveSpeed.refresh(player);
+        }
 
         if (!weapons.isEmpty() || !types.isEmpty() || !overalls.isEmpty()) {
             NetworkHandler.sendTo(player, new S2CUpdateMasteryPacket(weapons, types, overalls));

@@ -14,10 +14,13 @@ import java.util.function.Supplier;
 /**
  * 客户端请求排行榜（C2S）。
  *
- * <p>只带时间范围和排序方式两个序号。返回多少行、多久能请求一次全由服务端配置说了算，
+ * <p>带时间范围和排序方式两个序号，外加一个可选的搜索词。返回多少行、多久能请求一次全由服务端配置说了算，
  * 客户端发得再勤也只会被限流丢掉。
  */
 public class C2SRequestLeaderboardPacket {
+
+    /** 搜索词最长多少个字符：玩家名最多 16 个，完整的 UUID 是 36 个。 */
+    public static final int MAX_QUERY = 36;
 
     /** 时间范围的序号。 */
     private final int periodOrdinal;
@@ -25,20 +28,35 @@ public class C2SRequestLeaderboardPacket {
     /** 排序方式的序号。 */
     private final int sortOrdinal;
 
+    /** 搜索词：玩家名的一部分或 UUID 的开头；空串表示不搜，看整张榜。 */
+    private final String query;
+
     /**
      * 构造网络包。
      *
      * @param period 想要的时间范围
      * @param sort   想要的排序方式
+     * @param query  搜索词，空串表示看整张榜
      */
-    public C2SRequestLeaderboardPacket(LeaderboardPeriod period, LeaderboardSort sort) {
-        this.periodOrdinal = period.ordinal();
-        this.sortOrdinal = sort.ordinal();
+    public C2SRequestLeaderboardPacket(LeaderboardPeriod period, LeaderboardSort sort, String query) {
+        this(period.ordinal(), sort.ordinal(), query);
     }
 
-    private C2SRequestLeaderboardPacket(int periodOrdinal, int sortOrdinal) {
+    private C2SRequestLeaderboardPacket(int periodOrdinal, int sortOrdinal, String query) {
         this.periodOrdinal = periodOrdinal;
         this.sortOrdinal = sortOrdinal;
+        this.query = clip(query);
+    }
+
+    /**
+     * 去掉首尾空白并截到上限，写包时超长会直接抛异常，得在这里先截。
+     *
+     * @param query 原始搜索词
+     * @return 处理后的搜索词
+     */
+    private static String clip(String query) {
+        String trimmed = query == null ? "" : query.trim();
+        return trimmed.length() > MAX_QUERY ? trimmed.substring(0, MAX_QUERY) : trimmed;
     }
 
     /**
@@ -49,6 +67,7 @@ public class C2SRequestLeaderboardPacket {
     public void encode(FriendlyByteBuf buf) {
         buf.writeVarInt(this.periodOrdinal);
         buf.writeVarInt(this.sortOrdinal);
+        buf.writeUtf(this.query, MAX_QUERY);
     }
 
     /**
@@ -58,7 +77,7 @@ public class C2SRequestLeaderboardPacket {
      * @return 网络包
      */
     public static C2SRequestLeaderboardPacket decode(FriendlyByteBuf buf) {
-        return new C2SRequestLeaderboardPacket(buf.readVarInt(), buf.readVarInt());
+        return new C2SRequestLeaderboardPacket(buf.readVarInt(), buf.readVarInt(), buf.readUtf(MAX_QUERY));
     }
 
     /**
@@ -95,7 +114,7 @@ public class C2SRequestLeaderboardPacket {
             // 先把请求者自己刷一遍：他刚打完的那波经验还没到定时刷新，不然看到的是几十秒前的自己
             board.update(player);
             MasteryLeaderboard.Result result = board.query(server, period, sort,
-                    MasteryConfig.COMMON.leaderboardTopCount.get(), player.getUUID());
+                    MasteryConfig.COMMON.leaderboardTopCount.get(), player.getUUID(), this.query);
             NetworkHandler.sendTo(player, S2CLeaderboardPacket.ok(result, periodsEnabled));
         });
         ctx.setPacketHandled(true);

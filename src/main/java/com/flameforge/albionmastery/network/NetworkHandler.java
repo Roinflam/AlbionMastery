@@ -1,4 +1,3 @@
-// 路径：src/main/java/com/flameforge/albionmastery/network/NetworkHandler.java
 package com.flameforge.albionmastery.network;
 
 import com.flameforge.albionmastery.AlbionMastery;
@@ -13,7 +12,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
  * 网络通道注册。
  *
  * <p>数据流基本是单向的：服务端为唯一权威，客户端只接收专精数据用于界面显示。
- * C2S 包只有三种：切换特化（只带一个流派键，解锁条件与冷却全部由服务端重新校验）、
+ * C2S 包只有三种：切换特化（只带一个特化键，解锁条件与冷却全部由服务端重新校验）、
  * 要排行榜、要某个人的专精数据（后两种服务端会限流）。客户端说什么都不作数。
  */
 public final class NetworkHandler {
@@ -21,10 +20,11 @@ public final class NetworkHandler {
     /**
      * 协议版本，客户端与服务端不一致时 Forge 会直接拒绝连接。
      *
-     * <p>加了排行榜的四个包之后升到 2：老版本客户端收到不认识的包 ID 会直接断线报错，
-     * 不如在进服时就明确提示版本不匹配。
+     * <p>版本 4 的配置快照增加法术范围保护开关，且升级经验曲线翻倍。
+     * 版本 5 排行榜请求 / 回包加了搜索字段，新增罗盘管理操作包。
+     * 两端必须一起更新，避免旧客户端误读数据包或显示错误等级。
      */
-    private static final String PROTOCOL_VERSION = "3";
+    private static final String PROTOCOL_VERSION = "9";
 
     /** 主通道。 */
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
@@ -95,6 +95,13 @@ public final class NetworkHandler {
                 .decoder(S2CRankChangePacket::decode)
                 .consumerMainThread(S2CRankChangePacket::handle)
                 .add();
+
+        // 罗盘里的管理按钮
+        CHANNEL.messageBuilder(C2SAdminActionPacket.class, packetId++, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(C2SAdminActionPacket::encode)
+                .decoder(C2SAdminActionPacket::decode)
+                .consumerMainThread(C2SAdminActionPacket::handle)
+                .add();
     }
 
     /**
@@ -116,5 +123,3 @@ public final class NetworkHandler {
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), message);
     }
 }
-
-

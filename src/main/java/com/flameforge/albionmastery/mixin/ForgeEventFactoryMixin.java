@@ -43,7 +43,8 @@ public abstract class ForgeEventFactoryMixin {
     private static void albionmastery$captureFinalExperience(LivingEntity entity, Player attackingPlayer,
                                                              int experience,
                                                              CallbackInfoReturnable<Integer> callback) {
-        if (attackingPlayer == null || entity == null || MasteryExperienceHook.isCustomNpc(entity)) {
+        if (attackingPlayer == null || entity == null || MasteryExperienceHook.isCustomNpc(entity)
+                || !MasteryExperienceHook.isEligibleKill(entity, attackingPlayer)) {
             return;
         }
         // 第三个参数是进事件之前的原版数值，返回值是所有模组改完之后实际要掉的数，两个都传下去按配置挑

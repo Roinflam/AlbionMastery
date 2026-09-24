@@ -23,12 +23,17 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.LogicalSide;
 
 import java.util.Optional;
+import net.minecraftforge.entity.PartEntity;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.tags.DamageTypeTags;
+import net.minecraftforge.event.entity.living.LivingHurtEvent;
 
 /**
  * TACZ 枪械战斗事件处理。
@@ -76,9 +81,14 @@ public final class GunCombatHandler {
         ResolvedWeapon weapon = ResolvedWeapon.of(
                 WeaponKeys.PROVIDER_TACZ_GUN, gunId, TaczSupport.gunType(gunId));
 
+        // 末影龙这类多部件的实体，打中的是某个部件，算到本体头上：不然看目标的倍率、远近、连击全都跳过
+        Entity hurt = event.getHurtEntity();
+        if (hurt instanceof PartEntity<?> part) {
+            hurt = part.getParent();
+        }
         // 先按「加成生效前」的基础伤害发经验，避免加成 -> 经验 -> 更多加成的正反馈
         float baseAmount = event.getBaseAmount();
-        awardXpForHit(player, data, weapon, event.getHurtEntity(), baseAmount, snapshot);
+        awardXpForHit(player, data, weapon, hurt, baseAmount, snapshot);
 
         if (baseAmount > 0.0F) {
             MasteryHelper.Bonus bonus = MasteryHelper.computeBonus(data, weapon, snapshot);
@@ -87,7 +97,7 @@ public final class GunCombatHandler {
             // 否则重型弹药那 3 倍会被高等级玩家的专精加成稀释成聊胜于无
             SpecializationValues spec = SpecializationEffects.forData(data, weapon, snapshot);
             // 爆头与否只有枪械知道，所以这里把它传进去；近战和拔刀剑传 null 跳过这一项
-            LivingEntity target = event.getHurtEntity() instanceof LivingEntity living ? living : null;
+            LivingEntity target = hurt instanceof LivingEntity living ? living : null;
             double multiplier = bonus.multiplier() * spec.damage()
                     * SpecializationEffects.conditionalMultiplier(
                             spec, player, target, event.isHeadShot())
@@ -96,12 +106,51 @@ public final class GunCombatHandler {
             if (target != null) {
                 multiplier *= ComboTracker.hit(player, target, spec);
             }
+            multiplier *= lastRoundMultiplier(player, gunId, spec);
             if (Math.abs(multiplier - 1.0D) > 1.0E-6D) {
                 event.setBaseAmount((float) (baseAmount * multiplier));
             }
         }
     }
 
+
+    /**
+     * 爆炸弹的溅射伤害按专精和特化缩放。
+     *
+     * <p>TACZ 的「命中前」事件只对直接命中的那一个目标触发；RPG、榴弹的爆炸溅射是直接调受伤（爆炸类伤害，
+     * 直接来源是那颗弹），绕过了那个事件，以前溅射一点专精加成、特化倍率都吃不到。
+     * 直接命中和溅射是两次独立的伤害，各乘各的，不会重复。打到自己的不管。
+     *
+     * @param event 受伤事件
+     */
+    @SubscribeEvent(priority = EventPriority.HIGH)
+    public static void onExplosionHurt(LivingHurtEvent event) {
+        DamageSource source = event.getSource();
+        if (!source.is(DamageTypeTags.IS_EXPLOSION) || event.getAmount() <= 0.0F) {
+            return;
+        }
+        ResolvedWeapon weapon = TaczSupport.fromBullet(source.getDirectEntity());
+        if (weapon == null || !(source.getEntity() instanceof ServerPlayer player) || player.isSpectator()) {
+            return;
+        }
+        LivingEntity target = event.getEntity();
+        if (target == player || !target.isAlive()) {
+            return;
+        }
+        MasteryData data = MasteryHelper.get(player);
+        if (data == null) {
+            return;
+        }
+        MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
+        MasteryHelper.Bonus bonus = MasteryHelper.computeBonus(data, weapon, snapshot);
+        SpecializationValues spec = SpecializationEffects.forData(data, weapon, snapshot);
+        double multiplier = bonus.multiplier() * spec.damage()
+                * SpecializationEffects.conditionalMultiplier(spec, player, target, null)
+                * SpecializationEffects.critMultiplier(spec, player.getRandom());
+        if (Math.abs(multiplier - 1.0D) > 1.0E-6D) {
+            event.setAmount((float) (event.getAmount() * multiplier));
+        }
+    }
 
     /**
      * 按一次命中发放经验。
@@ -123,7 +172,13 @@ public final class GunCombatHandler {
         if (!(hurtEntity instanceof LivingEntity living) || !living.isAlive() || living == player) {
             return;
         }
-        if (living instanceof Player && !MasteryConfig.COMMON.xpFromPlayerDamage.get()) {
+        // TACZ 先发这个事件、再结算伤害，不管伤害最后有没有生效：盔甲架、无敌的目标、
+        // 创造模式或关了 PVP 的玩家都会走到这里，照发经验就能对着打不死的东西刷
+        if (living instanceof ArmorStand || living.isInvulnerable()) {
+            return;
+        }
+        if (living instanceof Player target && (target.getAbilities().invulnerable
+                || !player.server.isPvpAllowed() || !MasteryConfig.COMMON.xpFromPlayerDamage.get())) {
             return;
         }
         double perDamage = MasteryConfig.COMMON.xpPerDamage.get();
@@ -141,7 +196,7 @@ public final class GunCombatHandler {
      * <p>补的是<b>弹匣里的数</b>（物品 NBT 上的当前弹药），不动背包弹药，
      * 所以对玩家来说等于「白送了几发」。「直接从背包取弹」模式的枪没有弹匣概念，跳过。
      *
-     * <p>容量上限按配件和流派（扩容弹匣）算过之后的值，和换弹逻辑里用的同一套。
+     * <p>容量上限按配件和特化（扩容弹匣）算过之后的值，和换弹逻辑里用的同一套。
      *
      * @param event 击杀事件
      */
@@ -170,21 +225,16 @@ public final class GunCombatHandler {
             return;
         }
 
-        Optional<CommonGunIndex> index = TimelessAPI.getCommonGunIndex(gunId);
-        if (index.isEmpty()) {
+        int capacity = magazineCapacity(gun, gunId, values);
+        if (capacity <= 0) {
             return;
-        }
-        GunData gunData = index.get().getGunData();
-        int capacity = AttachmentDataUtils.getAmmoCountWithAttachment(gun, gunData);
-        if (values.magazine() != 1.0D) {
-            capacity = Math.max(1, (int) Math.round(capacity * values.magazine()));
         }
         int current = iGun.getCurrentAmmoCount(gun);
         if (current >= capacity) {
             return;
         }
-        // 杀玩家按流派写的比例补，杀怪打折；至少补 1 发：
-        // 小弹匣手枪按比例算出来 0.4 发，四舍五入成 0 会让这个流派在手枪上完全没感觉
+        // 杀玩家按特化写的比例补，杀怪打折；至少补 1 发：
+        // 小弹匣手枪按比例算出来 0.4 发，四舍五入成 0 会让这个特化在手枪上完全没感觉
         double ratio = values.killRefill();
         if (!(event.getKilledEntity() instanceof Player)) {
             ratio *= MasteryConfig.COMMON.killRefillMobRatio.get();
@@ -194,6 +244,58 @@ public final class GunCombatHandler {
         }
         int refill = Math.max(1, (int) Math.round(capacity * ratio));
         iGun.setCurrentAmmoCount(gun, Math.min(capacity, current + refill));
+    }
+
+    /** 弹匣剩多少以下算「最后几发」。 */
+    private static final double LAST_ROUND_SHARE = 0.3D;
+
+    /**
+     * 残弹加成：这一枪打出去之后弹匣只剩最后三成（含）以下，就乘特化给的倍率。
+     *
+     * <p>命中时弹匣里已经扣掉这一发了，所以看的是「打完这一发还剩多少」，
+     * 一个 30 发的弹匣从第 22 发开始吃加成。背包直读的枪没有弹匣，不算。
+     *
+     * @param player 射手
+     * @param gunId  枪械 ID
+     * @param spec   特化数值
+     * @return 倍率
+     */
+    private static double lastRoundMultiplier(ServerPlayer player, ResourceLocation gunId, SpecializationValues spec) {
+        if (spec.lastRoundDamage() == 1.0D) {
+            return 1.0D;
+        }
+        ItemStack gun = findHeldGun(player, gunId);
+        IGun iGun = gun == null ? null : IGun.getIGunOrNull(gun);
+        if (iGun == null || iGun.useInventoryAmmo(gun)) {
+            return 1.0D;
+        }
+        int capacity = magazineCapacity(gun, gunId, spec);
+        if (capacity <= 0) {
+            return 1.0D;
+        }
+        return iGun.getCurrentAmmoCount(gun) <= Math.ceil(capacity * LAST_ROUND_SHARE)
+                ? spec.lastRoundDamage() : 1.0D;
+    }
+
+    /**
+     * 这把枪的弹匣容量：配件加成之后、再乘特化的弹匣倍率，和换弹逻辑里用的同一套。
+     *
+     * @param gun    枪
+     * @param gunId  枪械 ID
+     * @param values 特化数值
+     * @return 容量；查不到枪械数据时返回 0
+     */
+    private static int magazineCapacity(ItemStack gun, ResourceLocation gunId, SpecializationValues values) {
+        Optional<CommonGunIndex> index = TimelessAPI.getCommonGunIndex(gunId);
+        if (index.isEmpty()) {
+            return 0;
+        }
+        GunData gunData = index.get().getGunData();
+        int capacity = AttachmentDataUtils.getAmmoCountWithAttachment(gun, gunData);
+        if (values.magazine() != 1.0D) {
+            capacity = Math.max(1, (int) Math.round(capacity * values.magazine()));
+        }
+        return capacity;
     }
 
     /**

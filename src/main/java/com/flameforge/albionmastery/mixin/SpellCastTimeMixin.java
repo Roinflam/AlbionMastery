@@ -11,12 +11,13 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import io.redspace.ironsspellbooks.api.spells.CastType;
 
 /**
- * 铁魔法施法时间（前摇）按流派缩放。
+ * 铁魔法施法时间（前摇）按特化缩放。
  *
  * <p>补的是什么：{@code AbstractSpell.getEffectiveCastTime(等级, 施法者)} 是最终的吟唱 / 前摇时长，
- * 施法者身上的施法速度属性已经算在里面了。在返回值上再乘流派倍率。两端都会调（客户端做进度条，
+ * 施法者身上的施法速度属性已经算在里面了。在返回值上再乘特化倍率。两端都会调（客户端做进度条，
  * 服务端做判定），各按各的数据算。只对玩家生效。
  */
 @Mixin(value = AbstractSpell.class, remap = false)
@@ -30,7 +31,10 @@ public abstract class SpellCastTimeMixin {
     @Inject(method = "getEffectiveCastTime", at = @At("RETURN"), cancellable = true, require = 0)
     private void albionmastery$scaleCastTime(int spellLevel, LivingEntity caster,
                                              CallbackInfoReturnable<Integer> callbackInfo) {
-        if (!(caster instanceof Player player)) {
+        // 持续引导的法术（光束、吐息），这个值是「能引导多久」而不是「要读多久」：
+        // 按读条缩短的话，加快施法的特化反而把光束缩短了，拖慢施法的反倒延长了。不动它
+        if (!(caster instanceof Player player)
+                || ((AbstractSpell) (Object) this).getCastType() == CastType.CONTINUOUS) {
             return;
         }
         double factor = SpecializationEffects.forWeapon(player,

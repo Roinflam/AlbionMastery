@@ -13,8 +13,11 @@ import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import com.flameforge.albionmastery.weapon.compat.WeaponOverrides;
 
 /**
  * 客户端专精数据缓存。
@@ -29,6 +32,9 @@ public final class ClientMasteryCache {
 
     /** 服务端下发的数值配置快照。 */
     private static MasteryConfig.Snapshot snapshot = MasteryConfig.Snapshot.createDefault();
+
+    /** 一次全量同步里改动超过这么多条，就只弹来源那一层的提示。 */
+    private static final int BULK_NOTIFY_LIMIT = 8;
 
     /** 是否已经收到过至少一次全量同步。 */
     private static boolean synced = false;
@@ -58,6 +64,19 @@ public final class ClientMasteryCache {
     }
 
     /**
+     * 这份缓存是不是这个玩家的。
+     *
+     * <p>缓存里只有本机玩家自己的专精数据；客户端上别的玩家拿枪开火、拉栓时，TACZ 同样会走到那些
+     * 被特化改过的方法里，这时不能拿本机玩家的特化去套别人。
+     *
+     * @param player 玩家
+     * @return 是本机玩家返回 true
+     */
+    public static boolean isLocalPlayer(net.minecraft.world.entity.player.Player player) {
+        return player == net.minecraft.client.Minecraft.getInstance().player;
+    }
+
+    /**
      * 接收全量同步包。
      *
      * @param newSnapshot 服务端配置快照
@@ -75,10 +94,18 @@ public final class ClientMasteryCache {
                                       double studyMultiplier) {
         // 登录后的第一次全量同步是一次性灌数据，弹一屏提示毫无意义；
         // 之后再来的全量同步一定是服务端那边动过数据（管理员改等级、切特化），这时候要提示
-        boolean notify = synced;
+        boolean notify = synced && MasteryConfig.CLIENT.showLevelUpToast.get();
         Map<String, Integer> before = notify ? levelSnapshot() : Map.of();
 
         snapshot = newSnapshot;
+        // 武器补录表跟着服务端走：服主在配置里补了哪些武器，客户端按同一份认，
+        // 免得服务端算出的武器键和客户端对不上（那样界面上永远是 0 级）
+        // 只有这两张表真的变了才让武器清单作废：全量同步几乎每件事都会触发
+        //（切特化、重生、换维度、配置重载），而重建要遍历整个物品注册表，
+        // 代价会落在下一次 ensureBuilt()——正好是战斗里升级弹横幅的那一帧
+        if (WeaponOverrides.applyFromServer(newSnapshot.extraWeapons, newSnapshot.notWeapons)) {
+            ClientWeaponRegistry.invalidate();
+        }
         DATA.clear();
         applyDelta(weapons, types, overalls, false);
         DATA.replaceSpecializations(specializations);
@@ -122,18 +149,80 @@ public final class ClientMasteryCache {
      * @param before 同步前的等级快照
      */
     private static void notifyChanges(Map<String, Integer> before) {
-        for (String key : DATA.getWeaponsView().keySet()) {
-            notifyIfLevelUp(before.getOrDefault("w" + key, 0), DATA.getWeaponLevel(key),
-                    key, Tier.WEAPON);
+        List<LevelChange> changes = changesSince(before);
+        if (changes.size() <= BULK_NOTIFY_LIMIT) {
+            for (LevelChange change : changes) {
+                notifyIfLevelUp(change.oldLevel(), change.newLevel(), change.key(), change.tier());
+            }
+            return;
+        }
+        // 管理员一键满级 / 清零会一次改掉上千条，逐条弹提示没法看：从上往下挑一层来弹。
+        // 有来源变了就只弹来源；来源没变（比如整类满级）就弹类型，最多弹上限那么多条
+        List<LevelChange> picked = new ArrayList<>();
+        for (Tier tier : new Tier[]{Tier.OVERALL, Tier.TYPE, Tier.WEAPON}) {
+            for (LevelChange change : changes) {
+                if (change.tier() == tier && picked.size() < BULK_NOTIFY_LIMIT) {
+                    picked.add(change);
+                }
+            }
+            if (!picked.isEmpty()) {
+                break;
+            }
+        }
+        for (LevelChange change : picked) {
+            notifyIfLevelUp(change.oldLevel(), change.newLevel(), change.key(), change.tier());
+        }
+    }
+
+    /**
+     * 同步前后等级变了的条目。
+     *
+     * <p>全量包不带经验为 0 的条目，清零之后它们直接从表里消失了，要从同步前的快照里补回来按 0 级算，
+     * 不然「清零」一条提示都没有。
+     *
+     * @param before 同步前的等级快照
+     * @return 变化列表，来源、类型、武器的顺序
+     */
+    private static List<LevelChange> changesSince(Map<String, Integer> before) {
+        List<LevelChange> changes = new ArrayList<>();
+        Set<String> present = new HashSet<>();
+        for (String key : DATA.getOverallsView().keySet()) {
+            present.add("o" + key);
+            addChange(changes, before.getOrDefault("o" + key, 0), DATA.getOverallLevel(key), key, Tier.OVERALL);
         }
         for (String key : DATA.getTypesView().keySet()) {
-            notifyIfLevelUp(before.getOrDefault("t" + key, 0), DATA.getTypeLevel(key),
-                    key, Tier.TYPE);
+            present.add("t" + key);
+            addChange(changes, before.getOrDefault("t" + key, 0), DATA.getTypeLevel(key), key, Tier.TYPE);
         }
-        for (String key : DATA.getOverallsView().keySet()) {
-            notifyIfLevelUp(before.getOrDefault("o" + key, 0), DATA.getOverallLevel(key),
-                    key, Tier.OVERALL);
+        for (String key : DATA.getWeaponsView().keySet()) {
+            present.add("w" + key);
+            addChange(changes, before.getOrDefault("w" + key, 0), DATA.getWeaponLevel(key), key, Tier.WEAPON);
         }
+        for (Map.Entry<String, Integer> entry : before.entrySet()) {
+            String prefixed = entry.getKey();
+            if (present.contains(prefixed) || entry.getValue() == 0) {
+                continue;
+            }
+            Tier tier = switch (prefixed.charAt(0)) {
+                case 'w' -> Tier.WEAPON;
+                case 't' -> Tier.TYPE;
+                default -> Tier.OVERALL;
+            };
+            changes.add(new LevelChange(prefixed.substring(1), tier, entry.getValue(), 0));
+        }
+        return changes;
+    }
+
+    private static void addChange(List<LevelChange> changes, int oldLevel, int newLevel, String key, Tier tier) {
+        if (oldLevel != newLevel) {
+            changes.add(new LevelChange(key, tier, oldLevel, newLevel));
+        }
+    }
+
+    /**
+     * 一条等级变化。
+     */
+    private record LevelChange(String key, Tier tier, int oldLevel, int newLevel) {
     }
 
     /**
@@ -312,9 +401,12 @@ public final class ClientMasteryCache {
         DATA.clear();
         DATA.clearDirty();
         snapshot = MasteryConfig.Snapshot.createDefault();
+        WeaponOverrides.clearServerData();
+        WeaponOverrides.apply(List.of(), List.of());
+        ClientWeaponRegistry.invalidate();
         synced = false;
         MasteryToastManager.clear();
-        // 记住的界面视角也要丢掉：换个服务器武器清单完全不一样，
+        // 记住的界面视角也要丢掉：换个服务端武器清单完全不一样，
         // 拿旧坐标恢复出来就是对着一片空白
         MasteryScreen.forgetView();
     }

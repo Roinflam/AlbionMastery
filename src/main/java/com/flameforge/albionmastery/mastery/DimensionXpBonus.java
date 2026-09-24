@@ -49,8 +49,9 @@ public final class DimensionXpBonus {
             String id = raw.substring(0, split).trim().toLowerCase(Locale.ROOT);
             try {
                 double value = Double.parseDouble(raw.substring(split + 1).trim());
-                if (value < 0.0D) {
-                    AlbionMastery.LOGGER.warn("维度经验倍率不能为负: {}", raw);
+                // parseDouble 认 Infinity 和 NaN：无穷大会让每次击杀给满 Long.MAX 的经验，NaN 会一路传下去
+                if (!Double.isFinite(value) || value < 0.0D) {
+                    AlbionMastery.LOGGER.warn("维度经验倍率必须是非负的有限数字: {}", raw);
                     continue;
                 }
                 parsed.put(id, value);

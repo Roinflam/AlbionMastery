@@ -8,15 +8,15 @@ import java.util.Map;
 import java.util.function.ToDoubleFunction;
 
 /**
- * 一个专精特化（流派）的全部数值。
+ * 一项专精特化的全部数值。
  *
  * <p>字段分三类。<b>倍率类</b>一律是「乘在原值上」，{@code 1.0} 表示不变；
  * 时间类（换弹、攻击间隔）小于 1 才是变快，这一点容易记反，配置注释里也写了一遍。
  * <b>阈值 / 比例类</b>是 0 到 1 的比例（血量线、暴击率、吸血比例、补弹比例）。
  * <b>层数类</b>（连击上限）是个整数，存成 double 只是为了和别的项走同一套读写。
  *
- * <p>一个流派通常只动其中两三项，其余保持中性值，所以这张表大部分时候是
- * 「一堆 1.0 里夹着几个数」——换来的是加流派不用改网络包结构。
+ * <p>一个特化通常只动其中两三项，其余保持中性值，所以这张表大部分时候是
+ * 「一堆 1.0 里夹着几个数」——换来的是加特化不用改网络包结构。
  *
  * <p>字段多了之后，读写和取值都走 {@link #KEYS} 这张顺序表，不再一个个手写：
  * 加一个维度只需要动 {@code KEYS}、{@link #value}、{@link #of}、{@link #defaultOf} 和
@@ -49,7 +49,7 @@ import java.util.function.ToDoubleFunction;
  * @param xpGain               用该类武器获得专精经验的倍率
  * @param killRefill           枪械击杀后立刻补回弹匣容量的这个比例，0 到 1
  * @param comboStep            连续命中同一目标时每层增加的伤害比例（0.05 = 每层 +5%）
- * @param comboMax             连击最多叠几层，0 表示这个流派没有连击
+ * @param comboMax             连击最多叠几层，0 表示这个特化没有连击
  * @param durability           武器耐久消耗倍率，小于 1 更耐用
  * @param manaCost             法术法力消耗倍率，小于 1 更省
  * @param spellCooldown        法术冷却时间倍率，小于 1 更快
@@ -60,6 +60,30 @@ import java.util.function.ToDoubleFunction;
  * @param castTime             法术施法时间（前摇）倍率，小于 1 更快
  * @param drawSpeed            拉弓蓄力速度倍率，大于 1 拉满更快
  * @param doubleCast           法术双重施法概率，0 到 1：施放后自动免费再放一次
+ * @param fireRate             枪械射速倍率，大于 1 更快（1.3 = 射速快三成）
+ * @param adsTime              枪械开镜耗时倍率，小于 1 更快
+ * @param hipSpread            枪械腰射（没完全开镜时）散布倍率，小于 1 更准
+ * @param aimSpread            枪械开镜散布倍率，小于 1 更准
+ * @param drawTime             枪械掏枪（切枪）耗时倍率，小于 1 更快
+ * @param boltTime             枪械拉栓耗时倍率，小于 1 更快
+ * @param sprintTime           枪械冲刺后恢复射击的耗时倍率，小于 1 更快
+ * @param ammoSave             枪械每发子弹不消耗弹匣的概率，0 到 1
+ * @param pierce               子弹 / 箭 / 魔艺投射物额外穿透的目标数，整数
+ * @param knockback            击退倍率（近战、拔刀剑、弓箭），大于 1 打得更远
+ * @param reach                近战攻击距离倍率（原版剑类）
+ * @param backstabDamage       从目标背后打中时的额外倍率
+ * @param damageTaken          手持该武器时自己受到的伤害倍率，小于 1 更硬
+ * @param saDamage             拔刀剑拔刀技（SA）期间的斩击伤害倍率
+ * @param soulGain             拔刀剑耀魂获取倍率
+ * @param killHeal             击杀后回复自己最大生命的这个比例，0 到 1
+ * @param frenzyStep           嗜战：每次击杀叠一层，每层伤害加成（0.08 = 每层 +8%）
+ * @param frenzyMax            嗜战最多叠几层，0 表示没有嗜战
+ * @param nearDamage           目标在近距离（6 格内）时的额外倍率
+ * @param farDamage            目标在远距离（24 格外）时的额外倍率
+ * @param igniteChance         命中时点燃目标的概率，0 到 1
+ * @param slowChance           命中时让目标缓慢的概率，0 到 1
+ * @param weakenChance         命中时让目标虚弱的概率，0 到 1
+ * @param lastRoundDamage      枪械弹匣只剩最后三成时的额外倍率
  */
 public record SpecializationValues(double magazine,
                                    double reloadTime,
@@ -96,7 +120,31 @@ public record SpecializationValues(double magazine,
                                    double recoil,
                                    double castTime,
                                    double drawSpeed,
-                                   double doubleCast) {
+                                   double doubleCast,
+                                   double fireRate,
+                                   double adsTime,
+                                   double hipSpread,
+                                   double aimSpread,
+                                   double drawTime,
+                                   double boltTime,
+                                   double sprintTime,
+                                   double ammoSave,
+                                   double pierce,
+                                   double knockback,
+                                   double reach,
+                                   double backstabDamage,
+                                   double damageTaken,
+                                   double saDamage,
+                                   double soulGain,
+                                   double killHeal,
+                                   double frenzyStep,
+                                   double frenzyMax,
+                                   double nearDamage,
+                                   double farDamage,
+                                   double igniteChance,
+                                   double slowChance,
+                                   double weakenChance,
+                                   double lastRoundDamage) {
 
     /** 全部维度的项名，同时也是网络传输的顺序。改动顺序会破坏兼容性，新项只能追加在末尾。 */
     public static final List<String> KEYS = List.of(
@@ -110,7 +158,12 @@ public record SpecializationValues(double magazine,
             "critChance", "critDamage", "lifeSteal", "moveSpeed", "xpGain",
             "killRefill", "comboStep", "comboMax", "durability",
             "manaCost", "spellCooldown", "spellLevel",
-            "gunVolume", "bulletSpeed", "recoil", "castTime", "drawSpeed", "doubleCast");
+            "gunVolume", "bulletSpeed", "recoil", "castTime", "drawSpeed", "doubleCast",
+            "fireRate", "adsTime", "hipSpread", "aimSpread", "drawTime", "boltTime", "sprintTime",
+            "ammoSave", "pierce",
+            "knockback", "reach", "backstabDamage", "damageTaken", "saDamage", "soulGain",
+            "killHeal", "frenzyStep", "frenzyMax", "nearDamage", "farDamage",
+            "igniteChance", "slowChance", "weakenChance", "lastRoundDamage");
 
     /** 什么都不改的中性值，用于「制式」以及查不到数值时的兜底。 */
     public static final SpecializationValues NEUTRAL = of(SpecializationValues::defaultOf);
@@ -129,7 +182,9 @@ public record SpecializationValues(double magazine,
             case "executeThreshold" -> 0.3D;
             case "desperationThreshold" -> 0.5D;
             case "desperationFloor" -> 0.3D;
-            case "critChance", "lifeSteal", "killRefill", "comboStep", "comboMax", "spellLevel", "doubleCast" -> 0.0D;
+            case "critChance", "lifeSteal", "killRefill", "comboStep", "comboMax", "spellLevel", "doubleCast",
+                    "ammoSave", "pierce", "killHeal", "frenzyStep", "frenzyMax",
+                    "igniteChance", "slowChance", "weakenChance" -> 0.0D;
             case "critDamage" -> 1.5D;
             default -> 1.0D;
         };
@@ -179,6 +234,30 @@ public record SpecializationValues(double magazine,
             case "castTime" -> this.castTime;
             case "drawSpeed" -> this.drawSpeed;
             case "doubleCast" -> this.doubleCast;
+            case "fireRate" -> this.fireRate;
+            case "adsTime" -> this.adsTime;
+            case "hipSpread" -> this.hipSpread;
+            case "aimSpread" -> this.aimSpread;
+            case "drawTime" -> this.drawTime;
+            case "boltTime" -> this.boltTime;
+            case "sprintTime" -> this.sprintTime;
+            case "ammoSave" -> this.ammoSave;
+            case "pierce" -> this.pierce;
+            case "knockback" -> this.knockback;
+            case "reach" -> this.reach;
+            case "backstabDamage" -> this.backstabDamage;
+            case "damageTaken" -> this.damageTaken;
+            case "saDamage" -> this.saDamage;
+            case "soulGain" -> this.soulGain;
+            case "killHeal" -> this.killHeal;
+            case "frenzyStep" -> this.frenzyStep;
+            case "frenzyMax" -> this.frenzyMax;
+            case "nearDamage" -> this.nearDamage;
+            case "farDamage" -> this.farDamage;
+            case "igniteChance" -> this.igniteChance;
+            case "slowChance" -> this.slowChance;
+            case "weakenChance" -> this.weakenChance;
+            case "lastRoundDamage" -> this.lastRoundDamage;
             default -> defaultOf(key);
         };
     }
@@ -226,7 +305,31 @@ public record SpecializationValues(double magazine,
                 lookup.applyAsDouble("recoil"),
                 lookup.applyAsDouble("castTime"),
                 lookup.applyAsDouble("drawSpeed"),
-                lookup.applyAsDouble("doubleCast"));
+                lookup.applyAsDouble("doubleCast"),
+                lookup.applyAsDouble("fireRate"),
+                lookup.applyAsDouble("adsTime"),
+                lookup.applyAsDouble("hipSpread"),
+                lookup.applyAsDouble("aimSpread"),
+                lookup.applyAsDouble("drawTime"),
+                lookup.applyAsDouble("boltTime"),
+                lookup.applyAsDouble("sprintTime"),
+                lookup.applyAsDouble("ammoSave"),
+                lookup.applyAsDouble("pierce"),
+                lookup.applyAsDouble("knockback"),
+                lookup.applyAsDouble("reach"),
+                lookup.applyAsDouble("backstabDamage"),
+                lookup.applyAsDouble("damageTaken"),
+                lookup.applyAsDouble("saDamage"),
+                lookup.applyAsDouble("soulGain"),
+                lookup.applyAsDouble("killHeal"),
+                lookup.applyAsDouble("frenzyStep"),
+                lookup.applyAsDouble("frenzyMax"),
+                lookup.applyAsDouble("nearDamage"),
+                lookup.applyAsDouble("farDamage"),
+                lookup.applyAsDouble("igniteChance"),
+                lookup.applyAsDouble("slowChance"),
+                lookup.applyAsDouble("weakenChance"),
+                lookup.applyAsDouble("lastRoundDamage"));
     }
 
     /**
@@ -266,13 +369,20 @@ public record SpecializationValues(double magazine,
     public static double minOf(String key) {
         return switch (key) {
             // 时间类和容量不能是 0，否则「间隔为零」会变成无限连击、容量 0 会永远装不满
-            case "reloadTime", "attackInterval", "magazine", "manaCost", "spellCooldown", "castTime" -> 0.05D;
+            case "reloadTime", "attackInterval", "magazine", "manaCost", "spellCooldown", "castTime",
+                    "adsTime", "drawTime", "boltTime" -> 0.05D;
+            // 射速再低也得能开枪；0.2 = 原射速的五分之一
+            case "fireRate" -> 0.2D;
             // 弹速夹得紧：太快子弹一 tick 飞穿好几个区块，碰撞会漏
             case "bulletSpeed" -> 0.2D;
             // 移速倍率再低也得能走，否则玩家被钉在原地
             case "moveSpeed" -> 0.2D;
             // 暴击倍率低于 1 就不叫暴击了
             case "critDamage" -> 1.0D;
+            // 攻击距离砍到一半已经很难用了，再低就摸不到人
+            case "reach" -> 0.5D;
+            // 受到伤害至少一成：不能做成无敌
+            case "damageTaken" -> 0.1D;
             default -> 0.0D;
         };
     }
@@ -287,12 +397,23 @@ public record SpecializationValues(double magazine,
         return switch (key) {
             // 血量比例、概率、回血比例、补弹比例都是 0~1
             case "executeThreshold", "desperationThreshold", "desperationFloor",
-                    "critChance", "lifeSteal", "killRefill", "doubleCast" -> 1.0D;
+                    "critChance", "lifeSteal", "killRefill", "doubleCast",
+                    "killHeal", "frenzyStep", "igniteChance", "slowChance", "weakenChance" -> 1.0D;
+            case "frenzyMax" -> 20.0D;
             case "reloadTime", "attackInterval", "magazine", "durability", "critDamage",
                     "manaCost", "spellCooldown" -> 20.0D;
             case "spellLevel" -> 10.0D;
-            case "moveSpeed", "gunVolume", "recoil", "castTime" -> 5.0D;
+            case "moveSpeed", "gunVolume", "recoil", "castTime",
+                    "adsTime", "hipSpread", "aimSpread", "drawTime", "boltTime", "sprintTime" -> 5.0D;
             case "bulletSpeed" -> 2.5D;
+            // 射速上限 3 倍：TACZ 客户端按 tick 开火，一秒最多 20 发，再高也打不出来
+            case "fireRate" -> 3.0D;
+            // 免耗弹封顶 90%：给到 100% 就是无限子弹，弹匣和换弹整套玩法都没了
+            case "ammoSave" -> 0.9D;
+            case "pierce" -> 10.0D;
+            case "knockback", "damageTaken" -> 5.0D;
+            // 攻击距离最多翻倍：再远就成了隔空砍人，服务端的距离校验也会拦
+            case "reach" -> 2.0D;
             case "comboStep" -> 10.0D;
             default -> 100.0D;
         };
@@ -313,11 +434,11 @@ public record SpecializationValues(double magazine,
     }
 
     /**
-     * 两个槽位的流派叠在一起。
+     * 两个槽位的特化叠在一起。
      *
      * <p>规则按项的性质定：倍率类相乘（伤害 1.4 × 1.1 = 1.54）；概率、比例、每层加成相加
      * （暴击率 15% + 10% = 25%）；层数上限、法术等级加成、暴击倍率和各种阈值取大的——
-     * 这些相加或相乘都没道理（两个流派各给 +1 级不该变 +2 级？其实该。所以法术等级相加；
+     * 这些相加或相乘都没道理（两个特化各给 +1 级不该变 +2 级？其实该。所以法术等级相加；
      * 暴击倍率相乘会爆炸，取大）。
      *
      * @param first  第一槽
@@ -330,11 +451,20 @@ public record SpecializationValues(double magazine,
             double b = second.value(key);
             return switch (key) {
                 // 概率、比例、每层加成：相加
-                case "critChance", "lifeSteal", "killRefill", "comboStep", "spellLevel", "doubleCast" ->
+                case "critChance", "lifeSteal", "killRefill", "comboStep", "spellLevel", "doubleCast",
+                        "ammoSave", "pierce", "killHeal", "frenzyStep",
+                        "igniteChance", "slowChance", "weakenChance" ->
                         clampOf(key, a + b);
-                // 上限、阈值、暴击倍率：取大
-                case "comboMax", "critDamage", "executeThreshold", "desperationThreshold", "desperationFloor" ->
-                        Math.max(a, b);
+                // 上限、暴击倍率：取大
+                case "comboMax", "frenzyMax", "critDamage" -> Math.max(a, b);
+                // 阈值：这几项的默认值不是中性的（背水下限默认 0.3、斩杀阈值默认 0.3），
+                // 无脑取大的话，另一个槽随便装个和背水 / 斩杀毫无关系的特化，
+                // 也会拿默认值去和真正带机制那一侧比大小，把人家的过渡区间改掉。
+                // 只有真的带这个机制的那一侧说了算
+                case "executeThreshold" ->
+                        mechanismThreshold(first.executeDamage(), second.executeDamage(), a, b);
+                case "desperationThreshold", "desperationFloor" ->
+                        mechanismThreshold(first.desperationDamage(), second.desperationDamage(), a, b);
                 // 其余全是倍率：相乘
                 default -> clampOf(key, a * b);
             };
@@ -342,7 +472,35 @@ public record SpecializationValues(double magazine,
     }
 
     /**
-     * @return 这个流派有没有连击（层数上限和每层加成都大于 0 才算）
+     * 合并一个「只有带对应机制才有意义」的阈值。
+     *
+     * <p>两边都带就取大（两个斩杀特化叠起来，按高的那条线走），只有一边带就听那一边的，
+     * 谁都没带时取大——反正没有机制会读它。
+     *
+     * @param firstDamage  第一槽这个机制的伤害倍率，1.0 表示没有这个机制
+     * @param secondDamage 第二槽同上
+     * @param a            第一槽的阈值
+     * @param b            第二槽的阈值
+     * @return 合并后的阈值
+     */
+    private static double mechanismThreshold(double firstDamage, double secondDamage, double a, double b) {
+        boolean firstHas = firstDamage != 1.0D;
+        boolean secondHas = secondDamage != 1.0D;
+        if (firstHas == secondHas) {
+            return Math.max(a, b);
+        }
+        return firstHas ? a : b;
+    }
+
+    /**
+     * @return 这个特化有没有嗜战（层数上限和每层加成都大于 0 才算）
+     */
+    public boolean hasFrenzy() {
+        return this.frenzyMax >= 1.0D && this.frenzyStep > 0.0D;
+    }
+
+    /**
+     * @return 这个特化有没有连击（层数上限和每层加成都大于 0 才算）
      */
     public boolean hasCombo() {
         return this.comboMax >= 1.0D && this.comboStep > 0.0D;

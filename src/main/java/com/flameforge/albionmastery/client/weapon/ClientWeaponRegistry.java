@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import com.flameforge.albionmastery.weapon.compat.WeaponOverrides;
 
 /**
  * 客户端武器注册表。
@@ -51,6 +52,12 @@ public final class ClientWeaponRegistry {
             PROVIDERS.add(ArsNouveauProvider.INSTANCE);
         }
         // 通用剑类只用原版类，永远可用；排最后，和解析器里的顺序一致
+        if (WeaponResolver.isSweetMagicLoaded()) {
+            PROVIDERS.add(SweetMagicProvider.INSTANCE);
+        }
+        if (WeaponResolver.isTinkersLoaded()) {
+            PROVIDERS.add(TinkersProvider.INSTANCE);
+        }
         PROVIDERS.add(VanillaMeleeProvider.INSTANCE);
         PROVIDERS.add(BowProvider.INSTANCE);
     }
@@ -63,6 +70,9 @@ public final class ClientWeaponRegistry {
 
     /** 类型键 -> 显示名称。 */
     private static Map<String, Component> typeNames = Map.of();
+
+    /** 清单是不是该重建了。 */
+    private static boolean dirty = true;
 
     private ClientWeaponRegistry() {
     }
@@ -82,6 +92,7 @@ public final class ClientWeaponRegistry {
      * @return 构建出来的来源列表（来源 -&gt; 类型 -&gt; 武器，三层都已排序）
      */
     public static List<WeaponSource> rebuild() {
+        dirty = false;
         List<WeaponEntry> collected = new ArrayList<>();
         Map<String, IWeaponProvider> providerById = new LinkedHashMap<>();
 
@@ -90,6 +101,11 @@ public final class ClientWeaponRegistry {
                 continue;
             }
             providerById.put(provider.providerId(), provider);
+            if (!WeaponKeys.isKnownProvider(provider.providerId())) {
+                // 没登记的来源在配置里没有自己的倍率键，服主调不到它
+                AlbionMastery.LOGGER.warn("[albionmastery] 武器来源「{}」没有登记进 WeaponKeys.ALL_PROVIDERS，"
+                        + "配置里不会有它的专精伤害倍率那一行", provider.providerId());
+            }
             try {
                 provider.collect(collected);
             } catch (Exception exception) {
@@ -104,6 +120,11 @@ public final class ClientWeaponRegistry {
         Set<String> seen = new HashSet<>();
 
         for (WeaponEntry entry : collected) {
+            // 排除表对所有来源生效：TACZ、拔刀剑、铁魔法这些来源自己建清单，
+            // 不经过 WeaponResolver，不在这儿滤一道的话物品不涨经验却还挂在树上
+            if (WeaponOverrides.isExcluded(entry.weaponId())) {
+                continue;
+            }
             if (!seen.add(entry.key())) {
                 continue;
             }
@@ -175,9 +196,33 @@ public final class ClientWeaponRegistry {
      * 那时注册表还是空的。这里在第一次用到时补建一次。
      */
     public static void ensureBuilt() {
-        if (sources.isEmpty()) {
+        if (dirty || sources.isEmpty()) {
             rebuild();
         }
+    }
+
+    /**
+     * 已经构建好的来源列表，没建过或者标记过期时先建一次。
+     *
+     * <p>专精界面每次打开都要这份清单。以前是每次打开都从头重扫一遍整个物品注册表
+     * （这个整合包里一两万件物品、四个来源各扫一遍），开界面那一下要卡十几毫秒；
+     * 现在只在真的可能变了的时候重建：换存档、收到服务端全量同步、数据包 / 标签重载。
+     *
+     * @return 来源列表
+     */
+    public static List<WeaponSource> builtSources() {
+        ensureBuilt();
+        return sources;
+    }
+
+    /**
+     * 标记清单过期，下次用到时重建。
+     *
+     * <p>什么时候该叫：进出存档、收到服务端的全量同步（服主可能改了配置）、
+     * 标签或数据包重载（武器判定读标签）、枪包重载。
+     */
+    public static void invalidate() {
+        dirty = true;
     }
 
     /**

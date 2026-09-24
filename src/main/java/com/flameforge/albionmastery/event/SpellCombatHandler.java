@@ -10,7 +10,6 @@ import com.flameforge.albionmastery.weapon.ResolvedWeapon;
 import com.flameforge.albionmastery.weapon.compat.IronsSpellsSupport;
 import io.redspace.ironsspellbooks.api.events.ModifySpellLevelEvent;
 import io.redspace.ironsspellbooks.api.events.SpellCooldownAddedEvent;
-import io.redspace.ironsspellbooks.api.events.SpellDamageEvent;
 import io.redspace.ironsspellbooks.api.events.SpellOnCastEvent;
 import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
@@ -34,11 +33,19 @@ import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import javax.annotation.Nullable;
+import io.redspace.ironsspellbooks.api.magic.MagicData;
+import net.minecraftforge.event.server.ServerStoppedEvent;
+import java.util.ArrayList;
+import java.util.List;
+import io.redspace.ironsspellbooks.damage.SpellDamageSource;
+import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import com.flameforge.albionmastery.mastery.spec.SpecMoveSpeed;
+import io.redspace.ironsspellbooks.api.events.SpellPreCastEvent;
 
 /**
  * 铁魔法法术的伤害加成。
  *
- * <p>基础倍率（专精加成 × 流派强度）不在这里：它乘在「法术强度」上（{@code AbstractSpellPowerMixin}），
+ * <p>基础倍率（专精加成 × 特化强度）不在这里：它乘在「法术强度」上（{@code AbstractSpellPowerMixin}），
  * 伤害、治疗、控制时长、提示框显示一起吃到。这里的 {@code SpellDamageEvent} 只负责
  * 必须知道目标才能算的那几层：条件倍率、暴击、连击。
  *
@@ -52,7 +59,7 @@ import javax.annotation.Nullable;
  * <p><b>不在这里发经验</b>：经验统一是「手里拿着东西、周围有怪死」那一套，在
  * {@code MasteryExperienceHook} 里，法术也一样——拿着书，书里每个法术都拿击杀经验。
  *
- * <p>流派里法术专属的三项也在这里生效：
+ * <p>特化里法术专属的三项也在这里生效：
  * <ul>
  *     <li>法力消耗：{@code SpellOnCastEvent}，施放前改 mana cost；</li>
  *     <li>冷却时间：{@code SpellCooldownAddedEvent.Pre}，冷却挂上去之前改时长；</li>
@@ -70,28 +77,31 @@ public final class SpellCombatHandler {
     }
 
     /**
-     * 法术伤害结算前乘上专精与流派倍率。
+     * 法术伤害按「看目标」的那几层特化缩放：条件倍率、暴击、连击。
      *
-     * @param event 法术伤害事件
+     * <p>挂在通用的受伤事件上、按伤害源是不是铁魔法的法术伤害来认，而不是铁魔法自己的法术伤害事件：
+     * 地震、火山爆发、召唤出来的武器和生物是直接造成伤害的，不发那个事件，以前这几层对它们都不生效；
+     * 那个事件又发在友伤判定之前，被挡掉的伤害也会叠连击、掷暴击。受伤事件只在伤害真的要结算时才来。
+     *
+     * @param event 受伤事件
      */
     @SubscribeEvent(priority = EventPriority.HIGH)
-    public static void onSpellDamage(SpellDamageEvent event) {
-        if (event.isCanceled()) {
+    public static void onSpellHurt(LivingHurtEvent event) {
+        if (!(event.getSource() instanceof SpellDamageSource spellSource)) {
             return;
         }
         float amount = event.getAmount();
         if (amount <= 0.0F) {
             return;
         }
-        if (!(event.getSpellDamageSource().getEntity() instanceof ServerPlayer player)
-                || player.isSpectator()) {
+        if (!(spellSource.getEntity() instanceof ServerPlayer player) || player.isSpectator()) {
             return;
         }
         LivingEntity target = event.getEntity();
-        if (target == null || target == player) {
+        if (target == player || !target.isAlive()) {
             return;
         }
-        ResolvedWeapon weapon = IronsSpellsSupport.resolveDamage(event.getSpellDamageSource());
+        ResolvedWeapon weapon = IronsSpellsSupport.resolveDamage(spellSource);
         if (weapon == null) {
             return;
         }
@@ -102,7 +112,7 @@ public final class SpellCombatHandler {
         MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
         SpecializationValues spec = SpecializationEffects.forData(data, weapon, snapshot);
 
-        // 专精加成和流派的强度倍率已经在 AbstractSpellPowerMixin 里乘进法术强度了，
+        // 专精加成和特化的强度倍率已经在 AbstractSpellPowerMixin 里乘进法术强度了，
         // 这里只乘「看目标」才知道的那几层：条件倍率、暴击、连击。再乘一遍基础倍率就是双倍
         double multiplier = SpecializationEffects.conditionalMultiplier(spec, player, target, null)
                 * SpecializationEffects.critMultiplier(spec, player.getRandom())
@@ -113,7 +123,38 @@ public final class SpellCombatHandler {
     }
 
     /**
-     * 施法时按流派缩放法力消耗。
+     * 开始吟唱：把施法倍速挂成会同步的属性，别人才能按同一个速度看到施法动作。
+     *
+     * <p>为什么不在 {@code SpellOnCastEvent} 里做：那个事件是「吟唱完、法术真正放出去」时才触发的，
+     * 而施法动作在吟唱一开始就播了——等到那时候再写，属性永远慢一整次施法。
+     * 这个事件在铁魔法发「开始吟唱」的包之前触发，正好赶得上。
+     *
+     * @param event 施法前事件
+     */
+    @SubscribeEvent
+    public static void onSpellPreCast(SpellPreCastEvent event) {
+        if (event.isCanceled() || !(event.getEntity() instanceof ServerPlayer caster)) {
+            return;
+        }
+        ResourceLocation spellId = ResourceLocation.tryParse(event.getSpellId());
+        AbstractSpell spell = spellId == null ? null : SpellRegistry.getSpell(spellId);
+        // 只有长吟唱才有前摇动作；瞬发和持续引导的施法时间我们本来就不改
+        if (spell == null || spell.getCastType() != CastType.LONG) {
+            SpecMoveSpeed.refreshCastSpeed(caster, 1.0D);
+            return;
+        }
+        SpecializationValues spec = SpecializationEffects.forWeapon(caster, IronsSpellsSupport.ofSpell(spell));
+        double castTime = spec.castTime();
+        // 补放那一次的引导时间被 SpellCastTimeMixin 额外乘了一道系数（默认减半），
+        // 动画不跟着乘的话，动作才抬到一半法术就放出去了，看着像被打断
+        if (isEchoCasting(caster)) {
+            castTime *= MasteryConfig.COMMON.doubleCastTimeFactor.get();
+        }
+        SpecMoveSpeed.refreshCastSpeed(caster, castTime);
+    }
+
+    /**
+     * 施法时按特化缩放法力消耗。
      *
      * @param event 施法事件
      */
@@ -135,9 +176,10 @@ public final class SpellCombatHandler {
                     spellId, event.getCastSource(), event.getEntity().level().isClientSide() ? "客户端" : "服务端",
                     spec.manaCost(), spec.doubleCast());
         }
-        // 流派倍率 × 专精折扣（后者让没有数值的法术也能感觉到等级涨了）
+        // 特化倍率 × 专精折扣（后者让没有数值的法术也能感觉到等级涨了）
         double factor = spec.manaCost() * IronsSpellsSupport.masteryReductionFactor(
-                event.getEntity(), weapon, MasteryConfig.COMMON.spellMasteryManaShare.get());
+                event.getEntity(), weapon,
+                SpecializationEffects.snapshotFor(event.getEntity()).spellMasteryManaShare);
         if (factor != 1.0D && event.getManaCost() > 0) {
             // 至少留 1 点，别把付费法术变成免费的
             event.setManaCost(Math.max(1, (int) Math.round(event.getManaCost() * factor)));
@@ -147,6 +189,32 @@ public final class SpellCombatHandler {
 
     /** 等着下一 tick 补放的双重施法。 */
     private static final Deque<PendingCast> PENDING_CASTS = new ArrayDeque<>();
+
+    /** 正在进行的补放：它结束时挂的那次冷却要取消。玩家 UUID -&gt; 记录。 */
+    private static final java.util.Map<UUID, EchoRecord> ECHO_COOLDOWN_SKIP = new java.util.HashMap<>();
+
+    /** 补放开始后多久之内结束才算（tick）：吟唱最长的法术也在这之内放完。 */
+    private static final long ECHO_COOLDOWN_WINDOW = 400L;
+
+    /** 一次补放：哪个法术、记录什么时候过期（世界 tick）。 */
+    private record EchoRecord(AbstractSpell spell, long expiresAt) {
+    }
+
+    /** 玩家正在施法时，补放隔几 tick 再试一次、最多试几次。 */
+    private static final int ECHO_RETRY_TICKS = 5;
+    private static final int ECHO_MAX_RETRIES = 8;
+
+    /**
+     * 服务端关掉时清空补放队列：单人世界里退出再进一个游戏时间更早的存档，
+     * 旧队首永远不到期，后面的补放全被卡住，还一直攥着上一个世界的玩家。
+     *
+     * @param event 服务端停止事件
+     */
+    @SubscribeEvent
+    public static void onServerStopped(ServerStoppedEvent event) {
+        PENDING_CASTS.clear();
+        ECHO_COOLDOWN_SKIP.clear();
+    }
 
     /**
      * 双重施法：这次施放成功后，按概率排一次免费的补放。
@@ -160,7 +228,7 @@ public final class SpellCombatHandler {
      *
      * @param event 施法事件
      * @param spell 法术
-     * @param spec  流派数值
+     * @param spec  特化数值
      */
     private static void queueDoubleCast(SpellOnCastEvent event, @Nullable AbstractSpell spell,
                                         SpecializationValues spec) {
@@ -173,13 +241,18 @@ public final class SpellCombatHandler {
         if (!canDoubleCast(spell)) {
             return;
         }
+        // 可重复施放的法术（雷霆步、传送门、邪能冲击之类）补放会被当成「再放一次」，
+        // 直接消耗掉玩家的一次重复施放机会（比如 0.2 秒后自动传回去），不补
+        if (spell.getRecastCount(event.getSpellLevel(), player) > 0) {
+            return;
+        }
         if (player.getRandom().nextDouble() >= spec.doubleCast()) {
             return;
         }
         // 记下这次是从哪个装备槽放的（书 / 主手 / 副手），补放时沿用，铁魔法靠它找施法物品
         String slot = IronsSpellsSupport.castingSlot(player);
         PENDING_CASTS.add(new PendingCast(player, spell, event.getSpellLevel(), slot,
-                player.level().getGameTime() + DOUBLE_CAST_DELAY_TICKS));
+                player.level().getGameTime() + DOUBLE_CAST_DELAY_TICKS, 0));
         if (MasteryConfig.COMMON.debugLogging.get()) {
             com.flameforge.albionmastery.AlbionMastery.LOGGER.info("[albionmastery] 双重施法排队: {} 玩家 {} 概率 {}",
                     spell.getSpellResource(), player.getGameProfile().getName(), spec.doubleCast());
@@ -200,11 +273,21 @@ public final class SpellCombatHandler {
             return;
         }
         long now = event.getServer().overworld().getGameTime();
+        List<PendingCast> deferred = new ArrayList<>();
         // 队列按入队顺序，到时间的在前面；碰到第一个没到时间的就停，剩下的下 tick 再看
         while (!PENDING_CASTS.isEmpty() && PENDING_CASTS.peek().dueTick() <= now) {
             PendingCast pending = PENDING_CASTS.poll();
             ServerPlayer player = pending.player();
             if (player.isRemoved() || !player.isAlive()) {
+                continue;
+            }
+            // 玩家已经在读下一个法术了：attemptInitiateCast 发现正在施法会直接取消当前的施法，
+            // 补放反而把玩家自己的法术打断，补放本身也放不出来。晚几 tick 再试，等太久就算了
+            if (MagicData.getPlayerMagicData(player).isCasting()) {
+                if (pending.attempts() < ECHO_MAX_RETRIES) {
+                    deferred.add(new PendingCast(player, pending.spell(), pending.level(), pending.slot(),
+                            now + ECHO_RETRY_TICKS, pending.attempts() + 1));
+                }
                 continue;
             }
             // 施法物品：饰品栏的书优先，没有就主手（卷轴 / 附魔武器）
@@ -218,6 +301,11 @@ public final class SpellCombatHandler {
             try {
                 boolean started = pending.spell().attemptInitiateCast(castingItem, pending.level(),
                         player.level(), player, CastSource.COMMAND, false, pending.slot());
+                if (started) {
+                    // 补放结束时铁魔法会照常挂一次冷却（它不看「不触发冷却」那个参数），
+                    // 冷却条就在补放后又从头走一遍。记下来，冷却事件里认出这一次就取消
+                    ECHO_COOLDOWN_SKIP.put(player.getUUID(), new EchoRecord(pending.spell(), now + ECHO_COOLDOWN_WINDOW));
+                }
                 if (MasteryConfig.COMMON.debugLogging.get()) {
                     com.flameforge.albionmastery.AlbionMastery.LOGGER.info(
                             "[albionmastery] 双重施法补放: {} 玩家 {} 结果 {}",
@@ -230,6 +318,7 @@ public final class SpellCombatHandler {
                 ECHO_CASTING.remove(player.getUUID());
             }
         }
+        PENDING_CASTS.addAll(deferred);
     }
 
     /**
@@ -239,7 +328,8 @@ public final class SpellCombatHandler {
      * @param spell  法术
      * @param level  法术等级
      */
-    private record PendingCast(ServerPlayer player, AbstractSpell spell, int level, String slot, long dueTick) {
+    private record PendingCast(ServerPlayer player, AbstractSpell spell, int level, String slot, long dueTick,
+                               int attempts) {
     }
 
     /** 正在补放的玩家，给施法时间 Mixin 看。 */
@@ -277,7 +367,7 @@ public final class SpellCombatHandler {
     }
 
     /**
-     * 冷却挂上去之前按流派缩放时长。
+     * 冷却挂上去之前按特化缩放时长。
      *
      * @param event 冷却事件
      */
@@ -286,17 +376,27 @@ public final class SpellCombatHandler {
         if (event.isCanceled() || event.getEntity() == null) {
             return;
         }
+        if (event.getCastSource() == CastSource.COMMAND && !event.getEntity().level().isClientSide()) {
+            EchoRecord echo = ECHO_COOLDOWN_SKIP.get(event.getEntity().getUUID());
+            if (echo != null && echo.spell() == event.getSpell()
+                    && event.getEntity().level().getGameTime() <= echo.expiresAt()) {
+                ECHO_COOLDOWN_SKIP.remove(event.getEntity().getUUID());
+                event.setCanceled(true);
+                return;
+            }
+        }
         ResolvedWeapon weapon = IronsSpellsSupport.ofSpell(event.getSpell());
         SpecializationValues spec = SpecializationEffects.forWeapon(event.getEntity(), weapon);
         double factor = spec.spellCooldown() * IronsSpellsSupport.masteryReductionFactor(
-                event.getEntity(), weapon, MasteryConfig.COMMON.spellMasteryCooldownShare.get());
+                event.getEntity(), weapon,
+                SpecializationEffects.snapshotFor(event.getEntity()).spellMasteryCooldownShare);
         if (factor != 1.0D && event.getEffectiveCooldown() > 0) {
             event.setEffectiveCooldown(Math.max(1, (int) Math.round(event.getEffectiveCooldown() * factor)));
         }
     }
 
     /**
-     * 算法术等级时按流派加等级。
+     * 算法术等级时按特化加等级。
      *
      * @param event 法术等级事件
      */

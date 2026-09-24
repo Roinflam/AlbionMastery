@@ -1,5 +1,6 @@
 package com.flameforge.albionmastery;
 
+import com.flameforge.albionmastery.event.CommonEventHandler;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.event.ArsCombatHandler;
 import com.flameforge.albionmastery.event.GunCombatHandler;
@@ -8,8 +9,10 @@ import com.flameforge.albionmastery.event.SpellCombatHandler;
 import com.flameforge.albionmastery.leaderboard.MasteryLeaderboard;
 import com.flameforge.albionmastery.mastery.DimensionXpBonus;
 import com.flameforge.albionmastery.network.NetworkHandler;
+import com.flameforge.albionmastery.weapon.WeaponCatalog;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
@@ -20,6 +23,8 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.flameforge.albionmastery.mastery.spec.SpecVisualAttributes;
+import com.flameforge.albionmastery.event.SweetMagicCombatHandler;
 
 /**
  * 武器专精系统主类。
@@ -56,6 +61,7 @@ public class AlbionMastery {
         modBus.addListener(this::onConfigLoading);
         modBus.addListener(this::onConfigReloading);
 
+        SpecVisualAttributes.register(modBus);
         NetworkHandler.register();
         // 四个来源全是可选依赖。这几个处理器的方法签名里有对应模组的事件类，
         // 没装时不能让事件总线去反射它们，所以逐个判断装了才注册；
@@ -72,6 +78,9 @@ public class AlbionMastery {
         if (WeaponResolver.isArsLoaded()) {
             MinecraftForge.EVENT_BUS.register(ArsCombatHandler.class);
         }
+        if (WeaponResolver.isSweetMagicLoaded()) {
+            MinecraftForge.EVENT_BUS.register(SweetMagicCombatHandler.class);
+        }
     }
 
     /**
@@ -81,6 +90,8 @@ public class AlbionMastery {
      */
     private void onConfigLoading(ModConfigEvent.Loading event) {
         if (event.getConfig().getType() == ModConfig.Type.COMMON) {
+            // 先把旧版本的特化数值换成新默认值，再刷新快照
+            MasteryConfig.migrateSpecBalance();
             MasteryConfig.refreshServerSnapshot();
             DimensionXpBonus.reload();
         }
@@ -91,20 +102,32 @@ public class AlbionMastery {
      *
      * <p>注意：等级曲线改变后，已有玩家的等级需要重算。这一步由
      * {@code CommonEventHandler} 在下一次访问玩家数据时兜底完成，
-     * 或由管理员重进服务器触发全量同步。
+     * 或由管理员重进服务端触发全量同步。
      *
      * @param event 配置重载事件
      */
     private void onConfigReloading(ModConfigEvent.Reloading event) {
         if (event.getConfig().getType() == ModConfig.Type.COMMON) {
+            MasteryConfig.migrateSpecBalance();
             MasteryConfig.refreshServerSnapshot();
             DimensionXpBonus.reload();
             // 等级上限或曲线变了，排行榜上存的「满级数」这些概况就不对了，得按新曲线重算。
             // 配置重载事件是文件监视线程发出来的，不在主线程，SavedData 不能在这里直接碰，
             // 用 server.execute 丢回主线程去做
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-            if (server != null && MasteryConfig.COMMON.leaderboardEnable.get()) {
+            if (server != null) {
                 server.execute(() -> {
+                    // 补录表、拆分口径都可能变了，服务端那份武器目录得跟着作废，
+                    // 不然管理指令还按旧口径写键（`/albionmastery config set` 那条路早就清了，这条漏了）
+                    WeaponCatalog.invalidate();
+                    // 在线玩家按新曲线重算等级、拿到新的配置快照：伤害结算读的是缓存的等级，
+                    // 不重算的话改了等级上限或经验曲线要等重登才生效，客户端也一直拿着旧快照
+                    for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                        CommonEventHandler.syncFull(player);
+                    }
+                    if (!MasteryConfig.COMMON.leaderboardEnable.get()) {
+                        return;
+                    }
                     try {
                         MasteryLeaderboard.get(server).recomputeAll();
                     } catch (Exception exception) {

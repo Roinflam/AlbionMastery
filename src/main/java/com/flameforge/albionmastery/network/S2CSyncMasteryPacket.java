@@ -42,6 +42,9 @@ public class S2CSyncMasteryPacket {
     /** 特化选择表最多接受多少条，只用来挡异常包。 */
     private static final int MAX_SPECIALIZATION_ENTRIES = 4096;
 
+    /** 特化表的键最长多少：武器键上限 256，再加第二栏的后缀。 */
+    private static final int MAX_SPEC_KEY = 300;
+
     /** 学习点倍率。 */
     private final double studyMultiplier;
 
@@ -117,7 +120,7 @@ public class S2CSyncMasteryPacket {
         writeMap(buf, this.overalls);
         buf.writeVarInt(this.specializations.size());
         for (Map.Entry<String, String> entry : this.specializations.entrySet()) {
-            buf.writeUtf(entry.getKey(), 128);
+            buf.writeUtf(entry.getKey(), MAX_SPEC_KEY);
             buf.writeUtf(entry.getValue(), 128);
         }
         buf.writeDouble(this.studyMultiplier);
@@ -146,18 +149,18 @@ public class S2CSyncMasteryPacket {
         Map<String, Long> overalls = readMap(buf, false);
 
         // 特化选择是按「类型键」存的（type|tacz_gun|rifle 这种），一个来源底下有多少类型就可能有多少条，
-        // 所以上限不能按流派枚举的数量封——那样枪械类型一多就会把后面的条目直接截掉
+        // 所以上限不能按特化枚举的数量封——那样枪械类型一多就会把后面的条目直接截掉
         int specCount = Math.max(0, Math.min(MAX_SPECIALIZATION_ENTRIES, buf.readVarInt()));
         Map<String, String> specializations = new HashMap<>();
         for (int i = 0; i < specCount; i++) {
-            String typeKey = buf.readUtf(128);
+            String typeKey = buf.readUtf(MAX_SPEC_KEY);
             String specKey = buf.readUtf(128);
             Specialization spec = Specialization.byKey(specKey);
-            // 校验和存档读取那边一致：键得是合法类型键，流派得属于这个类型所在的来源。
-            // 早先这里误把类型键当来源 ID 去和流派比，永远对不上，
+            // 校验和存档读取那边一致：键得是合法类型键，特化得属于这个类型所在的来源。
+            // 早先这里误把类型键当来源 ID 去和特化比，永远对不上，
             // 结果服务端切换成功了、客户端却一条都收不到，看起来就是「切不了」
             String baseKey = WeaponKeys.specBaseKey(typeKey);
-            if (spec != null && WeaponKeys.isValidTypeKey(baseKey)
+            if (spec != null && (WeaponKeys.isValidTypeKey(baseKey) || WeaponKeys.isValidWeaponKey(baseKey))
                     && spec.sourceId().equals(WeaponKeys.providerOf(baseKey))) {
                 specializations.put(typeKey, specKey);
             }

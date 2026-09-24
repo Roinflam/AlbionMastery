@@ -11,6 +11,10 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
+import com.flameforge.albionmastery.AlbionMastery;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.item.Item;
 
 /**
  * 通用弓弩：所有继承原版 {@code BowItem} / {@code CrossbowItem} 的物品，不管来自哪个模组。
@@ -33,6 +37,12 @@ public final class BowSupport {
     /** 箭的持久数据里记武器用的键。 */
     private static final String TAG_WEAPON = "albionmastery_weapon";
 
+    /** Forge 约定的弓标签。 */
+    private static final TagKey<Item> FORGE_BOWS = tag("forge", "tools/bows");
+
+    /** Forge 约定的弩标签。 */
+    private static final TagKey<Item> FORGE_CROSSBOWS = tag("forge", "tools/crossbows");
+
     private BowSupport() {
     }
 
@@ -43,7 +53,60 @@ public final class BowSupport {
      * @return 是返回 true
      */
     public static boolean isBowOrCrossbow(ItemStack stack) {
-        return !stack.isEmpty() && (stack.getItem() instanceof BowItem || stack.getItem() instanceof CrossbowItem);
+        return typeOf(stack) != null;
+    }
+
+    /**
+     * 物品 → 大类。
+     *
+     * <p>和近战一样：灾变的诅咒之弓继承的是 {@code ProjectileWeaponItem}，按类判定收不到。
+     * 顺序是补录表（{@link WeaponOverrides}，内置 + 配置）→ 原版类 → {@code forge:tools/bows|crossbows}。
+     *
+     * @param stack 物品
+     * @return 弓 / 弩；都不是返回 null
+     */
+    @Nullable
+    public static String typeOf(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return null;
+        }
+        ResourceLocation overrideId = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        if (WeaponOverrides.isExcluded(overrideId)) {
+            return null;
+        }
+        String override = WeaponOverrides.typeOf(overrideId);
+        if (override != null) {
+            return switch (override) {
+                case WeaponOverrides.CROSSBOW -> TYPE_CROSSBOW;
+                case WeaponOverrides.BOW -> TYPE_BOW;
+                // 补录成近战的物品不归弓弩
+                default -> null;
+            };
+        }
+        if (stack.getItem() instanceof CrossbowItem) {
+            return TYPE_CROSSBOW;
+        }
+        if (stack.getItem() instanceof BowItem) {
+            return TYPE_BOW;
+        }
+        if (stack.is(FORGE_CROSSBOWS)) {
+            return TYPE_CROSSBOW;
+        }
+        if (stack.is(FORGE_BOWS)) {
+            return TYPE_BOW;
+        }
+        return null;
+    }
+
+    /**
+     * 拼一个物品标签键。
+     *
+     * @param namespace 命名空间
+     * @param path      路径
+     * @return 标签键
+     */
+    private static TagKey<Item> tag(String namespace, String path) {
+        return ItemTags.create(new ResourceLocation(namespace, path));
     }
 
     /**
@@ -61,7 +124,10 @@ public final class BowSupport {
         if (id == null) {
             return null;
         }
-        String type = stack.getItem() instanceof CrossbowItem ? TYPE_CROSSBOW : TYPE_BOW;
+        String type = typeOf(stack);
+        if (type == null) {
+            return null;
+        }
         return ResolvedWeapon.of(WeaponKeys.PROVIDER_BOW, id, type);
     }
 

@@ -30,7 +30,7 @@ public final class MasteryClientBonus {
         if (bonus == null) {
             return 1.0D;
         }
-        // 显示用的倍率把流派的伤害倍率也乘进去：重型弹药 3 倍不显示在枪的伤害数字上，玩家会以为没生效
+        // 显示用的倍率把特化的伤害倍率也乘进去：重型弹药 3 倍不显示在枪的伤害数字上，玩家会以为没生效
         net.minecraft.client.player.LocalPlayer player = net.minecraft.client.Minecraft.getInstance().player;
         double spec = player == null ? 1.0D
                 : com.flameforge.albionmastery.mastery.spec.SpecializationEffects.forStack(player, stack).damage();

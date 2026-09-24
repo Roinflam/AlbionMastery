@@ -33,7 +33,7 @@ public enum LeaderboardPeriod {
     /** 标签页上的名字的语言键（总榜 / 日榜 …）。 */
     private final String nameKey;
 
-    /** 徽章前缀的语言键（全服 / 日榜 …），拼成「全服第一」「日榜第一」。 */
+    /** 徽章前缀的语言键（全局 / 日榜 …），拼成「全局第一」「日榜第一」。 */
     private final String labelKey;
 
     /** 基线在存盘 NBT 里的键；总榜没有基线，为 null。 */

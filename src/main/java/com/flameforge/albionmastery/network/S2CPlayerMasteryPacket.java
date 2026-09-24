@@ -28,7 +28,7 @@ import java.util.function.Supplier;
  * </ol>
  * 同一条通道上的包按发送顺序到达，片的顺序天然有保证，包里带序号只是为了校验和防错。
  *
- * <p>客户端收到后走和读档同一个 {@code deserializeNBT}，键校验、流派校验完全是同一套。
+ * <p>客户端收到后走和读档同一个 {@code deserializeNBT}，键校验、特化校验完全是同一套。
  */
 public class S2CPlayerMasteryPacket {
 
@@ -49,6 +49,9 @@ public class S2CPlayerMasteryPacket {
 
     /** 传输编号自增，客户端靠它区分「这一片属于哪一次传输」。 */
     private static int transferCounter = 0;
+
+    /** 「请求太频繁」回包用的传输号，正常传输号从 0 往上数，碰不上。 */
+    public static final int TRANSFER_TOO_FAST = -1;
 
     private final UUID uuid;
     private final String name;
@@ -110,6 +113,14 @@ public class S2CPlayerMasteryPacket {
      * @param uuid 玩家 UUID
      * @return 网络包
      */
+    /**
+     * @param uuid 请求的玩家
+     * @return 「请求太频繁」的回包
+     */
+    public static S2CPlayerMasteryPacket tooFast(UUID uuid) {
+        return new S2CPlayerMasteryPacket(uuid, "", false, TRANSFER_TOO_FAST, 0, 1, new byte[0]);
+    }
+
     public static S2CPlayerMasteryPacket notFound(UUID uuid) {
         return new S2CPlayerMasteryPacket(uuid, "", false, 0, 0, 1, new byte[0]);
     }

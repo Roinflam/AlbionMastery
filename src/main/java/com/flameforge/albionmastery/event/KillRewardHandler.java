@@ -35,10 +35,8 @@ public final class KillRewardHandler {
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onExperienceDrop(LivingExperienceDropEvent event) {
         Player attacker = event.getAttackingPlayer();
-        if (!(attacker instanceof ServerPlayer player) || player.isSpectator()) {
-            return;
-        }
-        if (event.getEntity() instanceof Player && !MasteryConfig.COMMON.xpFromPlayerDamage.get()) {
+        if (!MasteryExperienceHook.isEligibleKill(event.getEntity(), attacker)
+                || !(attacker instanceof ServerPlayer player)) {
             return;
         }
         // NPC 走死亡事件按固定值给，这里不重复
@@ -64,7 +62,8 @@ public final class KillRewardHandler {
         if (event.isCanceled() || !MasteryExperienceHook.isCustomNpc(event.getEntity())) {
             return;
         }
-        if (!(event.getSource().getEntity() instanceof ServerPlayer player) || player.isSpectator()) {
+        if (!(event.getSource().getEntity() instanceof ServerPlayer player)
+                || !MasteryExperienceHook.isEligibleKill(event.getEntity(), player)) {
             return;
         }
         MasteryExperienceHook.awardNpcKill(player, event.getEntity());

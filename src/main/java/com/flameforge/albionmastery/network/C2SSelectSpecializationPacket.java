@@ -1,8 +1,10 @@
 package com.flameforge.albionmastery.network;
 
 import com.flameforge.albionmastery.config.MasteryConfig;
+import com.flameforge.albionmastery.event.CommonEventHandler;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.mastery.MasteryData;
+import com.flameforge.albionmastery.mastery.spec.SpecTerms;
 import com.flameforge.albionmastery.mastery.spec.Specialization;
 import com.flameforge.albionmastery.mastery.spec.SpecializationManager;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
@@ -21,7 +23,7 @@ import java.util.function.Supplier;
  * 客户端请求切换某个来源的专精特化。
  *
  * <p>这是本模组的第一个 C2S 包，处理时必须把客户端当成不可信输入：
- * 包里只带一个流派键，解锁条件、冷却、键是否合法全部在服务端重新判一遍，
+ * 包里只带一个特化键，解锁条件、冷却、键是否合法全部在服务端重新判一遍，
  * 客户端界面里的置灰只是给玩家看的，不构成任何授权。
  */
 public class C2SSelectSpecializationPacket {
@@ -29,17 +31,26 @@ public class C2SSelectSpecializationPacket {
     /** 目标武器类型的键。 */
     private final String typeKey;
 
-    /** 流派的完整键。 */
+    /** 特化的完整键。 */
     private final String specKey;
 
     /** 槽位，1 或 2。 */
     private final int slot;
 
+    /** 武器键：空串表示改类型的通用配置，否则改这件武器的独立配置。 */
+    private final String weaponKey;
+
+    /** true 表示不是选特化，而是让这件武器恢复跟随通用配置。 */
+    private final boolean followType;
+
+    /** 武器键的最大长度。 */
+    private static final int MAX_WEAPON_KEY = 256;
+
     /**
      * 构造网络包（第一槽）。
      *
      * @param typeKey 目标武器类型的键
-     * @param specKey 流派的完整键
+     * @param specKey 特化的完整键
      */
     public C2SSelectSpecializationPacket(String typeKey, String specKey) {
         this(typeKey, specKey, 1);
@@ -49,13 +60,29 @@ public class C2SSelectSpecializationPacket {
      * 构造网络包。
      *
      * @param typeKey 目标武器类型的键
-     * @param specKey 流派的完整键
+     * @param specKey 特化的完整键
      * @param slot    槽位，1 或 2
      */
     public C2SSelectSpecializationPacket(String typeKey, String specKey, int slot) {
+        this(typeKey, specKey, slot, "", false);
+    }
+
+    /**
+     * 构造网络包。
+     *
+     * @param typeKey    目标武器类型的键
+     * @param specKey    特化的完整键（恢复通用配置时忽略）
+     * @param slot       槽位，1 或 2
+     * @param weaponKey  武器键，空串表示改通用配置
+     * @param followType 是否是「恢复通用配置」
+     */
+    public C2SSelectSpecializationPacket(String typeKey, String specKey, int slot, String weaponKey,
+                                         boolean followType) {
         this.typeKey = typeKey;
         this.specKey = specKey;
         this.slot = slot;
+        this.weaponKey = weaponKey == null ? "" : weaponKey;
+        this.followType = followType;
     }
 
     /**
@@ -67,6 +94,8 @@ public class C2SSelectSpecializationPacket {
         buf.writeUtf(this.typeKey, 128);
         buf.writeUtf(this.specKey, 128);
         buf.writeVarInt(this.slot);
+        buf.writeUtf(this.weaponKey, MAX_WEAPON_KEY);
+        buf.writeBoolean(this.followType);
     }
 
     /**
@@ -77,7 +106,8 @@ public class C2SSelectSpecializationPacket {
      */
     public static C2SSelectSpecializationPacket decode(FriendlyByteBuf buf) {
         return new C2SSelectSpecializationPacket(buf.readUtf(128), buf.readUtf(128),
-                Math.max(1, Math.min(WeaponKeys.SPEC_SLOTS, buf.readVarInt())));
+                Math.max(1, Math.min(WeaponKeys.SPEC_SLOTS, buf.readVarInt())),
+                buf.readUtf(MAX_WEAPON_KEY), buf.readBoolean());
     }
 
     /**
@@ -92,26 +122,53 @@ public class C2SSelectSpecializationPacket {
             if (player == null) {
                 return;
             }
+            String weapon = this.weaponKey.isEmpty() ? null : this.weaponKey;
+            if (this.followType) {
+                if (weapon == null) {
+                    return;
+                }
+                SpecializationManager.Result result = SpecializationManager.followType(player, this.typeKey, weapon);
+                // 失败也要给话：补了冷却检查之后 COOLDOWN 成了可达分支，
+                // 只放一声拒绝音的话，玩家只会觉得按钮点了没反应
+                String provider = WeaponKeys.providerOf(this.typeKey);
+                Component feedback = switch (result) {
+                    case OK -> Component.translatable("msg.albionmastery.spec_follow_type",
+                            SpecTerms.of(provider, "page")).withStyle(ChatFormatting.GOLD);
+                    case COOLDOWN -> Component.translatable("msg.albionmastery.spec_cooldown",
+                                    SpecTerms.of(provider, "spec"),
+                                    formatDuration(SpecializationManager.remainingSwitchCooldown(
+                                            player, this.typeKey, weapon, MasteryConfig.serverSnapshot())))
+                            .withStyle(ChatFormatting.RED);
+                    case DISABLED -> Component.translatable("msg.albionmastery.spec_disabled")
+                            .withStyle(ChatFormatting.RED);
+                    default -> null;
+                };
+                if (feedback != null) {
+                    player.displayClientMessage(feedback, true);
+                }
+                if (result == SpecializationManager.Result.OK) {
+                    CommonEventHandler.syncFull(player);
+                }
+                playFeedbackSound(player, result);
+                return;
+            }
             Specialization spec = Specialization.byKey(this.specKey);
             if (spec == null) {
                 // 键不认识：要么是客户端版本不一致，要么是有人在乱发包，直接丢掉
                 return;
             }
             SpecializationManager.Result result =
-                    SpecializationManager.select(player, this.typeKey, this.slot, spec);
-            Component feedback = describe(result, player, spec, this.typeKey, this.slot);
+                    SpecializationManager.select(player, this.typeKey, weapon, this.slot, spec);
+            Component feedback = describe(result, player, spec, this.typeKey, weapon, this.slot,
+                    weapon != null);
             if (feedback != null) {
                 player.displayClientMessage(feedback, true);
             }
             // 成功和失败各给一声，光靠物品栏上方那行小字很容易没注意到
             playFeedbackSound(player, result);
             if (result == SpecializationManager.Result.OK) {
-                MasteryData data = MasteryHelper.get(player);
-                if (data != null) {
-                    NetworkHandler.sendTo(player, S2CSyncMasteryPacket.of(
-                            data, MasteryConfig.serverSnapshot()));
-                    data.clearDirty();
-                }
+                // syncFull 会顺带给排行榜打标记（榜上的特化数要更新）并重算挂在属性上的特化效果
+                CommonEventHandler.syncFull(player);
             }
         });
         ctx.setPacketHandled(true);
@@ -130,7 +187,7 @@ public class C2SSelectSpecializationPacket {
         switch (result) {
             case OK -> player.playNotifySound(SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS,
                     0.6F, 1.4F);
-            case LOCKED, COOLDOWN, DISABLED -> player.playNotifySound(SoundEvents.VILLAGER_NO,
+            case LOCKED, COOLDOWN, DISABLED, DUPLICATE, CONFLICT -> player.playNotifySound(SoundEvents.VILLAGER_NO,
                     SoundSource.PLAYERS, 0.7F, 1.0F);
             // 键非法或者没变，不出声
             default -> {
@@ -143,25 +200,40 @@ public class C2SSelectSpecializationPacket {
      *
      * @param result 切换结果
      * @param player 玩家
-     * @param spec    目标流派
-     * @param typeKey 目标武器类型的键
+     * @param spec      目标特化
+     * @param typeKey   类型键
+     * @param weaponKey 武器键，改的是通用配置时为 null
+     * @param slot      槽位
+     * @param forWeapon 改的是不是某件武器的独立配置
      * @return 提示文本；不需要提示时返回 null
      */
     @Nullable
     private static Component describe(SpecializationManager.Result result, ServerPlayer player,
-                                      Specialization spec, String typeKey, int slot) {
+                                      Specialization spec, String typeKey, @Nullable String weaponKey,
+                                      int slot, boolean forWeapon) {
         return switch (result) {
-            case OK -> Component.translatable("msg.albionmastery.spec_selected_slot", slot,
+            case OK -> Component.translatable(forWeapon
+                            ? "msg.albionmastery.spec_selected_weapon" : "msg.albionmastery.spec_selected_slot",
+                    SpecTerms.slot(spec.sourceId(), slot),
                     Component.translatable(spec.nameKey())).withStyle(ChatFormatting.GOLD);
-            case DUPLICATE -> Component.translatable("msg.albionmastery.spec_duplicate")
+            case DUPLICATE -> Component.translatable("msg.albionmastery.spec_duplicate",
+                            Component.translatable(spec.nameKey()))
+                    .withStyle(ChatFormatting.RED);
+            case CONFLICT -> Component.translatable("msg.albionmastery.spec_conflict",
+                            Component.translatable(spec.nameKey()),
+                            SpecTerms.of(spec.sourceId(), "group"),
+                            Component.translatable(spec.familyKey()))
                     .withStyle(ChatFormatting.RED);
             case DISABLED -> Component.translatable("msg.albionmastery.spec_disabled")
                     .withStyle(ChatFormatting.RED);
-            case LOCKED -> Component.translatable("msg.albionmastery.spec_locked")
+            case LOCKED -> Component.translatable("msg.albionmastery.spec_locked",
+                            SpecTerms.slot(spec.sourceId(), slot))
                     .withStyle(ChatFormatting.RED);
             case COOLDOWN -> Component.translatable("msg.albionmastery.spec_cooldown",
-                            formatDuration(SpecializationManager.remainingCooldownSeconds(
-                                    player, typeKey, slot, MasteryConfig.serverSnapshot())))
+                            SpecTerms.of(spec.sourceId(), "spec"),
+                            // 和判定同一个口径：两个键取大，否则拒绝理由来自类型键时会写成「还需 0 分钟」
+                            formatDuration(SpecializationManager.remainingSwitchCooldown(
+                                    player, typeKey, weaponKey, slot, MasteryConfig.serverSnapshot())))
                     .withStyle(ChatFormatting.RED);
             // 键非法或者压根没变，不用打扰玩家
             case INVALID, UNCHANGED -> null;

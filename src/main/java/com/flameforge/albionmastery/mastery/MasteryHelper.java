@@ -65,7 +65,7 @@ public final class MasteryHelper {
 
         // 不同武器体系的基础强度跨度非常大：原版剑和高阶模组枪 / 法术拿同一套专精百分比，
         // 要么原版完全没感觉，要么模组武器直接失控。先按来源取得专精倍率，再统一作用到三层
-        // （总体 / 类型 / 单武器）以及同类型联动。这个倍率只属于“专精等级加成”，不碰流派特化。
+        // （总体 / 类型 / 单武器）以及同类型联动。这个倍率只属于“专精等级加成”，不碰特化。
         double sourceMultiplier = snapshot.masteryDamageMultiplier(weapon.providerId());
         double fromOverall = overallLevel * snapshot.overallDamagePerLevel * sourceMultiplier;
         double fromType = typeLevel * snapshot.typeDamagePerLevel * sourceMultiplier;
@@ -116,19 +116,33 @@ public final class MasteryHelper {
      */
     public static boolean awardXp(MasteryData data, ResolvedWeapon weapon, long amount,
                                   MasteryConfig.Snapshot snapshot, boolean applyStudy) {
+        return awardXp(data, weapon, amount, snapshot, applyStudy, null);
+    }
+
+    /**
+     * 同上，外加一张「这一批里类型和总体已经记过哪些」的表。
+     *
+     * <p>一次击杀要发给好几件武器时（一个法术的几个符文、主副手）传同一张表进来：
+     * 武器各记各的，类型和总体同一个键只记第一次，总体经验不会因为手里武器多就翻倍。
+     *
+     * @param credited 已记过的类型 / 总体键，调用方共用；传 null 表示不去重
+     */
+    public static boolean awardXp(MasteryData data, ResolvedWeapon weapon, long amount,
+                                  MasteryConfig.Snapshot snapshot, boolean applyStudy,
+                                  @Nullable java.util.Set<String> credited) {
         if (amount <= 0L) {
             return false;
         }
         if (applyStudy) {
-            // 流派的经验倍率和管理员设的学习倍率是两回事，分别乘：前者是玩家自己选的，后者是管理员给的
+            // 特化的经验倍率和管理员设的学习倍率是两回事，分别乘：前者是玩家自己选的，后者是管理员给的
             double specGain = SpecializationEffects.forData(data, weapon, snapshot).xpGain();
             if (specGain != 1.0D) {
-                amount = Math.max(1L, (long) Math.floor(amount * specGain));
+                amount = Math.max(1L, roundRandomly(amount * specGain));
             }
             double multiplier = data.getStudyMultiplier();
             if (multiplier != 1.0D) {
-                // 向下取整但保底 1：倍率 0.5 时不该让每次击杀都变成 0 经验
-                amount = Math.max(1L, (long) Math.floor(amount * multiplier));
+                // 保底 1：倍率 0.5 时不该让每次击杀都变成 0 经验
+                amount = Math.max(1L, roundRandomly(amount * multiplier));
             }
             // 倍率被设成 0 的玩家就是不涨经验，这是管理员的本意，直接返回
             if (multiplier <= 0.0D) {
@@ -137,9 +151,23 @@ public final class MasteryHelper {
         }
         boolean levelUp = data.addWeaponXp(weapon.weaponKey(), weapon.typeKey(), amount,
                 snapshot.weaponCurve());
-        levelUp |= data.addTypeXp(weapon.typeKey(), amount, snapshot.typeCurve());
-        levelUp |= data.addOverallXp(weapon.overallKey(), amount, snapshot.overallCurve());
+        if (credited == null || credited.add("t" + weapon.typeKey())) {
+            levelUp |= data.addTypeXp(weapon.typeKey(), amount, snapshot.typeCurve());
+        }
+        if (credited == null || credited.add("o" + weapon.overallKey())) {
+            levelUp |= data.addOverallXp(weapon.overallKey(), amount, snapshot.overallCurve());
+        }
         return levelUp;
+    }
+
+    /**
+     * 按概率取整：2.3 有三成概率取 3，其余取 2，长期平均正好是 2.3。
+     *
+     * <p>向下取整的话，一次只给 1 点经验的击杀乘 1.2 永远还是 1，经验加成的特化等于没用。
+     */
+    private static long roundRandomly(double value) {
+        long whole = (long) Math.floor(value);
+        return java.util.concurrent.ThreadLocalRandom.current().nextDouble() < value - whole ? whole + 1L : whole;
     }
 
     /**

@@ -17,10 +17,11 @@ import java.util.UUID;
  * @param updatedAt    这份概况最后一次刷新的时刻（毫秒时间戳）
  * @param maxed        满级武器数
  * @param levelSum     所有武器等级之和
+ * @param xpSum        所有武器经验之和，日 / 周 / 月榜看的就是它的增量
  * @param unlocked     有等级的武器数
  * @param topLevel     练得最高的那件武器的等级，只用来给平手的人分先后
  * @param topXp        练得最高的那件武器的经验，同上
- * @param specCount    已选的流派数（制式不算）
+ * @param specCount    已选的特化数（制式不算）
  * @param typeMaxed    满级的武器类型（中圈）数
  * @param overallMaxed 满级的来源（内圈）数
  */
@@ -30,6 +31,7 @@ public record LeaderboardRow(UUID uuid,
                              long updatedAt,
                              int maxed,
                              int levelSum,
+                             long xpSum,
                              int unlocked,
                              int topLevel,
                              long topXp,
@@ -52,6 +54,7 @@ public record LeaderboardRow(UUID uuid,
         buf.writeVarLong(this.updatedAt);
         buf.writeVarInt(this.maxed);
         buf.writeVarInt(this.levelSum);
+        buf.writeVarLong(this.xpSum);
         buf.writeVarInt(this.unlocked);
         buf.writeVarInt(this.topLevel);
         buf.writeVarLong(this.topXp);
@@ -73,13 +76,14 @@ public record LeaderboardRow(UUID uuid,
         long updatedAt = Math.max(0L, buf.readVarLong());
         int maxed = Math.max(0, buf.readVarInt());
         int levelSum = Math.max(0, buf.readVarInt());
+        long xpSum = Math.max(0L, buf.readVarLong());
         int unlocked = Math.max(0, buf.readVarInt());
         int topLevel = Math.max(0, buf.readVarInt());
         long topXp = Math.max(0L, buf.readVarLong());
         int specCount = Math.max(0, buf.readVarInt());
         int typeMaxed = Math.max(0, buf.readVarInt());
         int overallMaxed = Math.max(0, buf.readVarInt());
-        return new LeaderboardRow(uuid, name, online, updatedAt, maxed, levelSum, unlocked,
+        return new LeaderboardRow(uuid, name, online, updatedAt, maxed, levelSum, xpSum, unlocked,
                 topLevel, topXp, specCount, typeMaxed, overallMaxed);
     }
 
@@ -94,7 +98,7 @@ public record LeaderboardRow(UUID uuid,
             return this;
         }
         return new LeaderboardRow(this.uuid, this.name, isOnline, this.updatedAt, this.maxed,
-                this.levelSum, this.unlocked, this.topLevel, this.topXp,
+                this.levelSum, this.xpSum, this.unlocked, this.topLevel, this.topXp,
                 this.specCount, this.typeMaxed, this.overallMaxed);
     }
 }

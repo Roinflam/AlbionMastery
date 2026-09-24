@@ -10,9 +10,11 @@ import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.mastery.LevelCurve;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
+import com.flameforge.albionmastery.mastery.spec.SpecTerms;
 import com.flameforge.albionmastery.mastery.spec.Specialization;
 import com.flameforge.albionmastery.config.SpecializationValues;
 import com.flameforge.albionmastery.mastery.spec.SpecializationEffects;
+import com.flameforge.albionmastery.network.C2SAdminActionPacket;
 import com.flameforge.albionmastery.network.C2SSelectSpecializationPacket;
 import com.flameforge.albionmastery.network.NetworkHandler;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
@@ -29,6 +31,7 @@ import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
@@ -45,6 +48,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.client.server.IntegratedServer;
 
 /**
  * 阿尔比恩专精系统主界面。
@@ -57,7 +61,7 @@ import java.util.Set;
  * <p>操作：左键点节点看详情 / 双击节点飞过去（来源、类型整支收进屏幕）/ 空白处拖动平移 / 滚轮缩放 / ESC 关闭。
  *
  * <p>同一个界面也用来看别人的罗盘：从排行榜点进来时，传入那个人的 {@link MasteryData}，
- * 界面就按他的数据画，流派选择照样显示，只是不能点（只读）。
+ * 界面就按他的数据画，特化选择照样显示，只是不能点（只读）。
  * 所有数据读取都走 {@link #data} 这个字段而不是直接读客户端缓存，就是为了这一点。
  */
 public class MasteryScreen extends Screen {
@@ -197,10 +201,7 @@ public class MasteryScreen extends Screen {
     private static final float LABEL_MIN_SCREEN_RADIUS = 5.0F;
 
     /**
-     * 类型节点名称至少要有多少字体坐标宽度的可用空间才显示。
-     *
-     * <p>不再用固定缩放值硬开中圈文字。类型节点在不同来源里的密度差很多，
-     * 同一个 zoom 下有的地方很宽、有的地方已经挤成一团；按真实相邻节点间距判断才不会互相盖字。
+     * 中圈名字至少要有多少字体坐标宽度的可用空间才显示（大约三个汉字）。
      */
     private static final int TYPE_LABEL_MIN_BUDGET = 30;
 
@@ -278,12 +279,6 @@ public class MasteryScreen extends Screen {
     /** 搜索框描边到文字之间的内边距。 */
     private static final int SEARCH_PADDING = 5;
 
-    /** 流派卡片之间的间距。 */
-    private static final int SPEC_CARD_GAP = 3;
-
-    /** 流派卡片内容相对面板左边缘的缩进。 */
-    private static final int SPEC_TEXT_INSET = 3;
-
     /** 「得 / 失」行首符号占的宽度。 */
     private static final int SPEC_BULLET_WIDTH = 8;
 
@@ -341,6 +336,15 @@ public class MasteryScreen extends Screen {
     /** 类型节点的个数，算名字与等级牌宽度预算用。 */
     private int typeCount;
 
+    /**
+     * 中圈最挤的两个相邻类型节点之间的距离（图坐标）。
+     *
+     * <p>中圈的名字按整圈统一决定显示不显示、截多长：以最挤的那一对之间放得下的宽度为准，一起出现、一起隐藏。
+     * 以前是每个节点各自看离邻居多远，武器多的类型分到的扇区宽、名字就出来了，
+     * 武器少的几个挤在一起就整块不显示，同一圈上有的有名字有的没有。
+     */
+    private double minTypeSpacing = Double.POSITIVE_INFINITY;
+
     /** 上一帧面板显示的是哪个节点，换节点时用来把滚动归零。 */
     @Nullable
     private MasteryNode panelNode;
@@ -352,9 +356,6 @@ public class MasteryScreen extends Screen {
     @Nullable
     private EditBox searchBox;
 
-    /** 正在画流派卡片的那个类型键，点击发包时要带上。 */
-    @Nullable
-    private String specTypeKey;
 
     /** 当前搜索命中的节点，空搜索时为空集。 */
     private final Set<MasteryNode> searchHits = new HashSet<>();
@@ -366,12 +367,31 @@ public class MasteryScreen extends Screen {
     private int mouseYNow;
 
     /**
-     * 上一帧画出来的流派选项点击区。
+     * 上一帧画出来的「特化配置」按钮。
      *
      * <p>存的是「内容坐标」——也就是没有减去滚动量的 Y。点击时把鼠标 Y 加上滚动量再比，
      * 免得面板一滚点击区就全错位。
      */
-    private final List<SpecHit> specHits = new ArrayList<>();
+    @Nullable
+    private SpecButton specButton;
+
+    /** 上一帧画出来的管理按钮，和特化按钮一样存内容坐标、每帧重建。 */
+    private final List<AdminButton> adminButtons = new ArrayList<>();
+
+    /** 总览面板的分页按钮点击区，每帧重建。 */
+    private final List<InfoTabHit> infoTabHits = new ArrayList<>();
+
+    /** 总览面板当前停在哪一页。 */
+    private static InfoTab infoTab = InfoTab.PROGRESS;
+
+    /** 等二次确认的危险操作（清零）的 id，null 表示没有；以及确认的截止时刻。 */
+    @Nullable
+    private String armedAdmin;
+    private long armedUntilMs;
+
+    /** 上一帧面板的可视区（屏幕坐标），被裁掉的按钮不能点。 */
+    private int panelViewTop;
+    private int panelViewBottom;
 
     /** 本帧缓存的全局进度。中心节点的填充和说明面板都要用，一帧算一次就够。 */
     @Nullable
@@ -443,7 +463,7 @@ public class MasteryScreen extends Screen {
     @Nullable
     private final Screen parentScreen;
 
-    /** 是否只读：看别人的罗盘时流派卡片只显示不响应。 */
+    /** 是否只读：看别人的罗盘时特化卡片只显示不响应。 */
     private final boolean viewOnly;
 
     /** 缩放锚点是否有效。 */
@@ -486,9 +506,18 @@ public class MasteryScreen extends Screen {
 
     @Override
     protected void init() {
-        // 每次打开都重建一次清单：玩家可能中途重载了枪包
-        this.sources = ClientWeaponRegistry.rebuild();
-        rebuildNodes();
+        if (!this.initialized) {
+            // 清单只在标记过期时才重建（换存档、收到全量同步、标签重载），
+            // 不然一两万件物品要重扫一遍，开界面就是一下明显的卡顿
+            this.sources = ClientWeaponRegistry.builtSources();
+            rebuildNodes();
+        } else {
+            // 从特化页面、排行榜回来，或者窗口改了大小：节点原样保留。
+            // 以前这里也重建，节点对象全换了一批，选中链路还指着旧对象，整张图就按「不在链路上」压暗了；
+            // 上千把枪每次还要重新造一遍图标，拖窗口边框时一卡一卡的。
+            // 节点坐标是图空间的，和窗口大小无关，不用重算
+            this.layoutTimeMs = Util.getMillis() - 600000L;
+        }
         if (!this.initialized) {
             // 看别人的罗盘：手上的武器和记住的视角都是自己的事，跟他无关，直接居中看全貌。
             // 顺序很重要：手上拿着武器就一定定位到那把。
@@ -504,8 +533,11 @@ public class MasteryScreen extends Screen {
         // 搜索框放顶栏右端。用原版 EditBox 而不是自绘：输入法、光标、选中、
         // 粘贴这些细节自己实现一遍不现实，样式差一点可以接受
         // 去掉原版边框之后要自己留出左右内边距，不然文字会贴着描边
-        this.searchBox = new EditBox(this.font, this.width - SEARCH_WIDTH - 8 + SEARCH_PADDING, 5,
-                SEARCH_WIDTH - SEARCH_PADDING * 2, HEADER_HEIGHT - 10,
+        String previousSearch = this.searchBox == null ? "" : this.searchBox.getValue();
+        // 无边框的 EditBox 文字就画在 y 上：放 6 和顶栏标题、命中数同一条线。
+        // 右边留出命中数的位置，搜索词很长时两个不会叠在一起
+        this.searchBox = new EditBox(this.font, this.width - SEARCH_WIDTH - 8 + SEARCH_PADDING, 6,
+                SEARCH_WIDTH - SEARCH_PADDING * 2 - this.font.width("0000") - 4, HEADER_HEIGHT - 10,
                 Component.translatable("gui.albionmastery.search"));
         this.searchBox.setHint(Component.translatable("gui.albionmastery.search")
                 .withStyle(ChatFormatting.DARK_GRAY));
@@ -514,8 +546,11 @@ public class MasteryScreen extends Screen {
         this.searchBox.setTextColor(MasteryPalette.TEXT & 0xFFFFFF);
         this.searchBox.setTextColorUneditable(MasteryPalette.TEXT_DIM & 0xFFFFFF);
         this.searchBox.setMaxLength(48);
+        this.searchBox.setValue(previousSearch);
         this.searchBox.setResponder(text -> updateSearch());
-        addRenderableWidget(this.searchBox);
+        // 只注册成可交互的子组件、不注册成自动绘制的：render 里已经在 z=600 手动画了一次，
+        // 再让 super.render 在 z=0 画一次，选中文字的反色高亮叠两层会互相抵消
+        addWidget(this.searchBox);
         updateSearch();
 
         this.lastFrameMs = Util.getMillis();
@@ -563,7 +598,7 @@ public class MasteryScreen extends Screen {
                     ? Component.translatable("gui.albionmastery.search_empty")
                     : Component.translatable("gui.albionmastery.search_hint");
             guiGraphics.pose().pushPose();
-            guiGraphics.pose().translate(right, bottom + 3.0F, 0.0F);
+            guiGraphics.pose().translate(right, HEADER_HEIGHT + 4.0F, 0.0F);
             guiGraphics.pose().scale(0.75F, 0.75F, 1.0F);
             guiGraphics.drawString(this.font, hint, -this.font.width(hint), 0,
                     this.searchHits.isEmpty() ? MasteryPalette.WARN : MasteryPalette.TEXT_DIM, false);
@@ -678,7 +713,7 @@ public class MasteryScreen extends Screen {
     /**
      * 丢掉记住的视角。
      *
-     * <p>断线或者切服时调用：换个服务器武器清单完全不一样，拿旧坐标恢复出来就是对着一片空白。
+     * <p>断线或者切服时调用：换个服务端武器清单完全不一样，拿旧坐标恢复出来就是对着一片空白。
      */
     public static void forgetView() {
         savedView = null;
@@ -880,14 +915,18 @@ public class MasteryScreen extends Screen {
     /**
      * 左下角第二个按钮要不要画。
      *
-     * <p>看自己时是「全服排行」，看别人时是「返回排行榜」，两种情况都画。
-     * 单人世界也不藏：开了局域网就是好几个人，榜单照样有意义；真的只有自己一个人，
-     * 榜上只有一行也不碍事。
+     * <p>看自己时是「全局排行」，看别人时是「返回排行榜」。单人世界又没开局域网时不画：
+     * 榜上只可能有自己一行，点进去什么也看不到，白占一个按钮位。
+     * 开了局域网就是好几个人，榜单照样有意义，照画。
      *
      * @return 要画返回 true
      */
     private boolean hasSecondButton() {
-        return true;
+        if (this.viewOnly) {
+            return true;
+        }
+        IntegratedServer server = Minecraft.getInstance().getSingleplayerServer();
+        return server == null || server.isPublished();
     }
 
     /**
@@ -1024,6 +1063,18 @@ public class MasteryScreen extends Screen {
                 this.sourceCount++;
             } else if (node.type == MasteryNode.Type.TYPE) {
                 this.typeCount++;
+            }
+        }
+        this.minTypeSpacing = Double.POSITIVE_INFINITY;
+        for (MasteryNode node : this.nodes) {
+            if (node.type != MasteryNode.Type.TYPE) {
+                continue;
+            }
+            for (MasteryNode other : this.nodes) {
+                if (other != node && other.type == MasteryNode.Type.TYPE) {
+                    this.minTypeSpacing = Math.min(this.minTypeSpacing,
+                            Math.hypot(other.graphX - node.graphX, other.graphY - node.graphY));
+                }
             }
         }
         this.selected = null;
@@ -1333,11 +1384,16 @@ public class MasteryScreen extends Screen {
         drawGraph(guiGraphics, now);
 
         drawNodeIcons(guiGraphics, now);
-        drawNodeOverlays(guiGraphics, now);
+        // 文字层一次性提交：每次 drawString 默认会立刻把缓冲刷出去，
+        // 上千个节点、每个六七行字，一帧就是几千次 draw call。包在 drawManaged 里只在最后刷一次
+        guiGraphics.drawManaged(() -> drawNodeOverlays(guiGraphics, now));
         if (this.selected != null) {
             drawPanel(guiGraphics);
         }
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(0.0F, 0.0F, 350.0F);
         drawSearchHighlights(guiGraphics, now);
+        guiGraphics.pose().popPose();
         drawHeader(guiGraphics);
         if (this.searchBox != null) {
             guiGraphics.pose().pushPose();
@@ -1346,8 +1402,13 @@ public class MasteryScreen extends Screen {
             this.searchBox.render(guiGraphics, mouseX, mouseY, partialTick);
             guiGraphics.pose().popPose();
         }
+        // 左下角两个按钮也要抬到物品图标上面：renderItem 自带 150 以上的深度，
+        // 按钮画在 0 层的话，节点刚好飘到按钮底下时图标会压在字上
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(0.0F, 0.0F, 600.0F);
         drawResetButton(guiGraphics, mouseX, mouseY);
         drawSecondButton(guiGraphics, mouseX, mouseY);
+        guiGraphics.pose().popPose();
 
         super.render(guiGraphics, mouseX, mouseY, partialTick);
 
@@ -1797,14 +1858,23 @@ public class MasteryScreen extends Screen {
             candidates.add(node);
         }
         if (candidates.size() > MAX_ICONS_PER_FRAME) {
-            float centerX = (float) baseX();
-            float centerY = (float) baseY();
-            candidates.sort(Comparator.comparingDouble(node -> {
+            // 距离先算好再排：放在比较器里的话，每比较一次就要重算两个节点的屏幕坐标，
+            // 节点一多（这个整合包里上千个）排一次就是几千次多余的坐标变换
+            double centerX = baseX();
+            double centerY = baseY();
+            record Ranked(MasteryNode node, double distance) {
+            }
+            List<Ranked> ranked = new ArrayList<>(candidates.size());
+            for (MasteryNode node : candidates) {
                 double dx = toScreenX(node.graphX) - centerX;
                 double dy = toScreenY(node.graphY) - centerY;
-                return dx * dx + dy * dy;
-            }));
-            candidates = candidates.subList(0, MAX_ICONS_PER_FRAME);
+                ranked.add(new Ranked(node, dx * dx + dy * dy));
+            }
+            ranked.sort(Comparator.comparingDouble(Ranked::distance));
+            candidates = new ArrayList<>(MAX_ICONS_PER_FRAME);
+            for (int i = 0; i < MAX_ICONS_PER_FRAME; i++) {
+                candidates.add(ranked.get(i).node());
+            }
         }
 
         for (MasteryNode node : candidates) {
@@ -1825,9 +1895,9 @@ public class MasteryScreen extends Screen {
             float sy = (float) toScreenY(node.graphY);
             if (texture != null) {
                 // 贴图图标（法术）：方形贴图没有透明通道，整块贴上去是个方框，很突兀。
-                // 裁成和节点同形的六边形，尺寸比节点小一圈留出金边，再往里裁掉一成边缘
-                // 先把 GuiGraphics 攒着没画的东西刷出去，再直接画，保证前后顺序
-                guiGraphics.flush();
+                // 裁成和节点同形的六边形，尺寸比节点小一圈留出金边，再往里裁掉一成边缘。
+                // 这里不用先 flush：物品图标那条路每画完一个自己就会刷一次，
+                // 轮到这里时 GuiGraphics 手上没有攒着的东西，白刷一次相当于每帧空转一百多遍
                 guiGraphics.pose().pushPose();
                 guiGraphics.pose().translate(0.0F, 0.0F, 150.0F);
                 RenderUtil.texturedHexagon(guiGraphics.pose().last().pose(), texture,
@@ -1860,50 +1930,30 @@ public class MasteryScreen extends Screen {
     }
 
     /**
-     * 取同一圈中离当前节点最近的另一个节点的屏幕圆心距离。
+     * 中圈名字在字体坐标下能写多宽：整圈统一，按最挤的一对相邻节点之间的空隙算。
      *
-     * <p>中圈只有几十个节点，逐个比较的成本很低；比拿「整圈周长 / 总数量」靠谱得多，
-     * 因为实际布局按来源分扇区，局部疏密根本不均匀。
-     *
-     * @param node 当前节点
-     * @return 最近同层节点的屏幕距离；没有同层邻居时返回正无穷
+     * @param scale 当前文字缩放
+     * @return 宽度预算
      */
-    private double nearestSameLayerScreenSpacing(MasteryNode node) {
-        double x = toScreenX(node.graphX);
-        double y = toScreenY(node.graphY);
-        double nearestSq = Double.POSITIVE_INFINITY;
-        for (MasteryNode other : this.nodes) {
-            if (other == node || other.type != node.type) {
-                continue;
-            }
-            double dx = toScreenX(other.graphX) - x;
-            double dy = toScreenY(other.graphY) - y;
-            double distanceSq = dx * dx + dy * dy;
-            if (distanceSq < nearestSq) {
-                nearestSq = distanceSq;
-            }
+    private int typeLabelBudget(float scale) {
+        if (Double.isInfinite(this.minTypeSpacing)) {
+            return 170;
         }
-        return Double.isInfinite(nearestSq) ? Double.POSITIVE_INFINITY : Math.sqrt(nearestSq);
+        double room = this.minTypeSpacing * this.zoom - 10.0D;
+        return (int) Math.floor(Math.max(0.0D, room) / Math.max(0.1F, scale));
     }
 
     /**
-     * 当前类型节点有没有足够空间显示名称。
+     * 这一帧中圈的名字显示不显示：整圈统一判断。
      *
-     * <p>先量真实最近邻距离，再扣掉一点安全缝，换算成当前字号下能用的文本宽度。
-     * 有空间就显示，没有就安静待着；悬停 / 选中节点由调用方强制显示。
+     * <p>以前是每个节点各自看离邻居多远，武器多的类型分到的扇区宽、名字就出来了，武器少的几个挤在一起就不显示，
+     * 同一圈上有的有名字有的没有。现在以最挤的那一对为准，缩放到位之后整圈一起出现，名字也截成一样长。
      *
-     * @param node  类型节点
      * @param scale 当前文字缩放
-     * @return 空间足够返回 true
+     * @return 显示返回 true
      */
-    private boolean typeLabelHasRoom(MasteryNode node, float scale) {
-        double spacing = nearestSameLayerScreenSpacing(node);
-        if (Double.isInfinite(spacing)) {
-            return true;
-        }
-        double safeScreenWidth = Math.max(0.0D, spacing - 10.0D);
-        int budget = (int) Math.floor(safeScreenWidth / Math.max(0.1F, scale));
-        return budget >= TYPE_LABEL_MIN_BUDGET;
+    private boolean typeLabelsVisible(float scale) {
+        return this.typeCount > 0 && typeLabelBudget(scale) >= TYPE_LABEL_MIN_BUDGET;
     }
 
     /**
@@ -1918,6 +1968,7 @@ public class MasteryScreen extends Screen {
     private void drawNodeOverlays(GuiGraphics guiGraphics, long now) {
         float labelScale = Mth.clamp((float) this.zoom, LABEL_SCALE_MIN, LABEL_SCALE_MAX);
         boolean showLevelDetail = this.zoom >= LEVEL_DETAIL_ZOOM;
+        boolean showTypeLabels = typeLabelsVisible(labelScale);
         double weaponNameThreshold = weaponNameZoomThreshold();
         boolean showWeaponNames = this.zoom >= weaponNameThreshold;
         int maxLevel = ClientMasteryCache.snapshot().maxLevel;
@@ -1926,46 +1977,75 @@ public class MasteryScreen extends Screen {
         // 抬到物品渲染（z=150）之上
         guiGraphics.pose().translate(0.0F, 0.0F, 320.0F);
 
+        // 悬停的那个留到最后画：它的名字放宽了预算、会横着压到邻居头上，
+        // 要是按顺序画，排在后面的邻居的等级铭牌（带黑底）会盖掉它名字的后半截
+        MasteryNode hoveredNode = this.hovered;
         for (MasteryNode node : this.nodes) {
-            if (Mth.clamp(appearOf(node, now), 0.0F, 1.0F) < 0.9F) {
+            if (node == hoveredNode) {
                 continue;
             }
-            float radius = (float) screenRadius(node);
-            float sx = (float) toScreenX(node.graphX);
-            float sy = (float) toScreenY(node.graphY);
-            if (isOffScreen(sx, sy, radius + 46.0F)) {
-                continue;
-            }
-
-            boolean focused = node == this.hovered || node == this.selected;
-            // 外圈名字现在提前一格显示，因此不能再被旧的 5px 半径门槛二次卡住。
-            // 低于新名字阈值时仍然保留旧门槛，避免全貌视角画成一片文字海。
-            float minLabelRadius = switch (node.type) {
-                case SOURCE, INFO, TYPE -> 0.0F;
-                case WEAPON -> showWeaponNames ? 0.0F : LABEL_MIN_SCREEN_RADIUS;
-            };
-            if (radius < minLabelRadius && !focused) {
-                continue;
-            }
-            switch (node.type) {
-                case INFO -> drawScaledLabel(guiGraphics, node.displayName().getString(),
-                        sx, sy - 4.0F * labelScale, labelScale, MasteryPalette.GOLD_BRIGHT, 170);
-                case SOURCE -> drawNodeText(guiGraphics, node, sx, sy, radius, labelScale,
-                        true, showLevelDetail, maxLevel, MasteryPalette.TEXT);
-                case TYPE -> {
-                    // 中圈只有真的有位置时才画整套文本（等级牌、分支合计、名称）。
-                    // 否则即使把名称关了，等级牌仍会在那里挤，视觉上还是一团字。
-                    if (focused || typeLabelHasRoom(node, labelScale)) {
-                        drawNodeText(guiGraphics, node, sx, sy, radius, labelScale,
-                                true, showLevelDetail, maxLevel, MasteryPalette.TEXT);
-                    }
-                }
-                case WEAPON -> drawNodeText(guiGraphics, node, sx, sy, radius, labelScale,
-                        showWeaponNames || focused, showLevelDetail, maxLevel,
-                        focused ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT);
-            }
+            drawNodeOverlay(guiGraphics, node, now, labelScale, showLevelDetail,
+                    showTypeLabels, showWeaponNames, maxLevel);
+        }
+        if (hoveredNode != null) {
+            drawNodeOverlay(guiGraphics, hoveredNode, now, labelScale, showLevelDetail,
+                    showTypeLabels, showWeaponNames, maxLevel);
         }
         guiGraphics.pose().popPose();
+    }
+
+
+    /**
+     * 画一个节点的文字层（等级铭牌 + 名字）。
+     *
+     * @param guiGraphics     绘图上下文
+     * @param node            节点
+     * @param now             当前时刻
+     * @param labelScale      字号缩放
+     * @param showLevelDetail 是否显示「等级 / 上限」
+     * @param showTypeLabels  中圈是否显示名字
+     * @param showWeaponNames 外圈是否显示名字
+     * @param maxLevel        等级上限
+     */
+    private void drawNodeOverlay(GuiGraphics guiGraphics, MasteryNode node, long now, float labelScale,
+                                 boolean showLevelDetail, boolean showTypeLabels, boolean showWeaponNames,
+                                 int maxLevel) {
+        if (Mth.clamp(appearOf(node, now), 0.0F, 1.0F) < 0.9F) {
+            return;
+        }
+        // 和六边形、图标用同一个放大系数：以前铭牌和名字不跟着放大，
+        // 悬停时节点长大了、铭牌却原地不动，看起来像被节点吃掉了一截
+        float radius = (float) screenRadius(node) * (1.0F + node.hoverAnim * 0.14F);
+        float sx = (float) toScreenX(node.graphX);
+        float sy = (float) toScreenY(node.graphY);
+        if (isOffScreen(sx, sy, radius + 46.0F)) {
+            return;
+        }
+
+        boolean focused = node == this.hovered || node == this.selected;
+        // 外圈名字现在提前一格显示，因此不能再被旧的 5px 半径门槛二次卡住。
+        // 低于新名字阈值时仍然保留旧门槛，避免全貌视角画成一片文字海。
+        float minLabelRadius = switch (node.type) {
+            case SOURCE, INFO, TYPE -> 0.0F;
+            case WEAPON -> showWeaponNames ? 0.0F : LABEL_MIN_SCREEN_RADIUS;
+        };
+        if (radius < minLabelRadius && !focused) {
+            return;
+        }
+        switch (node.type) {
+            case INFO -> drawScaledLabel(guiGraphics, node.displayName().getString(),
+                    sx, sy - 4.0F * labelScale, labelScale, MasteryPalette.GOLD_BRIGHT, 170);
+            case SOURCE -> drawNodeText(guiGraphics, node, sx, sy, radius, labelScale,
+                    true, showLevelDetail, maxLevel, MasteryPalette.TEXT);
+            // 中圈：等级铭牌按整圈的平均间距统一缩放；名字整圈统一出现 / 隐藏；
+            // 分支合计那行只在悬停 / 选中时出，免得挤成一团
+            case TYPE -> drawNodeText(guiGraphics, node, sx, sy, radius, labelScale,
+                    focused || showTypeLabels, showLevelDetail && focused, maxLevel,
+                    focused ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT);
+            case WEAPON -> drawNodeText(guiGraphics, node, sx, sy, radius, labelScale,
+                    showWeaponNames || focused, showLevelDetail, maxLevel,
+                    focused ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT);
+        }
     }
 
     /**
@@ -2137,15 +2217,12 @@ public class MasteryScreen extends Screen {
         if (node.type == MasteryNode.Type.SOURCE || node.type == MasteryNode.Type.INFO) {
             return 170;
         }
-        double spacing;
         if (node.type == MasteryNode.Type.TYPE) {
-            // 类型节点按真实最近邻距离裁字。来源扇区疏密不均，拿整圈平均值会让密集区照样撞字。
-            double nearest = nearestSameLayerScreenSpacing(node);
-            spacing = Double.isInfinite(nearest) ? 170.0D * scale : nearest - 10.0D;
-        } else {
-            // 相邻武器的间距，和布局里用的间距系数保持一致
-            spacing = node.radius * 2.0D * 1.35D * this.zoom;
+            // 中圈整圈用同一个预算，名字截得一样长
+            return Mth.clamp(typeLabelBudget(scale), 24, 170);
         }
+        // 相邻武器的间距，和布局里用的间距系数保持一致
+        double spacing = node.radius * 2.0D * 1.35D * this.zoom;
         return (int) Mth.clamp(spacing / Math.max(0.1F, scale), 24.0D, 170.0D);
     }
 
@@ -2167,10 +2244,13 @@ public class MasteryScreen extends Screen {
         guiGraphics.fill(0, HEADER_HEIGHT - 1, this.width, HEADER_HEIGHT, MasteryPalette.EDGE);
 
         int textY = (HEADER_HEIGHT - this.font.lineHeight) / 2 + 1;
+        // 搜索框固定占右端这么宽，顶栏的字一律不许越过它
+        int headerLimit = this.width - SEARCH_WIDTH - 16;
         int cursor = 10;
-        guiGraphics.drawString(this.font, this.title, cursor, textY,
+        String title = trimToWidth(this.title.getString(), Math.max(20, headerLimit - 20 - cursor));
+        guiGraphics.drawString(this.font, title, cursor, textY,
                 MasteryPalette.GOLD_BRIGHT, false);
-        cursor += this.font.width(this.title) + 10;
+        cursor += this.font.width(title) + 10;
 
         double study = this.data.getStudyMultiplier();
         if (Math.abs(study - 1.0D) > 1.0E-6D) {
@@ -2178,7 +2258,7 @@ public class MasteryScreen extends Screen {
             Component label = Component.translatable("gui.albionmastery.header.study",
                     formatMultiplier(study));
             cursor = drawHeaderChip(guiGraphics, label, cursor, textY,
-                    study > 1.0D ? MasteryPalette.GOLD : MasteryPalette.WARN);
+                    study > 1.0D ? MasteryPalette.GOLD : MasteryPalette.WARN, headerLimit);
         }
 
         Progress progress = frameProgress();
@@ -2188,9 +2268,9 @@ public class MasteryScreen extends Screen {
         drawHeaderChip(guiGraphics, Component.translatable("gui.albionmastery.header.progress",
                 progress.levelSum(), ceiling,
                 String.format(Locale.ROOT, "%.1f%%", ratio * 100.0D)),
-                cursor, textY, MasteryPalette.TEXT);
+                cursor, textY, MasteryPalette.TEXT, headerLimit);
 
-        // 提示压到顶栏下面，字号 0.75，够看又不抢地方。看别人时换一句：他的流派只能看不能点
+        // 提示压到顶栏下面，字号 0.75，够看又不抢地方。看别人时换一句：他的特化只能看不能点
         guiGraphics.pose().pushPose();
         guiGraphics.pose().translate(10.0F, HEADER_HEIGHT + 4.0F, 0.0F);
         guiGraphics.pose().scale(0.75F, 0.75F, 1.0F);
@@ -2219,11 +2299,17 @@ public class MasteryScreen extends Screen {
      * @param x           起始 X
      * @param y           文字基线 Y
      * @param color       文字颜色
+     * @param limit       右边界：画出去会压到搜索框，放不下就整块不画
      * @return 下一段的起始 X
      */
-    private int drawHeaderChip(GuiGraphics guiGraphics, Component text, int x, int y, int color) {
-        guiGraphics.drawString(this.font, "\u00B7", x, y, MasteryPalette.GOLD_DARK, false);
+    private int drawHeaderChip(GuiGraphics guiGraphics, Component text, int x, int y, int color, int limit) {
         int textX = x + this.font.width("\u00B7") + 6;
+        // 放不下就整块不画：顶栏和搜索框都在 z=600，搜索框底色只是半透明，压上去就是两层字叠在一起。
+        // 排行榜那边早就这么做了，罗盘这边漏了
+        if (textX + this.font.width(text) > limit) {
+            return x;
+        }
+        guiGraphics.drawString(this.font, "\u00B7", x, y, MasteryPalette.GOLD_DARK, false);
         guiGraphics.drawString(this.font, text, textX, y, color, false);
         return textX + this.font.width(text) + 10;
     }
@@ -2240,7 +2326,11 @@ public class MasteryScreen extends Screen {
     private void drawPanel(GuiGraphics guiGraphics) {
         if (this.selected == null) {
             this.panelScrollable = false;
-            this.specHits.clear();
+            this.specButton = null;
+            this.adminButtons.clear();
+            this.infoTabHits.clear();
+            this.panelViewTop = 0;
+            this.panelViewBottom = 0;
             return;
         }
         int x = PANEL_PAD;
@@ -2260,6 +2350,8 @@ public class MasteryScreen extends Screen {
         // 换节点时会有一帧的滞后，肉眼看不出来，但内容再怎么变都不会露到底板外面
         int top = y - PANEL_PAD;
         int bottom = Math.min(this.height - 34, Math.max(y + 40, this.panelBottom + PANEL_PAD));
+        this.panelViewTop = top + 1;
+        this.panelViewBottom = bottom - 1;
         guiGraphics.fill(0, top, PANEL_WIDTH, bottom, MasteryPalette.PANEL);
         guiGraphics.fill(PANEL_WIDTH - 2, top, PANEL_WIDTH, bottom, MasteryPalette.EDGE);
         guiGraphics.fill(0, top, PANEL_WIDTH, top + 1, MasteryPalette.EDGE);
@@ -2274,7 +2366,9 @@ public class MasteryScreen extends Screen {
         this.panelScrollable = maxScroll > 0.0D;
 
         // 点击区每帧重建：面板内容会随等级、解锁状态变化，缓存反而容易点错
-        this.specHits.clear();
+        this.specButton = null;
+        this.adminButtons.clear();
+        this.infoTabHits.clear();
 
         // enableScissor 用的是未经 pose 变换的屏幕坐标，所以要在下面那次 translate 之前调用
         guiGraphics.enableScissor(0, top + 1, PANEL_WIDTH, bottom - 1);
@@ -2287,6 +2381,9 @@ public class MasteryScreen extends Screen {
             case WEAPON -> this.panelBottom = drawWeaponPanel(guiGraphics, x, y, width);
             default -> {
             }
+        }
+        if (isAdminView()) {
+            this.panelBottom = drawAdminBlock(guiGraphics, this.selected, x, this.panelBottom, width);
         }
         guiGraphics.pose().popPose();
         guiGraphics.disableScissor();
@@ -2324,16 +2421,76 @@ public class MasteryScreen extends Screen {
         guiGraphics.fill(left, thumbTop, left + 2, thumbTop + thumbHeight, MasteryPalette.GOLD);
     }
 
+    /**
+     * 总览面板。
+     *
+     * <p>以前是一长条：进度、加成规则、经验倍率、维度倍率、用法、玩法教程全堆在一列里滚，
+     * 光教程就四大段，打开界面第一眼看到的就是一屏密字。现在分成三页，
+     * 想看数字的看「进度」，想查倍率的看「规则」，第一次玩的看「玩法」，每页都不用怎么滚。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param x           起始 X
+     * @param y           起始 Y
+     * @param width       可用宽度
+     * @return 内容底边
+     */
     private int drawInfoPanel(GuiGraphics guiGraphics, int x, int y, int width) {
-        MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
-        Progress progress = frameProgress();
-
         int cursor = drawTitle(guiGraphics, Component.translatable("gui.albionmastery.panel.info_title"),
                 null, x, y, width);
+        cursor = drawInfoTabs(guiGraphics, x, cursor, width);
+        return switch (infoTab) {
+            case RULES -> drawInfoRules(guiGraphics, x, cursor, width);
+            case HOWTO -> drawInfoHowto(guiGraphics, x, cursor, width);
+            default -> drawInfoProgress(guiGraphics, x, cursor, width);
+        };
+    }
 
-        // 中心是最显眼的位置，先给总进度，再讲规则
-        cursor = drawSection(guiGraphics, Component.translatable("gui.albionmastery.panel.info_progress"),
-                x, cursor, width);
+    /**
+     * 总览面板顶部的三个分页按钮。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param x           起始 X
+     * @param y           起始 Y
+     * @param width       可用宽度
+     * @return 结束后的 Y
+     */
+    private int drawInfoTabs(GuiGraphics guiGraphics, int x, int y, int width) {
+        this.infoTabHits.clear();
+        InfoTab[] tabs = InfoTab.values();
+        int height = 14;
+        int gap = 2;
+        int each = (width - gap * (tabs.length - 1)) / tabs.length;
+        int left = x;
+        for (int i = 0; i < tabs.length; i++) {
+            InfoTab tab = tabs[i];
+            // 最后一个补齐余数，三等分除不尽时右边不会缺一两个像素
+            int right = i == tabs.length - 1 ? x + width : left + each;
+            boolean active = tab == infoTab;
+            guiGraphics.fill(left, y, right, y + height, active ? 0xFF241B0D : 0x60120E08);
+            guiGraphics.fill(left, y + height - 1, right, y + height,
+                    active ? MasteryPalette.GOLD : MasteryPalette.EDGE);
+            guiGraphics.drawCenteredString(this.font, Component.translatable(tab.key()),
+                    (left + right) / 2, y + (height - 8) / 2,
+                    active ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT_DIM);
+            this.infoTabHits.add(new InfoTabHit(tab, left, right, y, y + height));
+            left = right + gap;
+        }
+        return y + height + 6;
+    }
+
+    /**
+     * 「进度」页：只有数字，不讲道理。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param x           起始 X
+     * @param y           起始 Y
+     * @param width       可用宽度
+     * @return 内容底边
+     */
+    private int drawInfoProgress(GuiGraphics guiGraphics, int x, int y, int width) {
+        Progress progress = frameProgress();
+        int cursor = drawSection(guiGraphics, Component.translatable("gui.albionmastery.panel.info_progress"),
+                x, y, width);
         double ratio = progress.total() <= 0 ? 0.0D : (double) progress.unlocked() / progress.total();
         guiGraphics.fill(x - 1, cursor - 1, x + width + 1, cursor + 8, MasteryPalette.EDGE);
         guiGraphics.fill(x, cursor, x + width, cursor + 7, 0xFF17120A);
@@ -2348,13 +2505,22 @@ public class MasteryScreen extends Screen {
                 Component.literal(String.valueOf(progress.maxed())), x, cursor, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_level_sum"),
                 Component.literal(String.valueOf(progress.levelSum())), x, cursor, width);
-        cursor = drawStudyRow(guiGraphics, x, cursor, width) + 6;
+        return drawStudyRow(guiGraphics, x, cursor, width);
+    }
 
-        cursor = drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.panel.info_layers"),
-                x, cursor, width, MasteryPalette.TEXT_DIM) + 8;
-
-        cursor = drawSection(guiGraphics, Component.translatable("gui.albionmastery.panel.info_rules"),
-                x, cursor, width);
+    /**
+     * 「规则」页：加成、升级经验、维度倍率这些查得到的数。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param x           起始 X
+     * @param y           起始 Y
+     * @param width       可用宽度
+     * @return 内容底边
+     */
+    private int drawInfoRules(GuiGraphics guiGraphics, int x, int y, int width) {
+        MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
+        int cursor = drawSection(guiGraphics, Component.translatable("gui.albionmastery.panel.info_rules"),
+                x, y, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_max_level"),
                 Component.literal(String.valueOf(snapshot.maxLevel)), x, cursor, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_overall"),
@@ -2364,44 +2530,80 @@ public class MasteryScreen extends Screen {
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_self"),
                 Component.literal(perLevel(snapshot.weaponDamagePerLevel)), x, cursor, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_cross"),
-                Component.literal(perLevel(snapshot.weaponCrossDamagePerLevel)), x, cursor, width) + 6;
+                Component.literal(perLevel(snapshot.weaponCrossDamagePerLevel)), x, cursor, width) + 8;
 
         cursor = drawSection(guiGraphics, Component.translatable("gui.albionmastery.panel.info_grind"),
                 x, cursor, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_grind_weapon"),
-                Component.literal("×1"), x, cursor, width);
+                Component.literal("\u00D71"), x, cursor, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_grind_type"),
-                Component.literal("×" + trimNumber(snapshot.typeXpMultiplier)), x, cursor, width);
+                Component.literal("\u00D7" + trimNumber(snapshot.typeXpMultiplier)), x, cursor, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_grind_overall"),
-                Component.literal("×" + trimNumber(snapshot.overallXpMultiplier)), x, cursor, width) + 6;
+                Component.literal("\u00D7" + trimNumber(snapshot.overallXpMultiplier)), x, cursor, width) + 8;
 
         cursor = drawSection(guiGraphics, Component.translatable("gui.albionmastery.panel.info_dimension"),
                 x, cursor, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_dim_nether"),
-                Component.literal("×" + trimNumber(snapshot.netherXpMultiplier))
+                Component.literal("\u00D7" + trimNumber(snapshot.netherXpMultiplier))
                         .withStyle(ChatFormatting.GOLD), x, cursor, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_dim_end"),
-                Component.literal("×" + trimNumber(snapshot.endXpMultiplier))
+                Component.literal("\u00D7" + trimNumber(snapshot.endXpMultiplier))
                         .withStyle(ChatFormatting.GOLD), x, cursor, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_dim_modded"),
-                Component.literal("×" + trimNumber(snapshot.moddedDimensionXpMultiplier))
+                Component.literal("\u00D7" + trimNumber(snapshot.moddedDimensionXpMultiplier))
                         .withStyle(ChatFormatting.GOLD), x, cursor, width) + 8;
 
-        cursor = drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.panel.info_usage"),
-                x, cursor, width, MasteryPalette.TEXT_DIM) + 8;
-
-        // 「怎么玩」：用大白话把三圈、经验、流派、满级各说一句，新玩家看这一段就够
-        cursor = drawSection(guiGraphics, Component.translatable("gui.albionmastery.panel.info_howto"),
-                x, cursor, width);
-        cursor = drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.panel.info_howto_1"),
-                x, cursor, width, MasteryPalette.TEXT_DIM) + 4;
-        cursor = drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.panel.info_howto_2"),
-                x, cursor, width, MasteryPalette.TEXT_DIM) + 4;
-        cursor = drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.panel.info_howto_3",
-                        snapshot.specSlot1Percent, snapshot.specSlot2Percent),
-                x, cursor, width, MasteryPalette.TEXT_DIM) + 4;
-        return drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.panel.info_howto_4"),
+        return drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.panel.info_usage"),
                 x, cursor, width, MasteryPalette.TEXT_DIM);
+    }
+
+    /**
+     * 「玩法」页：六条，每条一个小标题加一句话。
+     *
+     * <p>整段整段的说明看着累，眼睛没有落脚的地方。拆成「标题一行、正文一行」之后，
+     * 会玩的人扫标题就能跳过，第一次玩的人也知道每条在讲哪件事。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param x           起始 X
+     * @param y           起始 Y
+     * @param width       可用宽度
+     * @return 内容底边
+     */
+    private int drawInfoHowto(GuiGraphics guiGraphics, int x, int y, int width) {
+        MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
+        int cursor = y;
+        for (int i = 1; i <= 6; i++) {
+            Component body = i == 6
+                    ? Component.translatable("gui.albionmastery.panel.play_6_d",
+                            snapshot.specSlot1Percent, snapshot.specSlot2Percent)
+                    : Component.translatable("gui.albionmastery.panel.play_" + i + "_d");
+            cursor = drawHowtoItem(guiGraphics, i,
+                    Component.translatable("gui.albionmastery.panel.play_" + i), body, x, cursor, width);
+        }
+        return cursor - 8;
+    }
+
+    /**
+     * 「玩法」里的一条。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param index       序号
+     * @param title       小标题
+     * @param body        正文
+     * @param x           起始 X
+     * @param y           起始 Y
+     * @param width       可用宽度
+     * @return 下一条的 Y
+     */
+    private int drawHowtoItem(GuiGraphics guiGraphics, int index, Component title, Component body,
+                              int x, int y, int width) {
+        int indent = 11;
+        guiGraphics.drawString(this.font, Component.literal(String.valueOf(index)),
+                x, y, MasteryPalette.GOLD, false);
+        guiGraphics.drawString(this.font, title, x + indent, y, MasteryPalette.TEXT, false);
+        int cursor = drawWrapped(guiGraphics, body, x + indent, y + LINE + 1,
+                width - indent, MasteryPalette.TEXT_DIM);
+        return cursor + 8;
     }
 
     private int drawSourcePanel(GuiGraphics guiGraphics, int x, int y, int width) {
@@ -2412,6 +2614,9 @@ public class MasteryScreen extends Screen {
         MasteryData data = this.data;
         MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
         int level = data.getOverallLevel(source.overallKey());
+        // 服务端结算时每一层加成都会再乘一道来源倍率（见 MasteryHelper.computeBonus），
+        // 面板不乘的话，服主把某个来源调到 20 倍之后，这里写的数和实际伤害差 20 倍
+        double sourceMultiplier = snapshot.masteryDamageMultiplier(source.id());
 
         int cursor = drawTitle(guiGraphics, source.displayName(),
                 Component.translatable("gui.albionmastery.panel.source_tag"), x, y, width);
@@ -2421,7 +2626,7 @@ public class MasteryScreen extends Screen {
         cursor = drawSection(guiGraphics, Component.translatable("gui.albionmastery.panel.section_effect"),
                 x, cursor, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_grants_all"),
-                Component.literal(formatPercent(level * snapshot.overallDamagePerLevel))
+                Component.literal(formatPercent(level * snapshot.overallDamagePerLevel * sourceMultiplier))
                         .withStyle(ChatFormatting.GOLD), x, cursor, width) + 6;
 
         // 只有一个类型的来源不画类型节点（比如近战附属），它的等级就并到这里显示
@@ -2431,7 +2636,8 @@ public class MasteryScreen extends Screen {
             cursor = drawRow(guiGraphics, only.displayName(),
                     Component.literal("Lv." + typeLevel), x, cursor, width);
             cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_grants_type"),
-                    Component.literal(formatPercent(typeLevel * snapshot.typeDamagePerLevel))
+                    Component.literal(formatPercent(typeLevel * snapshot.typeDamagePerLevel
+                                    * sourceMultiplier))
                             .withStyle(ChatFormatting.GOLD), x, cursor, width);
         }
         cursor += 6;
@@ -2444,11 +2650,10 @@ public class MasteryScreen extends Screen {
                 Component.literal(String.valueOf(source.weaponCount())), x, cursor, width);
 
         if (ClientMasteryCache.snapshot().enableSpecialization) {
-            cursor = drawSection(guiGraphics,
-                    Component.translatable("gui.albionmastery.panel.section_spec"),
-                    x, cursor + 6, width);
+            cursor = drawSection(guiGraphics, SpecTerms.of(source.id(), "page"), x, cursor + 6, width);
             cursor = drawWrapped(guiGraphics,
-                    Component.translatable("gui.albionmastery.panel.spec_in_type"),
+                    Component.translatable("gui.albionmastery.panel.spec_in_type",
+                            SpecTerms.of(source.id(), "page")),
                     x, cursor, width, MasteryPalette.TEXT_DIM);
         }
         return cursor;
@@ -2474,7 +2679,7 @@ public class MasteryScreen extends Screen {
         if (boosted) {
             // 加成用金底，惩罚（小于 1）用橙底，两种情况玩家都该注意到
             int tint = multiplier > 1.0D ? 0x30E8C25A : 0x30E08A3C;
-            guiGraphics.fill(x - 3, y - 2, x + width, y + LINE + 1, tint);
+            guiGraphics.fill(x - 3, y - 2, x + width + 3, y + LINE + 1, tint);
         }
         int valueWidth = this.font.width(value);
         guiGraphics.drawString(this.font,
@@ -2500,14 +2705,14 @@ public class MasteryScreen extends Screen {
     }
 
     /**
-     * 画来源面板底部的「专精特化」区块。
+     * 画类型 / 武器面板底部的「专精特化」摘要：两个槽现在装的是什么、合起来的效果，
+     * 再加一个进特化页面的按钮。
      *
-     * <p>没解锁时只留一行提示，解锁后把该来源的全部流派列出来，当前选中的高亮，
-     * 点一下就发请求切换。切换的合法性（解锁、冷却）由服务端说了算，
-     * 这里只负责把选项摆出来。
+     * <p>完整的特化列表放在单独的 {@link SpecializationScreen} 里：枪械二十几个特化塞在这条
+     * 186 像素宽的面板里，找一个要滚好几屏，也看不出装上之后合起来是什么效果。
      *
      * @param guiGraphics 绘图上下文
-     * @param overallKey  来源的总体专精键
+     * @param typeKey     武器类型键
      * @param x           起始 X
      * @param y           起始 Y
      * @param width       可用宽度
@@ -2520,62 +2725,231 @@ public class MasteryScreen extends Screen {
             return y;
         }
         MasteryData data = this.data;
-        this.specTypeKey = typeKey;
-        int cursor = drawSection(guiGraphics,
-                Component.translatable("gui.albionmastery.panel.section_spec"), x, y, width);
-
-        // 两个槽各自一行状态：解锁了显示当前选的，没解锁显示门槛
-        int typeLevel = data.getTypeLevel(typeKey);
         String provider = WeaponKeys.providerOf(typeKey);
+        int cursor = drawSection(guiGraphics, Component.translatable("gui.albionmastery.panel.spec_section_type",
+                SpecTerms.of(provider, "page")), x, y, width);
+
+        // 两栏各自一行状态：解锁了显示当前选的，没解锁显示门槛
+        int typeLevel = data.getTypeLevel(typeKey);
         int overallLevel = provider == null ? 0 : data.getOverallLevel(WeaponKeys.overallKey(provider));
         boolean anyUnlocked = false;
         for (int slot = 1; slot <= WeaponKeys.SPEC_SLOTS; slot++) {
             int need = snapshot.specSlotLevel(slot);
             boolean unlocked = typeLevel >= need && overallLevel >= need;
             anyUnlocked |= unlocked;
-            String chosen = data.getSpecialization(typeKey, slot);
-            Specialization chosenSpec = Specialization.byKey(chosen);
+            Specialization chosenSpec = Specialization.byKey(data.getSpecialization(typeKey, slot));
             Component value = !unlocked
                     ? Component.translatable("gui.albionmastery.panel.spec_slot_locked", need)
                             .withStyle(ChatFormatting.GRAY)
                     : Component.translatable(chosenSpec == null || chosenSpec.isStandard()
-                            ? "spec.albionmastery." + WeaponKeys.providerOf(typeKey) + ".standard"
+                            ? "spec.albionmastery." + provider + ".standard"
                             : chosenSpec.nameKey()).withStyle(ChatFormatting.GOLD);
-            cursor = drawRow(guiGraphics,
-                    Component.translatable("gui.albionmastery.panel.spec_slot_" + slot), value,
-                    x, cursor, width);
+            cursor = drawRow(guiGraphics, SpecTerms.slot(provider, slot), value, x, cursor, width);
         }
         if (!anyUnlocked) {
-            return drawSpecLocked(guiGraphics, data, typeKey, snapshot, x, cursor + 2, width);
-        }
-        cursor = drawWrapped(guiGraphics, Component.translatable(this.viewOnly
-                        ? "gui.albionmastery.panel.spec_view_hint"
-                        : "gui.albionmastery.panel.spec_click_hint"),
-                x, cursor + 2, width, MasteryPalette.TEXT_DIM) + 4;
-
-        String providerId = WeaponKeys.providerOf(typeKey);
-        String first = data.getSpecialization(typeKey, 1);
-        String second = data.getSpecialization(typeKey, 2);
-        boolean firstActive = SpecializationEffects.isSlotActive(data, typeKey, null, 1, snapshot);
-        boolean secondActive = SpecializationEffects.isSlotActive(data, typeKey, null, 2, snapshot);
-        for (Specialization spec : Specialization.forSource(providerId == null ? "" : providerId)) {
-            int inSlot = spec.key().equals(first) ? 1 : spec.key().equals(second) ? 2 : 0;
-            boolean selected = inSlot != 0 || (first == null && second == null && spec.isStandard());
-            Component tag = null;
-            if (inSlot != 0) {
-                // 选了但槽还没解锁的要明说「未生效」，不然玩家以为流派坏了
-                boolean active = inSlot == 1 ? firstActive : secondActive;
-                tag = Component.translatable(active
-                        ? "gui.albionmastery.panel.spec_tag_active"
-                        : "gui.albionmastery.panel.spec_tag_inactive",
-                        Component.translatable("gui.albionmastery.panel.spec_slot_" + inSlot),
-                        snapshot.specSlotLevel(inSlot));
-            } else if (selected) {
-                tag = Component.translatable("gui.albionmastery.panel.spec_active");
+            cursor = drawSpecLocked(guiGraphics, data, typeKey, snapshot, x, cursor + 2, width);
+        } else {
+            // 两槽叠加之后的实际效果，和特化页面左栏的「合计效果」一致
+            SpecDescriber.Lines described = SpecDescriber.describe(
+                    SpecializationEffects.forData(data, typeKey, snapshot), provider);
+            cursor += 2;
+            for (Component gain : described.gains()) {
+                cursor = drawSpecLine(guiGraphics, "+", gain, MasteryPalette.PROGRESS, x, cursor, width);
             }
-            cursor = drawSpecCard(guiGraphics, spec, selected, tag, x, cursor, width) + SPEC_CARD_GAP;
+            for (Component cost : described.costs()) {
+                cursor = drawSpecLine(guiGraphics, "\u2212", cost, MasteryPalette.WARN, x, cursor, width);
+            }
+        }
+        // 外圈的独立配置优先于这里：有几件单独配过的，提一句，免得玩家改了通用配置发现某把枪没变
+        int overrides = SpecializationScreen.countOverrides(data, typeKey);
+        if (overrides > 0) {
+            cursor = drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.panel.spec_overrides",
+                    overrides), x, cursor + 3, width, MasteryPalette.TEXT_DIM);
+        }
+        return drawSpecButton(guiGraphics, typeKey, null, x, cursor + 6, width);
+    }
+
+    /**
+     * 画「特化配置」按钮，点了进特化页面。按钮位置按内容坐标记下，点击时再换算滚动。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param typeKey     武器类型键
+     * @param x           起始 X
+     * @param y           起始 Y（内容坐标）
+     * @param width       宽度
+     * @return 结束后的 Y
+     */
+    private int drawSpecButton(GuiGraphics guiGraphics, String typeKey, @Nullable WeaponEntry weapon,
+                               int x, int y, int width) {
+        int height = 16;
+        double contentY = this.mouseYNow + this.panelScroll;
+        boolean hover = isInPanel(this.mouseXNow, this.mouseYNow) && this.mouseXNow >= x && this.mouseXNow < x + width
+                && contentY >= y && contentY < y + height;
+        guiGraphics.fill(x, y, x + width, y + height, hover ? 0xF01E1810 : 0xC0130F09);
+        int border = hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
+        guiGraphics.fill(x, y, x + width, y + 1, border);
+        guiGraphics.fill(x, y + height - 1, x + width, y + height, border);
+        guiGraphics.fill(x, y, x + 1, y + height, border);
+        guiGraphics.fill(x + width - 1, y, x + width, y + height, border);
+        Component label = Component.translatable(weapon == null
+                        ? (this.viewOnly ? "gui.albionmastery.panel.spec_open_view" : "gui.albionmastery.panel.spec_open")
+                        : (this.viewOnly ? "gui.albionmastery.panel.spec_open_weapon_view"
+                                : "gui.albionmastery.panel.spec_open_weapon"),
+                SpecTerms.of(WeaponKeys.providerOf(typeKey), "page"));
+        guiGraphics.drawCenteredString(this.font, label, x + width / 2, y + (height - 8) / 2,
+                hover ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT);
+        this.specButton = new SpecButton(typeKey, weapon, y, height);
+        return y + height;
+    }
+
+    /**
+     * 自己有管理员权限（单人开了作弊也算）、而且看的是自己的罗盘时，面板底下多一块管理区。
+     *
+     * <p>这里只决定画不画；真正的权限由服务端对每个包重新判。
+     *
+     * @return 是否显示管理区
+     */
+    private boolean isAdminView() {
+        LocalPlayer player = Minecraft.getInstance().player;
+        return !this.viewOnly && player != null && player.hasPermissions(C2SAdminActionPacket.PERMISSION_LEVEL);
+    }
+
+    /**
+     * 面板底下的管理区：按节点层级给不同的按钮，一律只改自己。
+     *
+     * <ul>
+     *     <li>中心：全部满级、全部清零、清除特化冷却。</li>
+     *     <li>来源 / 类型：本节点满级、清零、±10 级，外加连同下级一起满级或清零。</li>
+     *     <li>武器：满级、清零、±10 级，外加拿一把。</li>
+     * </ul>
+     * 按住 Shift 时 ±10 变成 ±1。清零要点两下确认。
+     */
+    private int drawAdminBlock(GuiGraphics guiGraphics, MasteryNode node, int x, int y, int width) {
+        int cursor = drawSection(guiGraphics, Component.translatable("gui.albionmastery.admin.section")
+                .withStyle(style -> style.withColor(MasteryPalette.WARN & 0xFFFFFF)), x, y + 10, width);
+        cursor = drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.admin.hint"),
+                x, cursor, width, MasteryPalette.TEXT_DIM) + 3;
+        C2SAdminActionPacket.Action set = C2SAdminActionPacket.Action.SET_LEVEL;
+        C2SAdminActionPacket.Action adjust = C2SAdminActionPacket.Action.ADJUST_LEVEL;
+        C2SAdminActionPacket.Action subtree = C2SAdminActionPacket.Action.SET_SUBTREE;
+        int step = Screen.hasShiftDown() ? 1 : 10;
+        switch (node.type) {
+            case INFO -> {
+                cursor = drawAdminRow(guiGraphics, x, cursor, width,
+                        admin("max_all", "max_all", C2SAdminActionPacket.Action.SET_ALL, "", "", -1, true),
+                        admin("wipe_all", "wipe_all", C2SAdminActionPacket.Action.SET_ALL, "", "", 0, true));
+                cursor = drawAdminRow(guiGraphics, x, cursor, width,
+                        admin("cooldown", "cooldown", C2SAdminActionPacket.Action.CLEAR_COOLDOWN, "", "", 0, false));
+            }
+            case SOURCE, TYPE -> {
+                String key = node.type == MasteryNode.Type.SOURCE ? node.source.overallKey() : node.typeGroup.key();
+                String tree = node.type == MasteryNode.Type.SOURCE ? "source" : "type";
+                cursor = drawAdminRow(guiGraphics, x, cursor, width,
+                        admin("max", "max", set, key, "", -1, false),
+                        admin("wipe", "wipe", set, key, "", 0, true),
+                        adminStep(-step, adjust, key, ""),
+                        adminStep(step, adjust, key, ""));
+                cursor = drawAdminRow(guiGraphics, x, cursor, width,
+                        admin("max_" + tree, "max_" + tree, subtree, key, "", -1, true),
+                        admin("wipe_" + tree, "wipe_" + tree, subtree, key, "", 0, true));
+            }
+            case WEAPON -> {
+                WeaponEntry weapon = node.weapon;
+                cursor = drawAdminRow(guiGraphics, x, cursor, width,
+                        admin("max", "max", set, weapon.key(), weapon.typeKey(), -1, false),
+                        admin("wipe", "wipe", set, weapon.key(), weapon.typeKey(), 0, true),
+                        adminStep(-step, adjust, weapon.key(), weapon.typeKey()),
+                        adminStep(step, adjust, weapon.key(), weapon.typeKey()));
+                String giveKey = "gui.albionmastery.admin.give." + WeaponKeys.providerOf(weapon.key());
+                cursor = drawAdminRow(guiGraphics, x, cursor, width,
+                        new AdminAction("give", Component.translatable(I18n.exists(giveKey)
+                                ? giveKey : "gui.albionmastery.admin.give.default"),
+                                C2SAdminActionPacket.Action.GIVE_WEAPON, weapon.key(), weapon.typeKey(), 0, false));
+            }
+            default -> {
+            }
         }
         return cursor;
+    }
+
+    /**
+     * 二次确认认的是「哪个节点上的哪个按钮」：只记按钮的话，在 A 类型上点一下、换到 B 类型再点，B 会被直接清零。
+     */
+    private static String armKey(AdminAction action) {
+        return action.id() + "|" + action.key();
+    }
+
+    private static AdminAction admin(String id, String labelKey, C2SAdminActionPacket.Action action, String key,
+                                     String typeKey, int value, boolean confirm) {
+        return new AdminAction(id, Component.translatable("gui.albionmastery.admin." + labelKey), action, key,
+                typeKey, value, confirm);
+    }
+
+    private static AdminAction adminStep(int delta, C2SAdminActionPacket.Action action, String key, String typeKey) {
+        return new AdminAction(delta < 0 ? "minus" : "plus",
+                Component.literal((delta < 0 ? "\u2212" : "+") + Math.abs(delta)), action, key, typeKey, delta, false);
+    }
+
+    /**
+     * 一排等宽的管理按钮。
+     *
+     * @return 这一排的底边
+     */
+    private int drawAdminRow(GuiGraphics guiGraphics, int x, int y, int width, AdminAction... actions) {
+        int gap = 3;
+        int height = 14;
+        int buttonWidth = (width - gap * (actions.length - 1)) / actions.length;
+        double contentY = this.mouseYNow + this.panelScroll;
+        long now = Util.getMillis();
+        for (int i = 0; i < actions.length; i++) {
+            AdminAction action = actions[i];
+            int left = x + i * (buttonWidth + gap);
+            int right = i == actions.length - 1 ? x + width : left + buttonWidth;
+            boolean hover = isInPanel(this.mouseXNow, this.mouseYNow) && this.mouseXNow >= left && this.mouseXNow < right
+                    && contentY >= y && contentY < y + height;
+            boolean armed = armKey(action).equals(this.armedAdmin) && now < this.armedUntilMs;
+            guiGraphics.fill(left, y, right, y + height, armed ? 0x60E08A3C : hover ? 0xF01E1810 : 0xC0130F09);
+            int border = armed || (action.confirm() && hover) ? MasteryPalette.WARN
+                    : hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
+            guiGraphics.fill(left, y, right, y + 1, border);
+            guiGraphics.fill(left, y + height - 1, right, y + height, border);
+            guiGraphics.fill(left, y, left + 1, y + height, border);
+            guiGraphics.fill(right - 1, y, right, y + height, border);
+            Component label = armed ? Component.translatable("gui.albionmastery.admin.confirm") : action.label();
+            String text = this.font.plainSubstrByWidth(label.getString(), right - left - 4);
+            guiGraphics.drawCenteredString(this.font, text, (left + right) / 2, y + (height - 8) / 2,
+                    armed ? MasteryPalette.GOLD_WHITE : hover ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT);
+            this.adminButtons.add(new AdminButton(action, left, right, y, height));
+        }
+        return y + height + 3;
+    }
+
+    /**
+     * 点了管理按钮：清零类的第一下只是「上膛」，三秒内再点一下才发出去。
+     *
+     * @return 点中了返回 true
+     */
+    private boolean clickAdmin(double mouseX, double contentY) {
+        for (AdminButton button : this.adminButtons) {
+            if (mouseX < button.left() || mouseX >= button.right()
+                    || contentY < button.top() || contentY >= button.top() + button.height()) {
+                continue;
+            }
+            AdminAction action = button.action();
+            long now = Util.getMillis();
+            Minecraft.getInstance().getSoundManager().play(
+                    SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
+            if (action.confirm() && !(armKey(action).equals(this.armedAdmin) && now < this.armedUntilMs)) {
+                this.armedAdmin = armKey(action);
+                this.armedUntilMs = now + 3000L;
+                return true;
+            }
+            this.armedAdmin = null;
+            NetworkHandler.sendToServer(new C2SAdminActionPacket(action.action(), action.key(), action.typeKey(),
+                    action.value()));
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -2601,7 +2975,7 @@ public class MasteryScreen extends Screen {
         int typeLevel = data.getTypeLevel(typeKey);
 
         int cursor = drawWrapped(guiGraphics,
-                Component.translatable("gui.albionmastery.panel.spec_locked"),
+                Component.translatable("gui.albionmastery.panel.spec_locked", SpecTerms.slot(providerId, 1)),
                 x, y, width, MasteryPalette.TEXT_DIM) + 2;
         // 内圈和中圈都得到门槛：分别画一根条，缺哪条一眼就看出来
         cursor = drawSpecRequirement(guiGraphics, "gui.albionmastery.panel.spec_need_overall",
@@ -2639,90 +3013,6 @@ public class MasteryScreen extends Screen {
     }
 
     /**
-     * 画一张流派卡片：标题一行，得失各一行。
-     *
-     * <p>三种状态用三层视觉区分，而不是只靠文字颜色：
-     * 选中的有金色左条 + 淡金底 + 右上角「使用中」；鼠标悬停的压一层更淡的底；
-     * 其余什么都不画。这样一眼扫过去能立刻分清「哪个在用」和「鼠标在哪」。
-     *
-     * <p>底色必须在文字之前画，所以整张卡的高度要先算出来——
-     * 文字换几行取决于字体和语言，得先问 {@code font.split}。
-     *
-     * @param guiGraphics 绘图上下文
-     * @param spec        流派
-     * @param selected    是否是当前选中的
-     * @param x           起始 X
-     * @param y           起始 Y
-     * @param width       可用宽度
-     * @return 卡片底边的 Y
-     */
-    private int drawSpecCard(GuiGraphics guiGraphics, Specialization spec, boolean selected,
-                             int x, int y, int width) {
-        return drawSpecCard(guiGraphics, spec, selected, null, x, y, width);
-    }
-
-    /**
-     * 画一张流派卡片，右上角的标签由调用方给（「第一 · 使用中」「第二 · 未生效」之类）。
-     *
-     * @param guiGraphics 绘制上下文
-     * @param spec        流派
-     * @param selected    是否被选中（任一槽）
-     * @param tag         右上角标签，null 则不画
-     * @param x           左边缘
-     * @param y           顶部
-     * @param width       宽度
-     * @return 结束后的 Y
-     */
-    private int drawSpecCard(GuiGraphics guiGraphics, Specialization spec, boolean selected,
-                             @Nullable Component tag, int x, int y, int width) {
-        int textLeft = x + SPEC_TEXT_INSET;
-        int textWidth = width - SPEC_TEXT_INSET;
-
-        // 先量高度：制式只有一行说明，其余流派是「得」「失」两行
-        Component gain = Component.translatable(spec.gainKey());
-        Component cost = spec.isStandard() ? null : Component.translatable(spec.costKey());
-        int lines = this.font.split(gain, textWidth - SPEC_BULLET_WIDTH).size();
-        if (cost != null) {
-            lines += this.font.split(cost, textWidth - SPEC_BULLET_WIDTH).size();
-        }
-        int top = y;
-        int bottom = top + LINE + 2 + lines * LINE + 3;
-
-        boolean hovered = isInPanel(this.mouseXNow)
-                && this.mouseYNow + this.panelScroll >= top
-                && this.mouseYNow + this.panelScroll < bottom;
-
-        if (selected) {
-            guiGraphics.fill(x - 3, top, x + width, bottom, 0x30E8C25A);
-            guiGraphics.fill(x - 3, top, x - 1, bottom, MasteryPalette.GOLD);
-        } else if (hovered) {
-            guiGraphics.fill(x - 3, top, x + width, bottom, 0x1AFFFFFF);
-            guiGraphics.fill(x - 3, top, x - 1, bottom, MasteryPalette.GOLD_DARK);
-        }
-
-        Component name = Component.translatable(spec.nameKey());
-        guiGraphics.drawString(this.font, name, textLeft, top + 2,
-                selected ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT, false);
-        if (tag != null) {
-            // 标签右对齐，和标题同一行，不占额外高度
-            int tagWidth = this.font.width(tag);
-            guiGraphics.drawString(this.font, tag, x + width - tagWidth, top + 2,
-                    MasteryPalette.GOLD, false);
-        }
-
-        this.specHits.add(new SpecHit(spec, this.specTypeKey, top, bottom - top));
-
-        int cursor = top + LINE + 2;
-        cursor = drawSpecLine(guiGraphics, "+", gain, MasteryPalette.PROGRESS,
-                textLeft, cursor, textWidth);
-        if (cost != null) {
-            cursor = drawSpecLine(guiGraphics, "\u2212", cost, MasteryPalette.WARN,
-                    textLeft, cursor, textWidth);
-        }
-        return Math.max(bottom, cursor);
-    }
-
-    /**
      * 画一条「得」或「失」：行首一个符号，后面跟自动换行的说明。
      *
      * <p>符号单独画、说明整体缩进，换行之后第二行会和第一行的文字左边缘对齐，
@@ -2752,6 +3042,8 @@ public class MasteryScreen extends Screen {
         MasteryData data = this.data;
         MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
         int level = data.getTypeLevel(group.key());
+        // 同上：这一层加成在结算时也要乘来源倍率
+        double sourceMultiplier = snapshot.masteryDamageMultiplier(WeaponKeys.providerOf(group.key()));
 
         int cursor = drawTitle(guiGraphics, group.displayName(),
                 Component.translatable("gui.albionmastery.panel.type_tag"), x, y, width);
@@ -2761,7 +3053,7 @@ public class MasteryScreen extends Screen {
         cursor = drawSection(guiGraphics, Component.translatable("gui.albionmastery.panel.section_effect"),
                 x, cursor, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_grants_type"),
-                Component.literal(formatPercent(level * snapshot.typeDamagePerLevel))
+                Component.literal(formatPercent(level * snapshot.typeDamagePerLevel * sourceMultiplier))
                         .withStyle(ChatFormatting.GOLD), x, cursor, width);
 
         int unlocked = 0;
@@ -2780,10 +3072,11 @@ public class MasteryScreen extends Screen {
                 Component.literal(unlocked + " / " + group.weapons().size()), x, cursor, width);
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_pool"),
                 Component.literal(totalLevels + "  "
-                        + formatPercent(totalLevels * snapshot.weaponCrossDamagePerLevel)),
+                        + formatPercent(totalLevels * snapshot.weaponCrossDamagePerLevel
+                                * sourceMultiplier)),
                 x, cursor, width);
 
-        // 流派挂在类型这一层：同样是枪，步枪和霰弹枪该走的路子完全不同
+        // 特化挂在类型这一层：同样是枪，步枪和霰弹枪该走的路子完全不同
         return drawSpecializationBlock(guiGraphics, group.key(), x, cursor + 6, width);
     }
 
@@ -2814,14 +3107,16 @@ public class MasteryScreen extends Screen {
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_total"),
                 Component.literal(formatPercent(bonus.total())).withStyle(ChatFormatting.GOLD),
                 x, cursor, width);
-        // 流派的伤害倍率不算在「专精加成」里，单独一行，再给一行两者相乘的最终倍率——
+        // 特化的伤害倍率不算在「专精加成」里，单独一行，再给一行两者相乘的最终倍率——
         // 重型弹药那 3 倍不在这里显示的话，玩家会以为没生效
         SpecializationValues specValues = SpecializationEffects.forData(data, resolved, snapshot);
         if (specValues.damage() != 1.0D) {
-            cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_spec_damage"),
+            cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_spec_damage",
+                            SpecTerms.of(WeaponKeys.providerOf(weapon.typeKey()), "spec")),
                     Component.literal("\u00d7" + formatMultiplier(specValues.damage())).withStyle(ChatFormatting.GOLD),
                     x, cursor, width);
-            cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_final_damage"),
+            cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_final_damage",
+                            SpecTerms.of(WeaponKeys.providerOf(weapon.typeKey()), "spec")),
                     Component.literal("\u00d7" + formatMultiplier(bonus.multiplier() * specValues.damage()))
                             .withStyle(ChatFormatting.GOLD),
                     x, cursor, width);
@@ -2845,20 +3140,28 @@ public class MasteryScreen extends Screen {
                 Component.literal(formatPercent(bonus.fromOthers())), x, cursor, width) + 8;
 
         cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_contribution"),
-                Component.literal(formatPercent(level * snapshot.weaponCrossDamagePerLevel)),
+                Component.literal(formatPercent(level * snapshot.weaponCrossDamagePerLevel
+                        * snapshot.masteryDamageMultiplier(WeaponKeys.providerOf(weapon.typeKey())))),
                 x, cursor, width);
 
-        return drawSpecEffects(guiGraphics, weapon.typeKey(), data, snapshot, x, cursor + 6, width);
+        cursor = drawSpecEffects(guiGraphics, weapon.typeKey(), weapon.key(), data, snapshot, x, cursor + 6, width);
+        if (snapshot.enableSpecialization) {
+            // 对着武器按 B 打开时选中的是武器节点，从这里直接进这件武器自己的特化页面
+            cursor = drawSpecButton(guiGraphics, weapon.typeKey(), weapon, x, cursor + 6, width);
+        }
+        return cursor;
     }
 
     /**
      * 在武器面板里列出当前特化对这把武器的实际影响。
      *
-     * <p>只列真正变了的那几项：一个流派通常只动两三个维度，把八项全列出来、
-     * 其中六项写着「×1」，等于让人自己去里面找哪个是重点。
+     * <p>只列真正变了的那几项：一个特化通常只动两三个维度，把几十项全列出来、
+     * 其中大半写着「×1」，等于让人自己去里面找哪个是重点。列的是两个槽叠加之后的实际数值，
+     * 文本由 {@link SpecDescriber} 按数值生成，和特化卡片上的说法一致。
      *
      * @param guiGraphics 绘图上下文
      * @param typeKey     这把武器所属类型的键
+     * @param weaponKey   武器键：有独立配置就按它显示
      * @param data        专精数据
      * @param snapshot    配置快照
      * @param x           起始 X
@@ -2866,83 +3169,50 @@ public class MasteryScreen extends Screen {
      * @param width       可用宽度
      * @return 结束后的 Y
      */
-    private int drawSpecEffects(GuiGraphics guiGraphics, String typeKey, MasteryData data,
-                                MasteryConfig.Snapshot snapshot, int x, int y, int width) {
+    private int drawSpecEffects(GuiGraphics guiGraphics, String typeKey, @Nullable String weaponKey,
+                                MasteryData data, MasteryConfig.Snapshot snapshot, int x, int y, int width) {
         if (!snapshot.enableSpecialization) {
             return y;
         }
-        Specialization spec = Specialization.byKey(data.getSpecialization(typeKey, 1));
-        Specialization second = Specialization.byKey(data.getSpecialization(typeKey, 2));
-        if ((spec == null || spec.isStandard()) && (second == null || second.isStandard())) {
-            return y;
+        String provider = WeaponKeys.providerOf(typeKey);
+        // 先说清楚这件武器用的是哪一份：单独配置（外圈）优先，没有就跟随类型的通用配置（中圈）
+        int cursor = drawSection(guiGraphics, SpecTerms.of(provider, "page"), x, y, width);
+        boolean own = data.hasWeaponOverride(weaponKey);
+        cursor = drawWrapped(guiGraphics, Component.translatable(own
+                        ? "gui.albionmastery.panel.spec_mode_own" : "gui.albionmastery.panel.spec_mode_follow",
+                ClientWeaponRegistry.typeName(typeKey)), x, cursor, width,
+                own ? MasteryPalette.GOLD : MasteryPalette.TEXT_DIM) + 2;
+        // 两个槽都生效时两个名字都列出来，否则玩家看不出叠加的第二个特化在不在起作用
+        List<Specialization> active = new ArrayList<>(WeaponKeys.SPEC_SLOTS);
+        Specialization applied = null;
+        for (int slot = 1; slot <= WeaponKeys.SPEC_SLOTS; slot++) {
+            Specialization spec = SpecializationEffects.activeSpec(data, typeKey, weaponKey, slot, snapshot);
+            // 和前一槽同系的不生效（规则见 SpecializationEffects.forData），这里也不列
+            if (spec != null && !spec.conflictsWith(applied)) {
+                active.add(spec);
+                applied = spec;
+            }
         }
-        if (spec == null || spec.isStandard()) {
-            spec = second;
+        if (active.isEmpty()) {
+            return cursor;
         }
-        SpecializationValues values = SpecializationEffects.forData(data, typeKey, snapshot);
+        SpecializationValues values = SpecializationEffects.forData(data, typeKey, weaponKey, snapshot);
 
-        int cursor = drawSection(guiGraphics,
-                Component.translatable("gui.albionmastery.panel.section_spec"), x, y, width);
-        cursor = drawRow(guiGraphics, Component.translatable(spec.nameKey()),
-                Component.translatable("gui.albionmastery.panel.spec_active")
-                        .withStyle(ChatFormatting.GOLD), x, cursor, width);
+        for (Specialization spec : active) {
+            cursor = drawRow(guiGraphics, Component.translatable(spec.nameKey()),
+                    Component.translatable("gui.albionmastery.panel.spec_active")
+                            .withStyle(ChatFormatting.GOLD), x, cursor, width);
+        }
 
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_damage",
-                values.damage(), false, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_magazine",
-                values.magazine(), false, x, cursor, width);
-        // 换弹和攻速是「时间」，小于 1 才是变好，所以判断方向要反过来
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_reload",
-                values.reloadTime(), true, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_attack_interval",
-                values.attackInterval(), true, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_summoned",
-                values.summonedDamage(), false, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_direct",
-                values.directDamage(), false, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_vs_player",
-                values.vsPlayerDamage(), false, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_vs_mob",
-                values.vsMobDamage(), false, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_armored",
-                values.armoredDamage(), false, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_unarmored",
-                values.unarmoredDamage(), false, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_headshot",
-                values.headShotDamage(), false, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_bodyshot",
-                values.bodyShotDamage(), false, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_execute",
-                values.executeDamage(), false, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_fresh",
-                values.freshDamage(), false, x, cursor, width);
-        cursor = drawSpecEffectRow(guiGraphics, "gui.albionmastery.panel.effect_desperation",
-                values.desperationDamage(), false, x, cursor, width);
+        // 两槽叠加之后的实际数值，逐条列出（只列变了的）
+        SpecDescriber.Lines described = SpecDescriber.describe(values, provider);
+        for (Component gain : described.gains()) {
+            cursor = drawSpecLine(guiGraphics, "+", gain, MasteryPalette.PROGRESS, x, cursor, width);
+        }
+        for (Component cost : described.costs()) {
+            cursor = drawSpecLine(guiGraphics, "\u2212", cost, MasteryPalette.WARN, x, cursor, width);
+        }
         return cursor;
-    }
-
-    /**
-     * 画一项特化影响，中性值（×1）直接跳过。
-     *
-     * @param guiGraphics  绘图上下文
-     * @param labelKey     标签语言键
-     * @param multiplier   倍率
-     * @param lowerIsBette 小于 1 是否算变好（时间类的项是这样）
-     * @param x            起始 X
-     * @param y            起始 Y
-     * @param width        可用宽度
-     * @return 结束后的 Y
-     */
-    private int drawSpecEffectRow(GuiGraphics guiGraphics, String labelKey, double multiplier,
-                                  boolean lowerIsBette, int x, int y, int width) {
-        if (Math.abs(multiplier - 1.0D) <= 1.0E-6D) {
-            return y;
-        }
-        boolean better = lowerIsBette ? multiplier < 1.0D : multiplier > 1.0D;
-        return drawRow(guiGraphics, Component.translatable(labelKey),
-                Component.literal("\u00D7" + formatMultiplier(multiplier))
-                        .withStyle(better ? ChatFormatting.GREEN : ChatFormatting.RED),
-                x, y, width);
     }
 
     /**
@@ -3063,9 +3333,9 @@ public class MasteryScreen extends Screen {
      * @return 结束后的 Y
      */
     private int drawWrapped(GuiGraphics guiGraphics, Component text, int x, int y, int width, int color) {
-        List<FormattedCharSequence> lines = this.font.split(text, width);
         int cursor = y;
-        for (FormattedCharSequence line : lines) {
+        // 用自己那套折行：原版的折法会把逗号句号甩到行首，整页看下来很累（见 TextWrap）
+        for (String line : TextWrap.wrap(this.font, text.getString(), width)) {
             guiGraphics.drawString(this.font, line, x, cursor, color, false);
             cursor += LINE;
         }
@@ -3088,6 +3358,11 @@ public class MasteryScreen extends Screen {
         if (level >= 0) {
             lines.add(Component.translatable("gui.albionmastery.tooltip.level", level,
                     snapshot.maxLevel));
+        }
+        if (node.type == MasteryNode.Type.WEAPON && node.weapon != null && snapshot.enableSpecialization
+                && this.data.hasWeaponOverride(node.weapon.key())) {
+            lines.add(Component.translatable("gui.albionmastery.tooltip.spec_own",
+                    SpecTerms.of(WeaponKeys.providerOf(node.weapon.key()), "page")).withStyle(ChatFormatting.GOLD));
         }
 
         // 不用 renderComponentTooltip：原版那圈紫边渐变和这套金褐配色完全不搭。
@@ -3153,8 +3428,7 @@ public class MasteryScreen extends Screen {
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
-        // 右键只在面板里有意义（给第二槽选流派），别处一律不管
-        if (button != 0 && !(button == 1 && isInPanel(mouseX))) {
+        if (button != 0) {
             return false;
         }
         if (isOnButton(mouseX, mouseY)) {
@@ -3169,8 +3443,13 @@ public class MasteryScreen extends Screen {
             // 顶栏整条都不参与地图操作，免得点标题就把镜头拖跑了
             return this.searchBox.mouseClicked(mouseX, mouseY, button);
         }
-        if (isInPanel(mouseX)) {
-            return clickSpecialization(mouseX, mouseY, button);
+        // 点到顶栏以外的地方就退出搜索框，和特化页、排行榜一致
+        if (this.searchBox != null && this.searchBox.isFocused()) {
+            this.searchBox.setFocused(false);
+            setFocused(null);
+        }
+        if (isInPanel(mouseX, mouseY)) {
+            return clickPanel(mouseX, mouseY);
         }
 
         MasteryNode node = pickNode(mouseX, mouseY);
@@ -3230,7 +3509,7 @@ public class MasteryScreen extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         // 鼠标停在面板上且内容超出时，滚轮归面板用，不去缩放地图
-        if (isInPanel(mouseX) && this.panelScrollable) {
+        if (isInPanel(mouseX, mouseY) && this.panelScrollable) {
             this.panelScroll = Math.max(0.0D, this.panelScroll - delta * PANEL_SCROLL_STEP);
             return true;
         }
@@ -3274,9 +3553,10 @@ public class MasteryScreen extends Screen {
                 jumpToFirstHit();
                 return true;
             }
-            if (this.searchBox.keyPressed(keyCode, scanCode, modifiers)) {
-                return true;
-            }
+            this.searchBox.keyPressed(keyCode, scanCode, modifiers);
+            // 不管 EditBox 认不认这个键都吞掉：字母键它返回 false（字符是从 charTyped 进来的），
+            // 放下去就会匹配到打开界面的 B 键，打拼音「bu」「ba」一按 b 界面就关了
+            return true;
         }
         if (KeyBindings.OPEN_MASTERY.matches(keyCode, scanCode)) {
             // 按开界面那个键是「我不看了」：看别人时也直接整叠关掉，不回排行榜
@@ -3310,46 +3590,67 @@ public class MasteryScreen extends Screen {
      * 判断坐标是否落在详情面板上。面板没显示时永远返回 false。
      *
      * @param mouseX 鼠标 X
+     * @param mouseY 鼠标 Y
      * @return 落在面板上返回 true
      */
-    private boolean isInPanel(double mouseX) {
-        return this.selected != null && mouseX <= PANEL_WIDTH;
+    private boolean isInPanel(double mouseX, double mouseY) {
+        // 面板只占左边一截高度，上下露出来的仍然是地图：只判 X 的话那两块地图点不动、拖不动、滚轮也不缩放
+        return this.selected != null && mouseX <= PANEL_WIDTH
+                && mouseY >= this.panelViewTop - 1 && mouseY <= this.panelViewBottom;
     }
 
     /**
-     * 处理落在面板里的点击：只认流派选项，其余位置吞掉不做事。
+     * 处理落在面板里的点击：只认管理按钮和「特化配置」按钮，其余位置不做事。
      *
      * @param mouseX 鼠标 X
      * @param mouseY 鼠标 Y
-     * @return 点中了流派返回 true
+     * @return 点中了按钮返回 true
      */
-    private boolean clickSpecialization(double mouseX, double mouseY, int button) {
-        if (this.specHits.isEmpty() || mouseX < 0.0D || mouseX > PANEL_WIDTH) {
+    private boolean clickPanel(double mouseX, double mouseY) {
+        // 面板滚动时，超出可视区的按钮虽然被裁掉了，点击区还在；不先挡住的话，
+        // 点面板下方的空白处会触发看不见的「全部满级」
+        if (mouseY < this.panelViewTop || mouseY >= this.panelViewBottom) {
             return false;
         }
-        // 看别人的罗盘：卡片只是展示他选了什么，点了不发包
-        if (this.viewOnly) {
-            return true;
-        }
-        // 左键给第一槽，右键给第二槽；解锁、冷却、重复全由服务端再判一遍
-        int slot = button == 1 ? 2 : 1;
         // 画的时候用的是内容坐标，这里把鼠标位置换算回去
         double contentY = mouseY + this.panelScroll;
-        for (SpecHit hit : this.specHits) {
-            if (contentY >= hit.top() && contentY < hit.top() + hit.height()) {
-                NetworkHandler.sendToServer(
-                        new C2SSelectSpecializationPacket(hit.typeKey(), hit.spec().key(), slot));
+        for (InfoTabHit hit : this.infoTabHits) {
+            if (mouseX >= hit.left() && mouseX < hit.right()
+                    && contentY >= hit.top() && contentY < hit.bottom()) {
+                if (infoTab != hit.tab()) {
+                    infoTab = hit.tab();
+                    this.panelScroll = 0.0D;
+                }
                 Minecraft.getInstance().getSoundManager().play(
                         SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
                 return true;
             }
         }
-        return false;
+        if (clickAdmin(mouseX, contentY)) {
+            return true;
+        }
+        SpecButton button = this.specButton;
+        if (button == null) {
+            return false;
+        }
+        if (contentY < button.top() || contentY >= button.top() + button.height()) {
+            return false;
+        }
+        Minecraft.getInstance().getSoundManager().play(
+                SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
+        WeaponEntry weapon = button.weapon();
+        Minecraft.getInstance().setScreen(new SpecializationScreen(this.data, button.typeKey(),
+                ClientWeaponRegistry.typeName(button.typeKey()),
+                weapon == null ? null : weapon.key(), weapon == null ? null : weapon.displayName(),
+                this, this.viewOnly));
+        return true;
     }
 
     @Nullable
     private MasteryNode pickNode(double mouseX, double mouseY) {
-        if (isInPanel(mouseX)) {
+        // 面板、顶栏、左下两个按钮底下的节点不算：不然鼠标停在按钮上，底下节点的悬停提示会盖住按钮
+        if (isInPanel(mouseX, mouseY) || mouseY < HEADER_HEIGHT
+                || isOnButton(mouseX, mouseY) || isOnSecondButton(mouseX, mouseY)) {
             return null;
         }
         for (int i = this.nodes.size() - 1; i >= 0; i--) {
@@ -3558,13 +3859,70 @@ public class MasteryScreen extends Screen {
     }
 
     /**
-     * 一个流派选项在面板里的点击区。
+     * 面板里「特化配置」按钮的点击区。
      *
-     * @param spec   流派
-     * @param top    内容坐标下的顶边
-     * @param height 高度
+     * @param typeKey 点了要打开哪个类型的特化页面
+     * @param top     内容坐标下的顶边
+     * @param height  高度
      */
-    private record SpecHit(Specialization spec, String typeKey, int top, int height) {
+    /**
+     * 总览面板的分页。
+     *
+     * <p>记成静态的：关掉界面再打开、点别的节点再回来，还停在刚才那一页，
+     * 看完玩法的人不用每次都切回去。
+     */
+    private enum InfoTab {
+
+        /** 进度数字。 */
+        PROGRESS("gui.albionmastery.panel.tab_progress"),
+
+        /** 加成与倍率。 */
+        RULES("gui.albionmastery.panel.tab_rules"),
+
+        /** 玩法说明。 */
+        HOWTO("gui.albionmastery.panel.tab_howto");
+
+        /** 分页名的翻译键。 */
+        private final String key;
+
+        InfoTab(String key) {
+            this.key = key;
+        }
+
+        /**
+         * @return 分页名的翻译键
+         */
+        String key() {
+            return this.key;
+        }
+    }
+
+    /** 一个分页按钮的点击区。 */
+    private record InfoTabHit(InfoTab tab, int left, int right, int top, int bottom) {
+    }
+
+    private record SpecButton(String typeKey, @Nullable WeaponEntry weapon, int top, int height) {
+    }
+
+    /**
+     * 一个管理操作。
+     *
+     * @param id      按钮标识，二次确认靠它认「是不是同一个按钮」
+     * @param label   按钮文字
+     * @param action  发给服务端的操作
+     * @param key     目标节点的键
+     * @param typeKey 武器所属的类型键，其余为空串
+     * @param value   等级或增减量
+     * @param confirm 是否要点两下确认
+     */
+    private record AdminAction(String id, Component label, C2SAdminActionPacket.Action action, String key,
+                               String typeKey, int value, boolean confirm) {
+    }
+
+    /**
+     * 上一帧画出来的一个管理按钮（横向是屏幕坐标，纵向是内容坐标）。
+     */
+    private record AdminButton(AdminAction action, int left, int right, int top, int height) {
     }
 
     /**
