@@ -1,5 +1,7 @@
 # Albion Mastery（武器专精）
 
+[![License: All Rights Reserved](https://img.shields.io/badge/license-All%20Rights%20Reserved-red)](LICENSE)
+
 > Minecraft 1.20.1 · Forge · 服务端 + 客户端
 
 阿尔比恩式武器专精系统。模组会自动识别已安装模组中的武器，玩家在战斗中积累专精等级，获得相应加成，并可选择特化方向。
