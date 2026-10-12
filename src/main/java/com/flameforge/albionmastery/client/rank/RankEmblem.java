@@ -23,8 +23,9 @@ import java.util.Arrays;
 /**
  * 段位徽章。
  *
- * <p>优先画 {@code albionmastery:textures/gui/rank/<段位>.png}（0~37 各一张，48×48 像素画，模组自带，
- * 资源包可以照同名覆盖）。传奇 7 以后没有各自的图，沿用传奇 7 那张，底部挂一块写着传奇序号的小牌。
+ * <p>优先画 {@code albionmastery:textures/gui/rank/<段位>.png}（0~39 各一张，48×48 像素画，模组自带，
+ * 资源包可以照同名覆盖）。传奇 7（37 段）是最后一个独有造型，38、39 是它的白银、黄金版；
+ * 再往上按青铜、白银、黄金轮着用这三张。从 38 段起造型重复，底部挂一块写着传奇序号的小牌。
  * 贴图是否存在的检查结果会缓存，资源重载时清掉（见 {@link #invalidateTextures()}）。
  *
  * <p>缺图时退回程序画的矢量纹章（见 {@link EmblemPainter}）：十组段位各有一枚，同组三段分青铜、白银、黄金，
@@ -45,8 +46,11 @@ public final class RankEmblem {
     /** 传奇序号小牌从多大的徽章开始画，再小就看不清了。 */
     private static final float NUMERAL_MIN_SIZE = 28.0F;
 
-    /** 有自己贴图的最高段位（传奇 7），再往上沿用这一张。 */
-    private static final int LAST_TEXTURED_RANK = MasteryRank.NAMED_RANKS + 7;
+    /** 最后一个独有造型的段位（传奇 7），往上的段位都用它的造型。 */
+    private static final int LAST_SHAPE_RANK = MasteryRank.NAMED_RANKS + 7;
+
+    /** 有自己贴图的最高段位：传奇 7 的青铜、白银、黄金三张，到 39 段为止。 */
+    private static final int LAST_TEXTURED_RANK = LAST_SHAPE_RANK + 2;
 
     /** 贴图本身的边长（像素），按它判断画出来是放大还是缩小。 */
     private static final int TEXTURE_PIXELS = 48;
@@ -168,8 +172,8 @@ public final class RankEmblem {
         ResourceLocation texture = textureFor(rank);
         if (texture != null) {
             drawTexture(guiGraphics, texture, cx, cy, size, alpha, flash);
-            // 传奇 7 以后共用一张图，靠序号小牌区分
-            if (rank > LAST_TEXTURED_RANK && size >= NUMERAL_MIN_SIZE) {
+            // 传奇 7 以后造型都一样，靠序号小牌区分
+            if (rank > LAST_SHAPE_RANK && size >= NUMERAL_MIN_SIZE) {
                 drawNumeral(guiGraphics, MasteryRank.legendaryIndex(rank), cx, cy, size, alpha);
             }
             return;
@@ -276,10 +280,12 @@ public final class RankEmblem {
     }
 
     /**
-     * 查这一段有没有贴图，结果缓存到下次资源重载。传奇 7 以后的段位用传奇 7 的图。
+     * 查这一段有没有贴图，结果缓存到下次资源重载。39 段以后按金属轮着用 37、38、39 三张
+     * （段位的金属是 (段位 - 1) % 3，和这三张的顺序对得上）。
      */
     private static ResourceLocation textureFor(int rank) {
-        int slot = Math.max(0, Math.min(LAST_TEXTURED_RANK, rank));
+        int slot = rank <= LAST_TEXTURED_RANK ? Math.max(0, rank)
+                : LAST_SHAPE_RANK + (rank - LAST_SHAPE_RANK) % 3;
         byte state = TEXTURE_STATE[slot];
         if (state == TEXTURE_UNKNOWN) {
             boolean present = Minecraft.getInstance().getResourceManager().getResource(TEXTURES[slot]).isPresent();

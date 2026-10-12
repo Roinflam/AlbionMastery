@@ -118,10 +118,10 @@ public class MasteryScreen extends Screen {
     /**
      * 在原始全貌最小值的基础上，额外往里抬多少格滚轮。
      *
-     * <p>1 表示「旧最小值放大一格」；你上一轮就是这个效果。
-     * 这次又明确要求在那基础上再限制一格，所以这里改成 2。
+     * <p>全貌缩放下外圈武器节点太小、整张图显得空，最远只缩到「全貌再放大三格」：
+     * 圆盘大部分还在屏幕里，节点已经认得出。
      */
-    private static final int MIN_ZOOM_EXTRA_NOTCHES = 2;
+    private static final int MIN_ZOOM_EXTRA_NOTCHES = 3;
 
     /** 每格倍数的取值范围，太小滚不动，太大跳得晃眼。 */
     private static final double ZOOM_STEP_MIN = 1.15D;
@@ -221,9 +221,9 @@ public class MasteryScreen extends Screen {
     private static final double LEVEL_DETAIL_ZOOM = 0.55D;
 
     /**
-     * 旧版武器名称开始显示的基准缩放。
+     * 武器名称开始显示的基准缩放。
      *
-     * <p>真正使用的阈值见 {@link #weaponNameZoomThreshold()}：按你的要求提前一格滚轮倍率。
+     * <p>真正使用的阈值见 {@link #weaponNameZoomThreshold()}：比它提前一格滚轮倍率。
      */
     private static final double NAME_ZOOM = 0.68D;
 
@@ -295,12 +295,12 @@ public class MasteryScreen extends Screen {
     /** 左下角两个按钮之间的间距。 */
     private static final int BUTTON_GAP = 6;
 
-    /** 右上角段位徽章的尺寸。 */
-    private static final int RANK_BADGE_WIDTH = 140;
-    private static final int RANK_BADGE_HEIGHT = 40;
+    /** 右上角段位徽章的尺寸。只是个角标，详细数字在悬停卡片里，别压住太多地图。 */
+    private static final int RANK_BADGE_WIDTH = 112;
+    private static final int RANK_BADGE_HEIGHT = 28;
 
-    /** 段位徽章里那枚徽记的边长。 */
-    private static final int RANK_EMBLEM_SIZE = 32;
+    /** 段位徽章里那枚徽记的边长（徽记贴图是 48 像素，GUI 缩放 2 时正好一比一）。 */
+    private static final int RANK_EMBLEM_SIZE = 24;
 
     /** 单个节点出现动画的时长（毫秒）。 */
     private static final float APPEAR_MS = 240.0F;
@@ -756,8 +756,7 @@ public class MasteryScreen extends Screen {
      *
      * <p>这是纯几何意义上的全貌缩放：整张圆盘放进屏幕，再乘上
      * {@value #MIN_ZOOM_WHOLE_FACTOR} 这点留白系数。真正给玩家用的最小缩放在
-     * {@link #minZoom()} 里还会再往里抬一格，因为上一版虽然已经顺眼很多，
-     * 但你实机看下来仍然觉得能再放大一档更舒服。
+     * {@link #minZoom()} 里还会再往里抬 {@value #MIN_ZOOM_EXTRA_NOTCHES} 格。
      *
      * @return 原始全貌缩放下限
      */
@@ -770,10 +769,8 @@ public class MasteryScreen extends Screen {
     /**
      * 当前这张图允许缩到多小。
      *
-     * <p>这里不是直接返回原始全貌缩放，而是按你这次要求：
-     * 「以现在的为基础，然后放大一次的效果，就是之后的缩小上限」。
-     * 也就是先拿旧逻辑算出原始最小值，再按那一版的滚轮倍率往里推一格，
-     * 把那两格之后的位置当成新的最小缩放。这样以后再往外滚，就会停在“旧版最小值放大两格”这个位置。
+     * <p>不直接用原始全貌缩放：先算出原始最小值，再按那个范围下的滚轮倍率往里推
+     * {@value #MIN_ZOOM_EXTRA_NOTCHES} 格，推到的位置才是往外滚的尽头。
      *
      * @return 给玩家实际使用的缩放下限
      */
@@ -799,8 +796,7 @@ public class MasteryScreen extends Screen {
     /**
      * 滚轮每格的缩放倍数，按当前范围分成 {@value #ZOOM_NOTCHES} 格。
      *
-     * <p>注意这里用的是抬高后的 {@link #minZoom()}；也就是说新的最小缩放本身就已经
-     * 等于“旧版最小值再放大一格”，之后再继续滚轮时，会在这个新范围里重新均分格数。
+     * <p>用的是抬高后的 {@link #minZoom()}，滚轮在抬高后的范围里重新均分格数。
      *
      * @return 倍数，大于 1
      */
@@ -1107,29 +1103,35 @@ public class MasteryScreen extends Screen {
         guiGraphics.fill(right - 1, y, right, bottom, border);
         guiGraphics.fill(x, y, x + 2, bottom, primary);
 
-        RankEmblem.draw(guiGraphics, rank, x + 6 + RANK_EMBLEM_SIZE / 2.0F, y + RANK_BADGE_HEIGHT / 2.0F,
+        RankEmblem.draw(guiGraphics, rank, x + 4 + RANK_EMBLEM_SIZE / 2.0F, y + RANK_BADGE_HEIGHT / 2.0F,
                 RANK_EMBLEM_SIZE, 1.0F, RankEmblem.clockSeconds());
 
-        int textX = x + 12 + RANK_EMBLEM_SIZE;
-        int textRight = right - 6;
+        int textX = x + 8 + RANK_EMBLEM_SIZE;
+        int textRight = right - 5;
         guiGraphics.drawString(this.font, trimToWidth(MasteryRank.name(rank).getString(), textRight - textX),
-                textX, y + 6, primary, false);
+                textX, y + 4, primary, false);
 
+        // 第二行小字：左边「段位 N」，右边到下一段的百分比
         boolean max = rank >= MasteryRank.MAX_RANK;
         float progress = max ? 1.0F : MasteryRank.progress(xp);
-        guiGraphics.drawString(this.font, I18n.get("gui.albionmastery.rank.badge.rank", rank),
-                textX, y + 17, MasteryPalette.TEXT_DIM, false);
+        String rankLabel = I18n.get("gui.albionmastery.rank.badge.rank", rank);
         String percent = max ? I18n.get("gui.albionmastery.rank.badge.max")
                 : (int) Math.floor(progress * 100.0F) + "%";
-        guiGraphics.drawString(this.font, percent, textRight - this.font.width(percent), y + 17,
+        float small = 0.75F;
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(textX, y + 15, 0.0F);
+        guiGraphics.pose().scale(small, small, 1.0F);
+        int smallWidth = Math.round((textRight - textX) / small);
+        guiGraphics.drawString(this.font, rankLabel, 0, 0, MasteryPalette.TEXT_DIM, false);
+        guiGraphics.drawString(this.font, percent, smallWidth - this.font.width(percent), 0,
                 MasteryPalette.TEXT_DIM, false);
+        guiGraphics.pose().popPose();
 
-        int barTop = y + 29;
-        guiGraphics.fill(textX, barTop, textRight, barTop + BAR_HEIGHT, 0xFF17120A);
+        int barTop = bottom - 5;
+        guiGraphics.fill(textX, barTop, textRight, barTop + 2, 0xFF17120A);
         int fillRight = textX + Math.round((textRight - textX) * progress);
         if (fillRight > textX) {
-            guiGraphics.fill(textX, barTop, fillRight, barTop + BAR_HEIGHT,
-                    max ? MasteryPalette.GOLD_BRIGHT : primary);
+            guiGraphics.fill(textX, barTop, fillRight, barTop + 2, max ? MasteryPalette.GOLD_BRIGHT : primary);
         }
     }
 
@@ -2169,9 +2171,9 @@ public class MasteryScreen extends Screen {
     /**
      * 外圈武器名称实际开始显示的缩放阈值。
      *
-     * <p>上一版是达到 {@link #NAME_ZOOM} 才显示。现在按你的要求，把它提前到
-     * 「原来显示名字之前的那一格滚轮倍率」：也就是旧阈值除以当前一格的缩放倍数。
-     * 不同大小的专精树滚轮倍率不同，所以这里动态算，别再塞一个碰运气的魔法数字。
+     * <p>比 {@link #NAME_ZOOM} 提前一格：基准阈值除以当前一格的缩放倍数，
+     * 往里滚到「显示名字的前一格」名字就出来了，不用贴得很近才认得出是哪件武器。
+     * 不同大小的专精树滚轮倍率不同，所以这里动态算，不写死一个数。
      *
      * @return 武器名开始显示的缩放
      */
