@@ -25,6 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.flameforge.albionmastery.mastery.spec.SpecVisualAttributes;
 import com.flameforge.albionmastery.event.SweetMagicCombatHandler;
+import com.flameforge.albionmastery.compat.ftbquests.FtbQuestsCompat;
 
 /**
  * 武器专精系统主类。
@@ -81,6 +82,8 @@ public class AlbionMastery {
         if (WeaponResolver.isSweetMagicLoaded()) {
             MinecraftForge.EVENT_BUS.register(SweetMagicCombatHandler.class);
         }
+        // FTB 任务同样可选：装了就多一种「专精段位」任务，没装时入口里自己判断、不碰 FTB 的类
+        FtbQuestsCompat.init();
     }
 
     /**
@@ -108,15 +111,21 @@ public class AlbionMastery {
      */
     private void onConfigReloading(ModConfigEvent.Reloading event) {
         if (event.getConfig().getType() == ModConfig.Type.COMMON) {
-            MasteryConfig.migrateSpecBalance();
-            MasteryConfig.refreshServerSnapshot();
-            DimensionXpBonus.reload();
             // 等级上限或曲线变了，排行榜上存的「满级数」这些概况就不对了，得按新曲线重算。
             // 配置重载事件是文件监视线程发出来的，不在主线程，SavedData 不能在这里直接碰，
             // 用 server.execute 丢回主线程去做
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-            if (server != null) {
+            if (server == null) {
+                MasteryConfig.migrateSpecBalance();
+                MasteryConfig.refreshServerSnapshot();
+                DimensionXpBonus.reload();
+            } else {
                 server.execute(() -> {
+                    // 换快照也放到主线程，和下面的全量同步紧挨着做：在监视线程上先换掉的话，
+                    // 中间插进来的一次增量冲刷会按新数值算出段位晋升，当成打怪练出来的
+                    MasteryConfig.migrateSpecBalance();
+                    MasteryConfig.refreshServerSnapshot();
+                    DimensionXpBonus.reload();
                     // 补录表、拆分口径都可能变了，服务端那份武器目录得跟着作废，
                     // 不然管理指令还按旧口径写键（`/albionmastery config set` 那条路早就清了，这条漏了）
                     WeaponCatalog.invalidate();

@@ -22,9 +22,10 @@ public final class NetworkHandler {
      *
      * <p>版本 4 的配置快照增加法术范围保护开关，且升级经验曲线翻倍。
      * 版本 5 排行榜请求 / 回包加了搜索字段，新增罗盘管理操作包。
+     * 版本 10 配置快照末尾加了每级段位经验，新增段位晋升包，排行榜排序多了段位。
      * 两端必须一起更新，避免旧客户端误读数据包或显示错误等级。
      */
-    private static final String PROTOCOL_VERSION = "9";
+    private static final String PROTOCOL_VERSION = "10";
 
     /** 主通道。 */
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
@@ -101,6 +102,13 @@ public final class NetworkHandler {
                 .encoder(C2SAdminActionPacket::encode)
                 .decoder(C2SAdminActionPacket::decode)
                 .consumerMainThread(C2SAdminActionPacket::handle)
+                .add();
+
+        // 段位晋升动画
+        CHANNEL.messageBuilder(S2CMasteryRankUpPacket.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(S2CMasteryRankUpPacket::encode)
+                .decoder(S2CMasteryRankUpPacket::decode)
+                .consumerMainThread(S2CMasteryRankUpPacket::handle)
                 .add();
     }
 

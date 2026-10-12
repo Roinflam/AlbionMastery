@@ -105,6 +105,10 @@ public class C2SRequestLeaderboardPacket {
             if (!periodsEnabled) {
                 period = LeaderboardPeriod.ALL;
             }
+            // 段位只在总榜有意义（增量榜里的等级之和是差值，换算成段位会误导），客户端不会这么请求，这里只是兜底
+            if (!sort.supports(period)) {
+                sort = LeaderboardSort.defaultFor(period);
+            }
             MasteryLeaderboard board = MasteryLeaderboard.get(server);
             long cooldownMs = MasteryConfig.COMMON.leaderboardRequestCooldownSeconds.get() * 1000L;
             if (!board.tryAcquireRequest(player.getUUID(), MasteryLeaderboard.REQUEST_LIST, cooldownMs)) {

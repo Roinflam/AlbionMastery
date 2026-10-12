@@ -7,6 +7,7 @@ import com.flameforge.albionmastery.leaderboard.MasteryLeaderboard;
 import com.flameforge.albionmastery.mastery.MasteryCapability;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.MasteryExperienceHook;
+import com.flameforge.albionmastery.mastery.rank.MasteryRankTracker;
 import com.flameforge.albionmastery.mastery.spec.SpecMoveSpeed;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.network.NetworkHandler;
@@ -183,6 +184,7 @@ public final class CommonEventHandler {
     @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
         WeaponCatalog.invalidate();
+        MasteryRankTracker.clear();
     }
 
     /**
@@ -231,6 +233,7 @@ public final class CommonEventHandler {
         if (event.getEntity() instanceof ServerPlayer player) {
             recordLeaderboard(player);
             MeleeSwingTracker.forget(player);
+            MasteryRankTracker.forget(player);
         }
     }
 
@@ -361,6 +364,7 @@ public final class CommonEventHandler {
         data.recomputeLevels(snapshot.weaponCurve(), snapshot.typeCurve(), snapshot.overallCurve());
         data.clearDirty();
         NetworkHandler.sendTo(player, S2CSyncMasteryPacket.of(data, snapshot));
+        MasteryRankTracker.evaluate(player, data);
         markLeaderboardChanged(player);
         // 等级、特化或配置变了，特化槽可能刚解锁 / 刚失效：挂在玩家属性上的移速、攻速、攻击距离跟着重算，
         // 不然要等换一次主手才生效
@@ -425,6 +429,10 @@ public final class CommonEventHandler {
 
         if (!weapons.isEmpty() || !types.isEmpty() || !overalls.isEmpty()) {
             NetworkHandler.sendTo(player, new S2CUpdateMasteryPacket(weapons, types, overalls));
+            // 段位只看武器等级，只有武器经验变了才需要重算
+            if (!weapons.isEmpty()) {
+                MasteryRankTracker.evaluate(player, data);
+            }
             markLeaderboardChanged(player);
         }
     }

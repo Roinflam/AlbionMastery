@@ -1,11 +1,16 @@
 package com.flameforge.albionmastery.client;
 
 import com.flameforge.albionmastery.AlbionMastery;
+import com.flameforge.albionmastery.client.rank.RankCeremony;
+import com.flameforge.albionmastery.client.rank.RankEmblem;
 import com.flameforge.albionmastery.client.screen.MasteryScreen;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
+import net.minecraftforge.client.event.RegisterGuiOverlaysEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.event.ScreenEvent;
@@ -84,6 +89,7 @@ public final class ClientEventHandler {
                 ReloadAnimSync.clear();
             }
             ClientMasteryCache.reset();
+            RankCeremony.clear();
         }
 
         /**
@@ -108,7 +114,7 @@ public final class ClientEventHandler {
         }
 
         /**
-         * 开着界面时，升级横幅画在界面之上。
+         * 开着界面时，升级横幅和段位晋升动画画在界面之上。
          *
          * @param event 界面绘制事件
          */
@@ -119,6 +125,13 @@ public final class ClientEventHandler {
             // 比罗盘的顶栏（600）和物品提示都高
             guiGraphics.pose().translate(0.0F, 0.0F, 800.0F);
             MasteryToastManager.render(guiGraphics);
+            guiGraphics.pose().popPose();
+
+            // 段位晋升动画后画，按先后压在横幅上面。横幅先走也能当帧让位：
+            // 排着队、这一帧就要开播的一场，RankCeremony.isActive 已经算作在播
+            guiGraphics.pose().pushPose();
+            guiGraphics.pose().translate(0.0F, 0.0F, 850.0F);
+            RankCeremony.render(guiGraphics);
             guiGraphics.pose().popPose();
         }
     }
@@ -141,6 +154,39 @@ public final class ClientEventHandler {
         @SubscribeEvent
         public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
             event.register(KeyBindings.OPEN_MASTERY);
+        }
+
+        /**
+         * 注册段位晋升动画的 HUD 层，放在所有 HUD 元素最上面。
+         *
+         * <p>没有像升级横幅那样挂在物品栏那一层的 Post 上：换了自定义物品栏的 HUD 模组会取消原版物品栏，
+         * 那一层的 Post 就不触发了，晋升动画不能跟着消失；放在最上层也不会被聊天栏、标题文字压住。
+         * 开着界面时这里不画，改由 {@link Forge#onScreenRender} 画在界面之上，两处互斥，一帧只画一次。
+         *
+         * @param event 注册事件
+         */
+        @SubscribeEvent
+        public static void onRegisterOverlays(RegisterGuiOverlaysEvent event) {
+            event.registerAboveAll("rank_ceremony", (gui, guiGraphics, partialTick, width, height) -> {
+                if (Minecraft.getInstance().screen != null) {
+                    return;
+                }
+                guiGraphics.pose().pushPose();
+                // 压在升级横幅（200）和物品栏图标之上
+                guiGraphics.pose().translate(0.0F, 0.0F, 300.0F);
+                RankCeremony.render(guiGraphics);
+                guiGraphics.pose().popPose();
+            });
+        }
+
+        /**
+         * 资源重载（换资源包、F3+T）后，段位徽章重新检查有没有资源包提供的贴图。
+         *
+         * @param event 注册事件
+         */
+        @SubscribeEvent
+        public static void onRegisterReloadListeners(RegisterClientReloadListenersEvent event) {
+            event.registerReloadListener((ResourceManagerReloadListener) manager -> RankEmblem.invalidateTextures());
         }
     }
 }

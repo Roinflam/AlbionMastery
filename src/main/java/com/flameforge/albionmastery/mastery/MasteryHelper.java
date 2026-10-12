@@ -151,6 +151,10 @@ public final class MasteryHelper {
         }
         boolean levelUp = data.addWeaponXp(weapon.weaponKey(), weapon.typeKey(), amount,
                 snapshot.weaponCurve());
+        if (levelUp && applyStudy) {
+            // 只有「玩」出来的升级才算：段位因此晋升时要通告全服，管理员直接给的不算
+            data.markGameplayWeaponLevelUp();
+        }
         if (credited == null || credited.add("t" + weapon.typeKey())) {
             levelUp |= data.addTypeXp(weapon.typeKey(), amount, snapshot.typeCurve());
         }

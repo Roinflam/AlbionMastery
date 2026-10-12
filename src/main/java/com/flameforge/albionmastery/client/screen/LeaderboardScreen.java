@@ -1,9 +1,12 @@
 package com.flameforge.albionmastery.client.screen;
 
 import com.flameforge.albionmastery.client.KeyBindings;
+import com.flameforge.albionmastery.client.rank.ClientRank;
+import com.flameforge.albionmastery.client.rank.RankEmblem;
 import com.flameforge.albionmastery.leaderboard.LeaderboardPeriod;
 import com.flameforge.albionmastery.leaderboard.LeaderboardRow;
 import com.flameforge.albionmastery.leaderboard.LeaderboardSort;
+import com.flameforge.albionmastery.mastery.rank.MasteryRank;
 import com.flameforge.albionmastery.network.C2SRequestLeaderboardPacket;
 import com.flameforge.albionmastery.network.C2SRequestPlayerMasteryPacket;
 import com.flameforge.albionmastery.network.NetworkHandler;
@@ -40,7 +43,10 @@ import java.util.UUID;
  * <p>搜索交给服务端做：在整张榜里按名字或 UUID 筛，名次照整张榜算，
  * 所以前一百名以外的人也能搜到，搜出来显示的还是他的真实名次。
  *
- * <p>数据全部来自服务端：这个界面自己不排、不算，只负责把收到的东西画出来。
+ * <p>总榜默认按段位排，每行右侧画段位徽章、段位名和到下一段的进度；日 / 周 / 月榜没有段位这个按钮。
+ *
+ * <p>数据全部来自服务端：这个界面自己不排，只负责把收到的东西画出来。
+ * 唯一现算的是段位：行里带着等级之和，按服务端下发的每级段位经验换算，和对方自己看到的一致。
  * 界面开着的时候才处理回包，关了之后晚到的包一律丢掉。
  */
 public class LeaderboardScreen extends Screen {
@@ -123,6 +129,15 @@ public class LeaderboardScreen extends Screen {
     /** 停手多久自动搜（毫秒）。服务端对要榜单有限流，边打边搜会被挡。 */
     private static final long SEARCH_DEBOUNCE_MS = 600L;
 
+    /** 段位视图里段位徽章的边长，和两行字的总高度差不多。 */
+    private static final float RANK_EMBLEM_SIZE = 16.0F;
+
+    /** 段位徽章到右侧段位名那一栏的间距。 */
+    private static final int RANK_EMBLEM_GAP = 5;
+
+    /** 段位名那一栏第二行的进度条至少多长，再短就看不出进度了，干脆不画。 */
+    private static final int RANK_BAR_MIN_WIDTH = 16;
+
     /** 上一层界面（通常是自己的专精界面），ESC 回到它。 */
     @Nullable
     private final Screen parent;
@@ -137,7 +152,7 @@ public class LeaderboardScreen extends Screen {
     private boolean periodsEnabled;
 
     /** 当前的排序方式。 */
-    private LeaderboardSort sort = LeaderboardSort.MAXED;
+    private LeaderboardSort sort = LeaderboardSort.defaultFor(LeaderboardPeriod.ALL);
 
     /** 服务端发来的前若干名。 */
     private List<LeaderboardRow> rows = List.of();
@@ -185,7 +200,15 @@ public class LeaderboardScreen extends Screen {
      * 行还是旧的那批，右侧大数字、徽章文字都得跟着行走，不能跟着按钮走。
      */
     private LeaderboardPeriod shownPeriod = LeaderboardPeriod.ALL;
-    private LeaderboardSort shownSort = LeaderboardSort.MAXED;
+    private LeaderboardSort shownSort = LeaderboardSort.defaultFor(LeaderboardPeriod.ALL);
+
+    /**
+     * 段位视图右侧段位名那一栏的宽度，-1 表示要重算。
+     *
+     * <p>按收到的这批行里最宽的段位名定，整列对齐：徽章排成一竖列，扫一眼就能比出谁高谁低。
+     * 换了一批行、窗口缩放时作废。
+     */
+    private int rankColumnWidth = -1;
 
     /** 界面状态。 */
     private State state = State.LOADING;
@@ -230,6 +253,7 @@ public class LeaderboardScreen extends Screen {
 
     @Override
     protected void init() {
+        this.rankColumnWidth = -1;
         // 窗口缩放会重新 init，框里的字和焦点都得接着用
         String previous = this.searchBox == null ? "" : this.searchBox.getValue();
         boolean wasFocused = this.searchBox != null && this.searchBox.isFocused();
@@ -374,6 +398,7 @@ public class LeaderboardScreen extends Screen {
                                List<LeaderboardRow> newRows, @Nullable int[] newRanks, int rank,
                                @Nullable LeaderboardRow self, int newTotal, String query, int newMatched) {
         this.waitingSinceMs = 0L;
+        this.rankColumnWidth = -1;
         switch (status) {
             case OK -> {
                 if (newSort != this.shownSort || newPeriod != this.shownPeriod || !query.equals(this.activeQuery)) {
@@ -544,24 +569,20 @@ public class LeaderboardScreen extends Screen {
     }
 
     /**
-     * @return 排序方式列表，按枚举顺序
-     */
-    /**
      * 排序按钮从左到右的顺序。
      *
-     * <p>日 / 周 / 月榜把「经验」提到最前，那是增量榜的主角。换的只是按钮的摆放，
-     * 枚举本身的顺序不能动——序号要进网络包。
+     * <p>每个时间范围的默认排序放最前：总榜是「段位」，日 / 周 / 月榜是「经验」，各自是那张榜的主角。
+     * 其余按枚举顺序；这个范围下没意义的（增量榜的段位）不出按钮。
+     * 换的只是按钮的摆放，枚举本身的顺序不能动——序号要进网络包。
      *
      * @return 这个时间范围下的排序方式，顺序即按钮顺序
      */
     private List<LeaderboardSort> visibleSorts() {
-        if (!this.period.isDelta()) {
-            return List.of(LeaderboardSort.values());
-        }
+        LeaderboardSort lead = LeaderboardSort.defaultFor(this.period);
         List<LeaderboardSort> ordered = new ArrayList<>();
-        ordered.add(LeaderboardSort.XP);
+        ordered.add(lead);
         for (LeaderboardSort value : LeaderboardSort.values()) {
-            if (value != LeaderboardSort.XP) {
+            if (value != lead && value.supports(this.period)) {
                 ordered.add(value);
             }
         }
@@ -605,8 +626,8 @@ public class LeaderboardScreen extends Screen {
     /**
      * 换时间范围的时候排序跟着换：一直用着默认排序的就换成新范围的默认，手动选过的就留着他选的。
      *
-     * <p>总榜默认看满级数，日 / 周 / 月榜默认看经验——点进日榜想知道的是「今天谁刷得最多」，
-     * 而不是「今天谁凑巧卡在升级线上」。
+     * <p>总榜默认看段位，日 / 周 / 月榜默认看经验——点进日榜想知道的是「今天谁刷得最多」，
+     * 而不是「今天谁凑巧卡在升级线上」。新范围下用不了的排序（段位到了增量榜）也换成新范围的默认。
      *
      * @param current 当前排序
      * @param from    原来的时间范围
@@ -615,7 +636,110 @@ public class LeaderboardScreen extends Screen {
      */
     private static LeaderboardSort carrySort(LeaderboardSort current, LeaderboardPeriod from,
                                              LeaderboardPeriod to) {
-        return current == LeaderboardSort.defaultFor(from) ? LeaderboardSort.defaultFor(to) : current;
+        LeaderboardSort next = current == LeaderboardSort.defaultFor(from)
+                ? LeaderboardSort.defaultFor(to) : current;
+        return next.supports(to) ? next : LeaderboardSort.defaultFor(to);
+    }
+
+    /**
+     * @return 当前显示的这批行要不要按段位画（段位排序且是总榜）
+     */
+    private boolean isRankView() {
+        return this.shownSort == LeaderboardSort.RANK && this.shownSort.supports(this.shownPeriod);
+    }
+
+    /**
+     * 一行的段位经验：等级之和按服务端下发的每级段位经验换算。
+     *
+     * @param row 一行数据
+     * @return 段位经验
+     */
+    private static long rankXpOf(LeaderboardRow row) {
+        return ClientRank.rankXpForLevelSum(row.levelSum());
+    }
+
+    /**
+     * 段位名下面那行小字：「段位 18」。传奇段位的名字里已经带着序号（「传奇 3」），
+     * 再写一遍「段位 33」反而让人困惑，只写「段位」两个字说明上面是什么。
+     *
+     * @param masteryRank 段位
+     * @return 文字
+     */
+    private static Component masteryRankLabel(int masteryRank) {
+        if (MasteryRank.isLegendary(masteryRank)) {
+            return Component.translatable(LeaderboardSort.RANK.nameKey());
+        }
+        return Component.translatable("gui.albionmastery.leaderboard.mastery_rank_number", masteryRank);
+    }
+
+    /**
+     * 段位名那一栏的宽度：取当前这批行里最宽的那个，窗口窄时封顶，放不下的段位名截短。
+     *
+     * @return 宽度（像素）
+     */
+    private int rankColumnWidth() {
+        if (this.rankColumnWidth < 0) {
+            int widest = 0;
+            for (LeaderboardRow row : this.rows) {
+                widest = Math.max(widest, rankCellWidth(row));
+            }
+            if (this.selfRow != null) {
+                widest = Math.max(widest, rankCellWidth(this.selfRow));
+            }
+            this.rankColumnWidth = widest;
+        }
+        // 封顶四分之一行宽，别把名字那一栏挤没了
+        return Math.min(this.rankColumnWidth, listWidth() / 4);
+    }
+
+    /**
+     * 一行的段位名那一栏至少要多宽：段位名，或者「进度条 + 段位 N」，取宽的。
+     *
+     * @param row 一行数据
+     * @return 宽度（像素）
+     */
+    private int rankCellWidth(LeaderboardRow row) {
+        int masteryRank = MasteryRank.rankFor(rankXpOf(row));
+        int nameWidth = this.font.width(MasteryRank.name(masteryRank));
+        int labelWidth = (int) Math.ceil(this.font.width(masteryRankLabel(masteryRank)) * SMALL_SCALE);
+        return Math.max(nameWidth, labelWidth + 3 + RANK_BAR_MIN_WIDTH);
+    }
+
+    /**
+     * 段位视图右侧整块（徽章 + 段位名一栏）占的宽度，不含行右侧的 6 像素留白。
+     * 徽章左边再多留几像素，名字后面的铭牌、状态不至于贴着徽章。
+     *
+     * @return 宽度（像素）
+     */
+    private int rankBlockWidth() {
+        return rankColumnWidth() + RANK_EMBLEM_GAP + (int) Math.ceil(RANK_EMBLEM_SIZE) + 6;
+    }
+
+    /**
+     * 段位视图第二行小字：「段位经验 812,400 · 距下一段 47,600」，到顶了只写段位经验。
+     *
+     * @param rankXp      段位经验
+     * @param masteryRank 段位
+     * @return 文字
+     */
+    private static Component rankStatsText(long rankXp, int masteryRank) {
+        if (masteryRank >= MasteryRank.MAX_RANK) {
+            return Component.translatable("gui.albionmastery.leaderboard.row_mastery_rank_max", grouped(rankXp));
+        }
+        long toNext = Math.max(0L, MasteryRank.xpForRank(masteryRank + 1) - rankXp);
+        return Component.translatable("gui.albionmastery.leaderboard.row_mastery_rank",
+                grouped(rankXp), grouped(toNext));
+    }
+
+    /**
+     * 千分位写法，段位经验动辄七位数，不分组数不清。和 {@link #oneDecimal} 一样用 {@link Locale#ROOT}，
+     * 分隔符固定是逗号。
+     *
+     * @param value 数值
+     * @return 文本
+     */
+    private static String grouped(long value) {
+        return String.format(Locale.ROOT, "%,d", value);
     }
 
     /**
@@ -623,6 +747,7 @@ public class LeaderboardScreen extends Screen {
      *
      * <p>满级数、等级总和这些都是两三位的整数，原样显示；经验动辄七八位，
      * 写全了既占掉名字的位置也看不出量级，缩成 12.3K / 4.5M。
+     * 段位视图右侧画的是徽章和段位名，不走这里（见 {@link #drawRankCell}）。
      *
      * @param row 一行数据
      * @return 大字文本
@@ -1013,19 +1138,28 @@ public class LeaderboardScreen extends Screen {
         int line1 = y + 7;
         int nameColor = self ? MasteryPalette.GOLD_BRIGHT
                 : (top3 ? MasteryPalette.GOLD_BRIGHT : (top10 ? MasteryPalette.GOLD : MasteryPalette.TEXT));
-        int headlineWidth = this.font.width(headlineText(row)) + 4;
+        // 右侧那一块占多宽：普通视图是一个大数字，段位视图是徽章加段位名一栏
+        boolean rankView = isRankView();
+        int headlineWidth = rankView ? rankBlockWidth() : this.font.width(headlineText(row)) + 4;
         int nameBudget = width - NAME_INSET - headlineWidth - 8;
         String name = trimToWidth(row.name(), Math.max(30, nameBudget / 2));
         guiGraphics.drawString(this.font, name, nameX, line1, nameColor, false);
         int cursor = nameX + this.font.width(name) + 5;
+        // 名字后面的铭牌、状态一律不能越过这条线，窄窗口下放不下的铭牌宁可不画也别压到右侧
+        int rightLimit = x + width - headlineWidth - 6;
 
         if (top10) {
-            cursor = drawPlaque(guiGraphics, rankBadgeText(rank), cursor, line1 - 1,
-                    top3 ? rankColor(rank) : MasteryPalette.GOLD, top3) + 4;
+            Component badge = rankBadgeText(rank);
+            if (cursor + plaqueWidth(badge) <= rightLimit) {
+                cursor = drawPlaque(guiGraphics, badge, cursor, line1 - 1,
+                        top3 ? rankColor(rank) : MasteryPalette.GOLD, top3) + 4;
+            }
         }
         if (self) {
-            cursor = drawPlaque(guiGraphics, Component.translatable("gui.albionmastery.leaderboard.you"),
-                    cursor, line1 - 1, MasteryPalette.GOLD, false) + 4;
+            Component you = Component.translatable("gui.albionmastery.leaderboard.you");
+            if (cursor + plaqueWidth(you) <= rightLimit) {
+                cursor = drawPlaque(guiGraphics, you, cursor, line1 - 1, MasteryPalette.GOLD, false) + 4;
+            }
         }
 
         // 在线 / 多久前 / 读取中
@@ -1042,8 +1176,20 @@ public class LeaderboardScreen extends Screen {
             statusColor = MasteryPalette.TEXT_DIM;
         }
         // 小字缩到 0.75 之后比名字矮，往上提 1 像素让它和名字、铭牌的视觉中线对齐
-        if (cursor + this.font.width(status) * SMALL_SCALE < x + width - headlineWidth - 6) {
+        if (cursor + this.font.width(status) * SMALL_SCALE < rightLimit) {
             drawScaled(guiGraphics, status, cursor, line1 + 1, SMALL_SCALE, statusColor);
+        }
+
+        if (rankView) {
+            long rankXp = rankXpOf(row);
+            int masteryRank = MasteryRank.rankFor(rankXp);
+            drawRankCell(guiGraphics, masteryRank, rankXp, x, y, width, line1);
+            // 第二行：段位经验和离下一段还差多少。右侧没有排序名那行小字，预算只让出徽章那一块
+            int rankStatsBudget = (int) ((width - NAME_INSET - headlineWidth - 10) / SMALL_SCALE);
+            drawScaled(guiGraphics,
+                    Component.literal(trimToWidth(rankStatsText(rankXp, masteryRank).getString(), rankStatsBudget)),
+                    nameX, line1 + 13, SMALL_SCALE, MasteryPalette.TEXT_DIM);
+            return;
         }
 
         // 右侧：这种排序方式看的那个数，大字；底下一行小字说明是什么
@@ -1068,6 +1214,51 @@ public class LeaderboardScreen extends Screen {
         int statsBudget = (int) ((width - NAME_INSET - headlineWidth - 40) / SMALL_SCALE);
         drawScaled(guiGraphics, Component.literal(trimToWidth(line2, statsBudget)),
                 nameX, line1 + 13, SMALL_SCALE, MasteryPalette.TEXT_DIM);
+    }
+
+    /**
+     * 段位视图一行的右侧：段位徽章 + 段位名一栏。
+     *
+     * <p>段位名一栏右对齐、宽度整列统一（{@link #rankColumnWidth}），徽章贴在这一栏左边、上下居中，
+     * 一列徽章排得齐齐的。栏里第一行是段位名，用段位本色；第二行左边一根细进度条（本段位内攒了多少），
+     * 右边小字「段位 N」。名次高低已经由左边的六边形管着，这里的颜色只跟段位走，不跟名次走。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param masteryRank 段位
+     * @param rankXp      段位经验
+     * @param x           行左边缘
+     * @param y           行顶边
+     * @param width       行宽
+     * @param line1       第一行字的 Y
+     */
+    private void drawRankCell(GuiGraphics guiGraphics, int masteryRank, long rankXp,
+                              int x, int y, int width, int line1) {
+        int column = rankColumnWidth();
+        int right = x + width - 6;
+        int columnLeft = right - column;
+        int color = RankEmblem.primaryColor(masteryRank);
+
+        RankEmblem.draw(guiGraphics, masteryRank, columnLeft - RANK_EMBLEM_GAP - RANK_EMBLEM_SIZE / 2.0F,
+                y + ROW_HEIGHT / 2.0F, RANK_EMBLEM_SIZE, 1.0F);
+
+        String name = trimToWidth(MasteryRank.name(masteryRank).getString(), column);
+        guiGraphics.drawString(this.font, name, right - this.font.width(name), line1, color, false);
+
+        Component label = masteryRankLabel(masteryRank);
+        int labelX = right - (int) Math.ceil(this.font.width(label) * SMALL_SCALE);
+        drawScaled(guiGraphics, label, labelX, line1 + 13, SMALL_SCALE, MasteryPalette.TEXT_DIM);
+
+        // 进度条和小字的视觉中线对齐，两像素高；窗口太窄、栏被封顶时放不下就不画
+        int barRight = labelX - 3;
+        if (barRight - columnLeft >= RANK_BAR_MIN_WIDTH) {
+            int barTop = line1 + 15;
+            guiGraphics.fill(columnLeft, barTop, barRight, barTop + 2,
+                    RenderUtil.withAlpha(MasteryPalette.EDGE, 0.55F));
+            int filled = Math.round((barRight - columnLeft) * MasteryRank.progress(rankXp));
+            if (filled > 0) {
+                guiGraphics.fill(columnLeft, barTop, columnLeft + filled, barTop + 2, color);
+            }
+        }
     }
 
     /**
@@ -1229,6 +1420,16 @@ public class LeaderboardScreen extends Screen {
         guiGraphics.fill(x, y + boxHeight - 1, x + boxWidth, y + boxHeight, RenderUtil.withAlpha(color, 0.6F));
         drawScaled(guiGraphics, text, x + 3, y + 2, SMALL_SCALE, color);
         return x + boxWidth;
+    }
+
+    /**
+     * 铭牌画出来有多宽，和 {@link #drawPlaque} 的算法一致，画之前先量一下放不放得下。
+     *
+     * @param text 文字
+     * @return 宽度（像素）
+     */
+    private int plaqueWidth(Component text) {
+        return (int) Math.ceil(this.font.width(text) * SMALL_SCALE) + 6;
     }
 
     /**

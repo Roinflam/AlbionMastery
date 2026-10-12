@@ -47,6 +47,19 @@ public class MasteryData {
     /** 学习点：这名玩家获得专精经验时的倍率，1.0 是默认值。 */
     private double studyMultiplier = 1.0D;
 
+    /**
+     * 已经给这名玩家播过晋升的段位。段位本身由武器等级现算，这里只记「播到哪了」，
+     * 免得每次登录、重生都把晋升动画再放一遍。-1 = 从没评定过（老存档、新玩家）。
+     */
+    private int rankSeen = -1;
+
+    /**
+     * 上次段位判定以来，有没有打怪练出来的武器升级（不存盘）。
+     * 段位判定靠它决定晋升要不要通告全服：经验最后由哪一次同步冲刷出去说明不了来源，
+     * 换维度、切特化都会先触发一次全量同步，把打怪攒下的改动一并带走。
+     */
+    private boolean gameplayWeaponLevelUp;
+
     private final Set<String> dirtyWeapons = new HashSet<>();
     private final Set<String> dirtyTypes = new HashSet<>();
     private final Set<String> dirtyOveralls = new HashSet<>();
@@ -143,6 +156,40 @@ public class MasteryData {
         double value = Double.isNaN(multiplier) ? 1.0D : multiplier;
         this.studyMultiplier = Math.max(0.0D, Math.min(100.0D, value));
         this.needFullSync = true;
+    }
+
+    /**
+     * @return 已经播过晋升的段位，-1 表示从没评定过
+     */
+    public int getRankSeen() {
+        return this.rankSeen;
+    }
+
+    /**
+     * 记下已经播过晋升的段位。
+     *
+     * @param rank 段位，负数按 -1 处理
+     */
+    public void setRankSeen(int rank) {
+        this.rankSeen = Math.max(-1, rank);
+    }
+
+    /**
+     * 记一笔：有武器靠打怪升了级。
+     */
+    public void markGameplayWeaponLevelUp() {
+        this.gameplayWeaponLevelUp = true;
+    }
+
+    /**
+     * 取出并清掉「有武器靠打怪升了级」的标记。
+     *
+     * @return 上次取出以来有没有
+     */
+    public boolean consumeGameplayWeaponLevelUp() {
+        boolean value = this.gameplayWeaponLevelUp;
+        this.gameplayWeaponLevelUp = false;
+        return value;
     }
 
     /**
@@ -479,6 +526,9 @@ public class MasteryData {
         this.typeLevelSum.clear();
         this.specializations.clear();
         this.studyMultiplier = 1.0D;
+        // 清空后段位归零；记成 0 而不是 -1，重新练上去时播的是「晋升」而不是「评定」
+        this.rankSeen = 0;
+        this.gameplayWeaponLevelUp = false;
         clearDirty();
         this.needFullSync = true;
     }
@@ -535,6 +585,10 @@ public class MasteryData {
         this.specializations.clear();
         this.specializations.putAll(other.specializations);
         this.studyMultiplier = other.studyMultiplier;
+        // 漏拷的话死一次就回到「从没评定过」，重生时会把段位评定动画再放一遍
+        this.rankSeen = other.rankSeen;
+        // 死亡那一刻刚打出来的升级还没判定过段位，跟着搬过去，重生后照样算打怪晋升
+        this.gameplayWeaponLevelUp = other.gameplayWeaponLevelUp;
         clearDirty();
         this.needFullSync = true;
     }
@@ -650,6 +704,9 @@ public class MasteryData {
         if (this.studyMultiplier != 1.0D) {
             root.putDouble("Study", this.studyMultiplier);
         }
+        if (this.rankSeen >= 0) {
+            root.putInt("RankSeen", this.rankSeen);
+        }
         return root;
     }
 
@@ -669,6 +726,8 @@ public class MasteryData {
         double study = root.contains("Study") ? root.getDouble("Study") : 1.0D;
         // NaN 过不了 min / max 的夹取，得单独挡：坏掉的存档里读出 NaN 会让每次只发 1 点经验
         this.studyMultiplier = Double.isNaN(study) ? 1.0D : Math.max(0.0D, Math.min(100.0D, study));
+        // 老存档没有这个键：按「从没评定过」处理，第一次登录时补一次段位评定
+        this.rankSeen = root.contains("RankSeen") ? Math.max(-1, root.getInt("RankSeen")) : -1;
 
         ListTag weaponList = root.getList("Weapons", Tag.TAG_COMPOUND);
         for (int i = 0; i < weaponList.size(); i++) {

@@ -1,5 +1,6 @@
 package com.flameforge.albionmastery.client;
 
+import com.flameforge.albionmastery.client.rank.RankCeremony;
 import com.flameforge.albionmastery.client.screen.MasteryPalette;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import net.minecraft.Util;
@@ -31,6 +32,10 @@ import java.util.UUID;
  * </ol>
  *
  * <p>同时最多显示 {@value #MAX_VISIBLE} 条，连升好几级也不会糊满半个屏幕。
+ *
+ * <p>段位晋升动画（{@link RankCeremony}）也在屏幕上方居中，播放期间横幅给它让位：
+ * 新的先不上屏；刚弹出来还没看清的撤回队列，动画放完再上（不重复响提示音）；
+ * 已经停留了一阵的直接进入退出段，上移淡出。
  */
 public final class MasteryToastManager {
 
@@ -111,7 +116,7 @@ public final class MasteryToastManager {
         // 学习点不是 1 的时候在横幅上挂个「×2」，让玩家知道涨得快慢是因为什么
         double study = ClientMasteryCache.data().getStudyMultiplier();
         Pending pending = new Pending(priority, sequence++, title, tier, oldLevel, newLevel,
-                List.copyOf(usable), down, study, null, null, "");
+                List.copyOf(usable), down, study, null, null, "", false);
 
         // 按优先级插到该在的位置，同优先级按到达先后；最后一条永远是最不重要的
         int insertAt = PENDING.size();
@@ -140,7 +145,7 @@ public final class MasteryToastManager {
      */
     public static void pushRank(Component title, Component detail, UUID face, String faceName, boolean self) {
         Pending pending = new Pending(-1, sequence++, title, Component.empty(), 0, 0, List.of(),
-                false, 1.0D, detail, face, faceName);
+                false, 1.0D, detail, face, faceName, false);
         PENDING.add(0, pending);
         while (PENDING.size() > MAX_PENDING) {
             PENDING.remove(PENDING.size() - 1);
@@ -162,10 +167,11 @@ public final class MasteryToastManager {
     private static void activatePending(long now) {
         while (ACTIVE.size() < MAX_VISIBLE && !PENDING.isEmpty()) {
             Pending pending = PENDING.remove(0);
-            ACTIVE.add(new Toast(pending.title(), pending.tier(), pending.oldLevel(), pending.newLevel(),
-                    pending.icons(), now, pending.down(), pending.study(), pending.detail(),
-                    pending.face(), pending.faceName()));
-            if (MasteryConfig.CLIENT.levelUpSound.get()) {
+            ACTIVE.add(new Toast(pending.priority(), pending.sequence(), pending.title(), pending.tier(),
+                    pending.oldLevel(), pending.newLevel(), pending.icons(), now, pending.down(), pending.study(),
+                    pending.detail(), pending.face(), pending.faceName()));
+            // 给晋升动画让过位、撤回来重新上屏的，第一次上屏时已经响过了
+            if (!pending.announced() && MasteryConfig.CLIENT.levelUpSound.get()) {
                 Minecraft minecraft = Minecraft.getInstance();
                 if (minecraft.player != null) {
                     // 音量压得很低，做成一声轻微的「叮」，不打断正在进行的战斗。
@@ -174,6 +180,48 @@ public final class MasteryToastManager {
                             0.3F, pending.down() ? 0.7F : 1.7F);
                 }
             }
+        }
+    }
+
+    /**
+     * 给段位晋升动画让位。
+     *
+     * <p>刚弹出来（还在弹入段）的撤回等待队列，按原来的先后插回去，动画放完再上；
+     * 已经停留了一阵的直接跳到退出段，上移淡出，把屏幕上方让出来。
+     *
+     * @param now 当前时刻
+     */
+    private static void yieldToCeremony(long now) {
+        for (int index = ACTIVE.size() - 1; index >= 0; index--) {
+            Toast toast = ACTIVE.get(index);
+            long elapsed = now - toast.bornAt();
+            if (elapsed < ENTER_MS) {
+                ACTIVE.remove(index);
+                insertPending(toast.requeue());
+            } else if (elapsed < ENTER_MS + HOLD_MS) {
+                ACTIVE.set(index, toast.exitingFrom(now));
+            }
+        }
+    }
+
+    /**
+     * 按「优先级、到达先后」插进等待队列，超出上限时丢掉最不重要的。
+     *
+     * @param pending 要插的提示
+     */
+    private static void insertPending(Pending pending) {
+        int insertAt = PENDING.size();
+        for (int index = 0; index < PENDING.size(); index++) {
+            Pending other = PENDING.get(index);
+            if (other.priority() > pending.priority()
+                    || (other.priority() == pending.priority() && other.sequence() > pending.sequence())) {
+                insertAt = index;
+                break;
+            }
+        }
+        PENDING.add(insertAt, pending);
+        while (PENDING.size() > MAX_PENDING) {
+            PENDING.remove(PENDING.size() - 1);
         }
     }
 
@@ -195,7 +243,11 @@ public final class MasteryToastManager {
         float total = ENTER_MS + HOLD_MS + EXIT_MS;
         // 先把播完的清掉，腾出位子再从队列里放新的
         ACTIVE.removeIf(toast -> now - toast.bornAt >= total);
-        activatePending(now);
+        if (RankCeremony.isActive()) {
+            yieldToCeremony(now);
+        } else {
+            activatePending(now);
+        }
         if (ACTIVE.isEmpty()) {
             return;
         }
@@ -367,18 +419,21 @@ public final class MasteryToastManager {
      * @param down     是否降级
      * @param study    学习倍率
      * @param detail   第二行的现成文案；为 null 时按层级和等级拼
-     * @param face     头像用谁的皮肤；为 null 时用物品图标
-     * @param faceName 头像主人的名字
+     * @param face      头像用谁的皮肤；为 null 时用物品图标
+     * @param faceName  头像主人的名字
+     * @param announced 是否已经上过屏、响过提示音（给晋升动画让位后撤回来的）
      */
     private record Pending(int priority, long sequence, Component title, Component tier,
                            int oldLevel, int newLevel, List<ItemStack> icons,
                            boolean down, double study, @Nullable Component detail,
-                           @Nullable UUID face, String faceName) {
+                           @Nullable UUID face, String faceName, boolean announced) {
     }
 
     /**
      * 一条提示。
      *
+     * @param priority 优先级，撤回队列时用
+     * @param sequence 到达序号，撤回队列时用
      * @param title    名称
      * @param tier     层级说明
      * @param oldLevel 旧等级
@@ -389,9 +444,29 @@ public final class MasteryToastManager {
      * @param face     头像用谁的皮肤；为 null 时用物品图标
      * @param faceName 头像主人的名字
      */
-    private record Toast(Component title, Component tier, int oldLevel, int newLevel,
+    private record Toast(int priority, long sequence, Component title, Component tier, int oldLevel, int newLevel,
                          List<ItemStack> icons, long bornAt, boolean down, double study,
                          @Nullable Component detail, @Nullable UUID face, String faceName) {
+
+        /**
+         * @return 原样放回等待队列用的条目，标记为已响过提示音
+         */
+        Pending requeue() {
+            return new Pending(this.priority, this.sequence, this.title, this.tier, this.oldLevel, this.newLevel,
+                    this.icons, this.down, this.study, this.detail, this.face, this.faceName, true);
+        }
+
+        /**
+         * 同一条提示，改成从现在开始退出。
+         *
+         * @param now 当前时刻
+         * @return 新的提示
+         */
+        Toast exitingFrom(long now) {
+            return new Toast(this.priority, this.sequence, this.title, this.tier, this.oldLevel, this.newLevel,
+                    this.icons, now - (long) (ENTER_MS + HOLD_MS), this.down, this.study, this.detail,
+                    this.face, this.faceName);
+        }
 
         /**
          * @return 是否要画学习点标记

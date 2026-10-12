@@ -179,7 +179,8 @@ public final class MasteryConfig {
                 List.copyOf(COMMON.notWeapons.get()),
                 COMMON.spellMasteryManaShare.get(),
                 COMMON.spellMasteryCooldownShare.get(),
-                COMMON.spellMasteryReductionCap.get()
+                COMMON.spellMasteryReductionCap.get(),
+                COMMON.rankXpPerWeaponLevel.get()
         );
         // 武器补录表两端各自按同一份配置刷新：服务端读自己的配置，客户端读同步过来的快照
         WeaponOverrides.applyFromConfig(serverSnapshot.extraWeapons, serverSnapshot.notWeapons);
@@ -375,6 +376,11 @@ public final class MasteryConfig {
         public final ForgeConfigSpec.IntValue leaderboardRequestCooldownSeconds;
         public final ForgeConfigSpec.BooleanValue leaderboardBroadcastTopChanges;
         public final ForgeConfigSpec.EnumValue<LeaderboardSort> leaderboardBroadcastSort;
+
+        /** 每件武器每升一级给多少段位经验。 */
+        public final ForgeConfigSpec.IntValue rankXpPerWeaponLevel;
+        /** 晋升段位时在聊天栏通告全服。 */
+        public final ForgeConfigSpec.BooleanValue rankUpBroadcast;
 
         Common(ForgeConfigSpec.Builder builder) {
             builder.comment("武器专精系统 - 玩法数值（以服务端配置为准，登录时会下发给客户端用于界面显示）")
@@ -1544,8 +1550,24 @@ public final class MasteryConfig {
                             "别人看到的是「xxx 替代 yyy 成为了…」），不走聊天。只看总榜，日榜周榜月榜的变动不通知")
                     .define("broadcastTopChanges", true);
             this.leaderboardBroadcastSort = builder
-                    .comment("广播按哪种排序算前三：MAXED 满级数，LEVEL_SUM 等级总和，UNLOCKED 已解锁数，XP 经验总和")
+                    .comment("广播按哪种排序算前三：MAXED 满级数，LEVEL_SUM 等级总和，UNLOCKED 已解锁数，XP 经验总和，",
+                            "RANK 段位（和 LEVEL_SUM 同序，段位经验就是等级总和乘每级段位经验）")
                     .defineEnum("broadcastSort", LeaderboardSort.MAXED);
+            builder.pop();
+
+            builder.comment("段位：账号级的总进度，规则照搬星际战甲的精通段位。",
+                            "段位经验只来自外圈（单件武器）：每件武器每升一级给固定的段位经验，类型和总体两圈不算。",
+                            "门槛与星际战甲一致：1~30 段累计 2500 × 段位²（30 段至崇宗师 = 2,250,000），",
+                            "之后每 147,500 升一个传奇段位。段位按武器等级现算：调低等级上限、或调高经验曲线（xpBase / xpExponent）时段位会跟着降；",
+                            "反过来段位会升，重载配置后可能一次触发多段晋升")
+                    .push("rank");
+            this.rankXpPerWeaponLevel = builder
+                    .comment("每件武器每升一级给多少段位经验。星际战甲是武器 100、战甲 200。",
+                            "按默认的等级上限 100，一件满级武器给 10,000，225 件满级武器到至崇宗师")
+                    .defineInRange("xpPerWeaponLevel", 100, 1, 100000);
+            this.rankUpBroadcast = builder
+                    .comment("晋升段位时在聊天栏通告全服（关掉后只有本人收到一行记录；屏幕上方的晋升动画不受影响）")
+                    .define("broadcastRankUp", true);
             builder.pop();
 
             builder.pop();
@@ -1633,6 +1655,8 @@ public final class MasteryConfig {
         public final ForgeConfigSpec.BooleanValue showLevelUpToast;
         public final ForgeConfigSpec.BooleanValue levelUpSound;
         public final ForgeConfigSpec.BooleanValue overrideDamageDisplay;
+        public final ForgeConfigSpec.BooleanValue rankUpAnimation;
+        public final ForgeConfigSpec.BooleanValue rankUpSound;
 
         Client(ForgeConfigSpec.Builder builder) {
             builder.comment("武器专精系统 - 客户端表现")
@@ -1675,6 +1699,14 @@ public final class MasteryConfig {
                             "关闭后提示里显示的是未计专精加成的原始伤害。")
                     .define("overrideDamageDisplay", true);
 
+            this.rankUpAnimation = builder
+                    .comment("晋升段位时在屏幕正上方播放晋升动画（关掉后只剩聊天栏那一行）")
+                    .define("rankUpAnimation", true);
+
+            this.rankUpSound = builder
+                    .comment("晋升动画是否带音效")
+                    .define("rankUpSound", true);
+
             builder.pop();
         }
     }
@@ -1698,6 +1730,8 @@ public final class MasteryConfig {
         public final double spellMasteryCooldownShare;
         /** 法术专精折扣的上限。 */
         public final double spellMasteryReductionCap;
+        /** 每件武器每升一级给多少段位经验。进快照是为了让客户端看别人罗盘、看排行榜时自己算段位。 */
+        public final int rankXpPerWeaponLevel;
         /** 服务端同步的范围保护总开关。 */
         public final boolean preventMasterySpellRangeScaling;
         /** 补录成武器的物品，格式「物品id=大类」。 */
@@ -1771,6 +1805,7 @@ public final class MasteryConfig {
          * @param spellMasteryManaShare     法术专精折算成法力折扣的比例
          * @param spellMasteryCooldownShare 法术专精折算成冷却折扣的比例
          * @param spellMasteryReductionCap  法术专精折扣的上限
+         * @param rankXpPerWeaponLevel      每件武器每升一级给多少段位经验
          */
         public Snapshot(int maxLevel, double overallDamagePerLevel, double typeDamagePerLevel,
                         double weaponDamagePerLevel, double weaponCrossDamagePerLevel,
@@ -1786,7 +1821,7 @@ public final class MasteryConfig {
                         boolean preventMasterySpellRangeScaling,
                         List<String> extraWeapons, List<String> notWeapons,
                         double spellMasteryManaShare, double spellMasteryCooldownShare,
-                        double spellMasteryReductionCap) {
+                        double spellMasteryReductionCap, int rankXpPerWeaponLevel) {
             this.extraWeapons = extraWeapons == null ? List.of() : List.copyOf(extraWeapons);
             this.notWeapons = notWeapons == null ? List.of() : List.copyOf(notWeapons);
             this.maxLevel = Math.max(1, maxLevel);
@@ -1809,6 +1844,7 @@ public final class MasteryConfig {
             this.spellMasteryManaShare = clamp(spellMasteryManaShare, 0.0D, 1.0D);
             this.spellMasteryCooldownShare = clamp(spellMasteryCooldownShare, 0.0D, 1.0D);
             this.spellMasteryReductionCap = clamp(spellMasteryReductionCap, 0.0D, 0.9D);
+            this.rankXpPerWeaponLevel = Math.max(1, Math.min(100000, rankXpPerWeaponLevel));
             this.xpBase = xpBase;
             this.xpExponent = xpExponent;
             this.typeXpMultiplier = Math.max(0.1D, typeXpMultiplier);
@@ -1922,7 +1958,7 @@ public final class MasteryConfig {
                     Map.of(),
                     80.0D, 1.0D, 3.0D, 10.0D, 1.5D, 2.0D, 2.0D,
                     true, true, 3600, 50, 100, Map.of(), true, List.of(), List.of(),
-                    0.3D, 0.3D, 0.5D);
+                    0.3D, 0.3D, 0.5D, 100);
         }
 
         /**
@@ -1968,6 +2004,7 @@ public final class MasteryConfig {
             buf.writeDouble(this.spellMasteryManaShare);
             buf.writeDouble(this.spellMasteryCooldownShare);
             buf.writeDouble(this.spellMasteryReductionCap);
+            buf.writeVarInt(this.rankXpPerWeaponLevel);
         }
 
         /**
@@ -2018,11 +2055,12 @@ public final class MasteryConfig {
             double manaShare = clamp(buf.readDouble(), 0.0D, 1.0D);
             double cooldownShare = clamp(buf.readDouble(), 0.0D, 1.0D);
             double reductionCap = clamp(buf.readDouble(), 0.0D, 0.9D);
+            int rankXpPerLevel = Math.max(1, Math.min(100000, buf.readVarInt()));
             return new Snapshot(maxLevel, overallDmg, typeDmg, wpnDmg, crossDmg,
                     maxBonus, sourceMultipliers,
                     xpBase, xpExp, typeMul, overallMul, netherMul, endMul, moddedMul,
                     splitMelee, enableSpec, specCooldown, slot1, slot2, specValues, preventRangeScaling,
-                    extraWeapons, notWeapons, manaShare, cooldownShare, reductionCap);
+                    extraWeapons, notWeapons, manaShare, cooldownShare, reductionCap, rankXpPerLevel);
         }
 
         /** 已经吼过「没有独立倍率配置」的来源，每个只吼一次。 */

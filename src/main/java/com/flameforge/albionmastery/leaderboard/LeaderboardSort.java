@@ -48,6 +48,22 @@ public enum LeaderboardSort {
         long primary(LeaderboardRow row) {
             return row.xpSum();
         }
+    },
+
+    /**
+     * 段位最高的排前面。总榜的默认排序。
+     *
+     * <p>段位经验 = 全部武器等级之和 × 每级段位经验，后者是全服统一的一个数，
+     * 所以按等级之和排就是按段位经验排：服务端排序不用读配置，行里也不用多带一个字段。
+     * 名次和 {@link #LEVEL_SUM} 完全一样，区别只在界面上画什么——这里画段位徽章和段位名。
+     *
+     * <p>只有总榜有。日 / 周 / 月榜的行是增量，拿「这段时间涨的等级」去换算段位没有意义，见 {@link #supports}。
+     */
+    RANK("gui.albionmastery.leaderboard.sort_rank") {
+        @Override
+        long primary(LeaderboardRow row) {
+            return row.levelSum();
+        }
     };
 
     /** 显示在排序按钮上的语言键。 */
@@ -104,7 +120,20 @@ public enum LeaderboardSort {
     }
 
     /**
-     * 按序号取排序方式，序号非法时回落到默认的满级数。
+     * 这种排序方式在某个时间范围下有没有意义。
+     *
+     * <p>段位是按累计值算的，日 / 周 / 月榜的行是增量，没有段位可言，所以段位只出现在总榜。
+     * 界面按它决定显示哪几个按钮。
+     *
+     * @param period 时间范围
+     * @return 能不能用
+     */
+    public boolean supports(LeaderboardPeriod period) {
+        return this != RANK || !period.isDelta();
+    }
+
+    /**
+     * 按序号取排序方式，序号非法时回落到满级数（任何时间范围下都能用）。
      *
      * @param ordinal 序号（网络包里传的）
      * @return 排序方式，永不为 null
@@ -121,9 +150,9 @@ public enum LeaderboardSort {
      * 某种时间范围下默认选中哪种排序。
      *
      * @param period 时间范围
-     * @return 总榜给满级数，日 / 周 / 月榜给经验
+     * @return 总榜给段位，日 / 周 / 月榜给经验
      */
     public static LeaderboardSort defaultFor(LeaderboardPeriod period) {
-        return period.isDelta() ? XP : MAXED;
+        return period.isDelta() ? XP : RANK;
     }
 }

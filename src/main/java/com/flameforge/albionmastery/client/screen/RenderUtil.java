@@ -1,5 +1,6 @@
 package com.flameforge.albionmastery.client.screen;
 
+import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -368,6 +369,260 @@ public final class RenderUtil {
         buffer.vertex(matrix, x1 + nx, y1 + ny, 0.0F).color(r, g, b, a).endVertex();
         buffer.vertex(matrix, x2 - nx, y2 - ny, 0.0F).color(r, g, b, a).endVertex();
         buffer.vertex(matrix, x2 + nx, y2 + ny, 0.0F).color(r, g, b, a).endVertex();
+    }
+
+    // ======================================================================
+    // 发光与渐变（段位晋升动画用）
+    // ======================================================================
+
+    /**
+     * 开始一批叠加混合的图元：颜色直接加到底色上，越叠越亮，只适合画光。
+     *
+     * <p>必须配 {@link #endAdditive()}，它会把混合函数恢复成默认。
+     *
+     * @return 用于写入顶点的缓冲
+     */
+    public static BufferBuilder beginAdditive() {
+        RenderSystem.enableBlend();
+        RenderSystem.blendFunc(GlStateManager.SourceFactor.SRC_ALPHA, GlStateManager.DestFactor.ONE);
+        RenderSystem.disableCull();
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        BufferBuilder buffer = Tesselator.getInstance().getBuilder();
+        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+        return buffer;
+    }
+
+    /**
+     * 结束叠加混合的一批图元，混合函数恢复默认。
+     */
+    public static void endAdditive() {
+        Tesselator.getInstance().end();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.enableCull();
+        RenderSystem.disableBlend();
+    }
+
+    /**
+     * 写一个带颜色的顶点。
+     *
+     * @param buffer 顶点缓冲
+     * @param matrix 变换矩阵
+     * @param x      X
+     * @param y      Y
+     * @param argb   颜色
+     */
+    public static void vertex(BufferBuilder buffer, Matrix4f matrix, float x, float y, int argb) {
+        buffer.vertex(matrix, x, y, 0.0F)
+                .color((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF, (argb >>> 24) & 0xFF)
+                .endVertex();
+    }
+
+    /**
+     * 四个顶点各自带颜色的四边形（按 0-1-2、0-2-3 拆成两个三角形）。
+     *
+     * @param buffer 顶点缓冲
+     * @param matrix 变换矩阵
+     */
+    public static void gradientQuad(BufferBuilder buffer, Matrix4f matrix,
+                                    float x0, float y0, int c0, float x1, float y1, int c1,
+                                    float x2, float y2, int c2, float x3, float y3, int c3) {
+        vertex(buffer, matrix, x0, y0, c0);
+        vertex(buffer, matrix, x1, y1, c1);
+        vertex(buffer, matrix, x2, y2, c2);
+        vertex(buffer, matrix, x0, y0, c0);
+        vertex(buffer, matrix, x2, y2, c2);
+        vertex(buffer, matrix, x3, y3, c3);
+    }
+
+    /**
+     * 径向渐变的圆：中心一种颜色，边缘另一种颜色。
+     *
+     * @param buffer      顶点缓冲
+     * @param matrix      变换矩阵
+     * @param cx          圆心 X
+     * @param cy          圆心 Y
+     * @param radius      半径
+     * @param centerArgb  中心颜色
+     * @param edgeArgb    边缘颜色
+     */
+    public static void radialGradient(BufferBuilder buffer, Matrix4f matrix, float cx, float cy, float radius,
+                                      int centerArgb, int edgeArgb) {
+        if (radius <= 0.0F) {
+            return;
+        }
+        int segments = Math.max(24, Math.min(96, (int) Math.ceil(radius * 0.6F)));
+        double step = Math.PI * 2.0D / segments;
+        for (int i = 0; i < segments; i++) {
+            double a0 = step * i;
+            double a1 = step * (i + 1);
+            vertex(buffer, matrix, cx, cy, centerArgb);
+            vertex(buffer, matrix, cx + (float) (Math.cos(a0) * radius), cy + (float) (Math.sin(a0) * radius), edgeArgb);
+            vertex(buffer, matrix, cx + (float) (Math.cos(a1) * radius), cy + (float) (Math.sin(a1) * radius), edgeArgb);
+        }
+    }
+
+    /**
+     * 内外沿颜色不同的圆环。
+     *
+     * @param buffer     顶点缓冲
+     * @param matrix     变换矩阵
+     * @param cx         圆心 X
+     * @param cy         圆心 Y
+     * @param inner      内半径
+     * @param outer      外半径
+     * @param innerArgb  内沿颜色
+     * @param outerArgb  外沿颜色
+     */
+    public static void ringGradient(BufferBuilder buffer, Matrix4f matrix, float cx, float cy,
+                                    float inner, float outer, int innerArgb, int outerArgb) {
+        if (outer <= inner || outer <= 0.0F) {
+            return;
+        }
+        int segments = segmentsFor(outer);
+        double step = Math.PI * 2.0D / segments;
+        float ri = Math.max(0.0F, inner);
+        for (int i = 0; i < segments; i++) {
+            float c0 = (float) Math.cos(step * i);
+            float s0 = (float) Math.sin(step * i);
+            float c1 = (float) Math.cos(step * (i + 1));
+            float s1 = (float) Math.sin(step * (i + 1));
+            gradientQuad(buffer, matrix,
+                    cx + c0 * ri, cy + s0 * ri, innerArgb,
+                    cx + c0 * outer, cy + s0 * outer, outerArgb,
+                    cx + c1 * outer, cy + s1 * outer, outerArgb,
+                    cx + c1 * ri, cy + s1 * ri, innerArgb);
+        }
+    }
+
+    /**
+     * 两边虚化的光环：半径处最亮，向内外各 {@code halfWidth} 渐隐到透明。冲击波用。
+     *
+     * @param buffer    顶点缓冲
+     * @param matrix    变换矩阵
+     * @param cx        圆心 X
+     * @param cy        圆心 Y
+     * @param radius    半径
+     * @param halfWidth 半宽
+     * @param argb      颜色
+     */
+    public static void softRing(BufferBuilder buffer, Matrix4f matrix, float cx, float cy,
+                                float radius, float halfWidth, int argb) {
+        int clear = argb & 0x00FFFFFF;
+        ringGradient(buffer, matrix, cx, cy, radius - halfWidth, radius, clear, argb);
+        ringGradient(buffer, matrix, cx, cy, radius, radius + halfWidth, argb, clear);
+    }
+
+    /**
+     * 两端颜色不同的线段，拖尾的火花用：尾端给透明色，头端给亮色。
+     *
+     * @param buffer 顶点缓冲
+     * @param matrix 变换矩阵
+     * @param x1     起点 X
+     * @param y1     起点 Y
+     * @param x2     终点 X
+     * @param y2     终点 Y
+     * @param width  线宽
+     * @param argb1  起点颜色
+     * @param argb2  终点颜色
+     */
+    public static void gradientLine(BufferBuilder buffer, Matrix4f matrix, float x1, float y1, float x2, float y2,
+                                    float width, int argb1, int argb2) {
+        float dx = x2 - x1;
+        float dy = y2 - y1;
+        float length = (float) Math.sqrt(dx * dx + dy * dy);
+        if (length < 1.0E-4F) {
+            return;
+        }
+        float nx = -dy / length * (width / 2.0F);
+        float ny = dx / length * (width / 2.0F);
+        gradientQuad(buffer, matrix,
+                x1 + nx, y1 + ny, argb1,
+                x1 - nx, y1 - ny, argb1,
+                x2 - nx, y2 - ny, argb2,
+                x2 + nx, y2 + ny, argb2);
+    }
+
+    /**
+     * 一道横向的光：中心最亮，向左右两个尖端和上下两边线性渐隐，整体是一枚压扁的菱形，
+     * 两头自然收尖，像镜头上拉出的一道光。
+     *
+     * @param buffer        顶点缓冲
+     * @param matrix        变换矩阵
+     * @param cx            中心 X
+     * @param cy            中心 Y
+     * @param halfLength    半长
+     * @param halfThickness 中心处的半厚
+     * @param argb          中心颜色
+     */
+    public static void lightStreak(BufferBuilder buffer, Matrix4f matrix, float cx, float cy,
+                                   float halfLength, float halfThickness, int argb) {
+        if (halfLength <= 0.0F || halfThickness <= 0.0F) {
+            return;
+        }
+        int clear = argb & 0x00FFFFFF;
+        float left = cx - halfLength;
+        float right = cx + halfLength;
+        float top = cy - halfThickness;
+        float bottom = cy + halfThickness;
+        vertex(buffer, matrix, cx, cy, argb);
+        vertex(buffer, matrix, left, cy, clear);
+        vertex(buffer, matrix, cx, top, clear);
+        vertex(buffer, matrix, cx, cy, argb);
+        vertex(buffer, matrix, cx, top, clear);
+        vertex(buffer, matrix, right, cy, clear);
+        vertex(buffer, matrix, cx, cy, argb);
+        vertex(buffer, matrix, right, cy, clear);
+        vertex(buffer, matrix, cx, bottom, clear);
+        vertex(buffer, matrix, cx, cy, argb);
+        vertex(buffer, matrix, cx, bottom, clear);
+        vertex(buffer, matrix, left, cy, clear);
+    }
+
+    /**
+     * 四边羽化的矩形：内部是给定颜色，四周向外渐隐到透明。给文字垫一块看不出边的暗底。
+     *
+     * @param buffer   顶点缓冲
+     * @param matrix   变换矩阵
+     * @param x0       内部左边
+     * @param y0       内部上边
+     * @param x1       内部右边
+     * @param y1       内部下边
+     * @param featherX 左右羽化宽度
+     * @param featherY 上下羽化宽度
+     * @param argb     颜色
+     */
+    public static void softRect(BufferBuilder buffer, Matrix4f matrix, float x0, float y0, float x1, float y1,
+                                float featherX, float featherY, int argb) {
+        int clear = argb & 0x00FFFFFF;
+        float ox0 = x0 - featherX;
+        float ox1 = x1 + featherX;
+        float oy0 = y0 - featherY;
+        float oy1 = y1 + featherY;
+        gradientQuad(buffer, matrix, x0, y0, argb, x1, y0, argb, x1, y1, argb, x0, y1, argb);
+        gradientQuad(buffer, matrix, x0, oy0, clear, x1, oy0, clear, x1, y0, argb, x0, y0, argb);
+        gradientQuad(buffer, matrix, x0, y1, argb, x1, y1, argb, x1, oy1, clear, x0, oy1, clear);
+        gradientQuad(buffer, matrix, ox0, y0, clear, x0, y0, argb, x0, y1, argb, ox0, y1, clear);
+        gradientQuad(buffer, matrix, x1, y0, argb, ox1, y0, clear, ox1, y1, clear, x1, y1, argb);
+        gradientQuad(buffer, matrix, x0, y0, argb, ox0, y0, clear, ox0, oy0, clear, x0, oy0, clear);
+        // 四个角：亮的那个顶点放在第一个，两个三角形都带上它，角上才是均匀的渐隐
+        gradientQuad(buffer, matrix, x1, y0, argb, x1, oy0, clear, ox1, oy0, clear, ox1, y0, clear);
+        gradientQuad(buffer, matrix, x0, y1, argb, x0, oy1, clear, ox0, oy1, clear, ox0, y1, clear);
+        gradientQuad(buffer, matrix, x1, y1, argb, ox1, y1, clear, ox1, oy1, clear, x1, oy1, clear);
+    }
+
+    /**
+     * 实心小菱形。
+     *
+     * @param buffer 顶点缓冲
+     * @param matrix 变换矩阵
+     * @param cx     中心 X
+     * @param cy     中心 Y
+     * @param radius 中心到尖角的距离
+     * @param argb   颜色
+     */
+    public static void diamond(BufferBuilder buffer, Matrix4f matrix, float cx, float cy, float radius, int argb) {
+        gradientQuad(buffer, matrix, cx, cy - radius, argb, cx + radius, cy, argb,
+                cx, cy + radius, argb, cx - radius, cy, argb);
     }
 
     // ======================================================================

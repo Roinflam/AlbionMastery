@@ -2,6 +2,8 @@ package com.flameforge.albionmastery.client.screen;
 
 import com.flameforge.albionmastery.client.ClientMasteryCache;
 import com.flameforge.albionmastery.client.KeyBindings;
+import com.flameforge.albionmastery.client.rank.ClientRank;
+import com.flameforge.albionmastery.client.rank.RankEmblem;
 import com.flameforge.albionmastery.client.weapon.ClientWeaponRegistry;
 import com.flameforge.albionmastery.client.weapon.WeaponEntry;
 import com.flameforge.albionmastery.client.weapon.WeaponSource;
@@ -10,6 +12,7 @@ import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.mastery.LevelCurve;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
+import com.flameforge.albionmastery.mastery.rank.MasteryRank;
 import com.flameforge.albionmastery.mastery.spec.SpecTerms;
 import com.flameforge.albionmastery.mastery.spec.Specialization;
 import com.flameforge.albionmastery.config.SpecializationValues;
@@ -292,6 +295,13 @@ public class MasteryScreen extends Screen {
     /** 左下角两个按钮之间的间距。 */
     private static final int BUTTON_GAP = 6;
 
+    /** 右上角段位徽章的尺寸。 */
+    private static final int RANK_BADGE_WIDTH = 140;
+    private static final int RANK_BADGE_HEIGHT = 40;
+
+    /** 段位徽章里那枚徽记的边长。 */
+    private static final int RANK_EMBLEM_SIZE = 32;
+
     /** 单个节点出现动画的时长（毫秒）。 */
     private static final float APPEAR_MS = 240.0F;
 
@@ -410,6 +420,10 @@ public class MasteryScreen extends Screen {
 
     /** 帧号，每次 render 加一，节点上的等级缓存靠它判断是不是本帧算的。 */
     private int frameStamp;
+
+    /** 段位经验的本帧缓存：徽章、命中测试、悬停卡片一帧里都要用，武器表只遍历一次。 */
+    private int rankStamp = -1;
+    private long rankXpCache;
 
     private double panX;
     private double panY;
@@ -593,7 +607,7 @@ public class MasteryScreen extends Screen {
         }
 
         // 有内容时在框底下提一句怎么用：不写的话没人知道回车能跳过去
-        if (this.searchBox != null && !this.searchBox.getValue().trim().isEmpty()) {
+        if (hasSearchHint()) {
             Component hint = this.searchHits.isEmpty()
                     ? Component.translatable("gui.albionmastery.search_empty")
                     : Component.translatable("gui.albionmastery.search_hint");
@@ -604,6 +618,15 @@ public class MasteryScreen extends Screen {
                     this.searchHits.isEmpty() ? MasteryPalette.WARN : MasteryPalette.TEXT_DIM, false);
             guiGraphics.pose().popPose();
         }
+    }
+
+    /**
+     * 搜索框底下那行用法提示要不要画：框里有内容时画。
+     *
+     * @return 要画返回 true
+     */
+    private boolean hasSearchHint() {
+        return this.searchBox != null && !this.searchBox.getValue().trim().isEmpty();
     }
 
     /**
@@ -978,6 +1001,229 @@ public class MasteryScreen extends Screen {
             // 把自己这个界面传过去当上一层，从排行榜按 ESC 能原样回来
             minecraft.setScreen(new LeaderboardScreen(this));
         }
+    }
+
+    // ======================================================================
+    // 段位徽章
+    // ======================================================================
+
+    /**
+     * 这份数据的段位经验，一帧只算一次。看别人时算的是别人的。
+     *
+     * @return 段位经验
+     */
+    private long rankXp() {
+        if (this.rankStamp != this.frameStamp) {
+            this.rankStamp = this.frameStamp;
+            this.rankXpCache = ClientRank.rankXpOf(this.data);
+        }
+        return this.rankXpCache;
+    }
+
+    /**
+     * @return 段位徽章的左边界，贴着屏幕右边
+     */
+    private int rankBadgeX() {
+        return this.width - RANK_BADGE_WIDTH - 8;
+    }
+
+    /**
+     * 段位徽章的上边界。
+     *
+     * <p>默认紧贴顶栏下面。顶栏下面那行操作提示（以及「正在等待同步」）在窄屏、英文下会伸到右边，
+     * 碰到徽章时整块挪到它们下面，和左侧详情面板的顶边对齐。
+     * 搜索框里有内容时，框底下右对齐的用法提示正好落在徽章顶上那一条，徽章挪到提示下面。
+     *
+     * @return 上边界
+     */
+    private int rankBadgeY() {
+        int x = rankBadgeX();
+        String hint = I18n.get(this.viewOnly ? "gui.albionmastery.hint_viewing" : "gui.albionmastery.hint");
+        int hintRight = 10 + (int) Math.ceil(this.font.width(hint) * 0.75F);
+        boolean blocked = hintRight + 6 > x;
+        if (!blocked && !this.viewOnly && !ClientMasteryCache.isSynced()) {
+            blocked = 10 + this.font.width(I18n.get("gui.albionmastery.not_synced")) + 6 > x;
+        }
+        if (blocked) {
+            return HEADER_HEIGHT + 26;
+        }
+        if (hasSearchHint()) {
+            // 提示从 HEADER_HEIGHT + 4 起，按 0.75 倍缩小画一行
+            return HEADER_HEIGHT + 4 + (int) Math.ceil(this.font.lineHeight * 0.75F) + 3;
+        }
+        return HEADER_HEIGHT + 4;
+    }
+
+    /**
+     * 窗口太窄、徽章会压到左侧详情面板时不画。
+     *
+     * @return 要画返回 true
+     */
+    private boolean hasRankBadge() {
+        return rankBadgeX() >= PANEL_WIDTH + 6;
+    }
+
+    /**
+     * 判断坐标是否落在段位徽章上。
+     *
+     * @param mouseX 鼠标 X
+     * @param mouseY 鼠标 Y
+     * @return 落在徽章上返回 true
+     */
+    private boolean isOnRankBadge(double mouseX, double mouseY) {
+        if (!hasRankBadge()) {
+            return false;
+        }
+        int x = rankBadgeX();
+        int y = rankBadgeY();
+        return mouseX >= x && mouseX <= x + RANK_BADGE_WIDTH && mouseY >= y && mouseY <= y + RANK_BADGE_HEIGHT;
+    }
+
+    /**
+     * 画右上角的段位徽章：徽记、段位名（金属色）、「段位 N」、到下一段的进度条。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param mouseX      鼠标 X
+     * @param mouseY      鼠标 Y
+     */
+    private void drawRankBadge(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        if (!hasRankBadge()) {
+            return;
+        }
+        int x = rankBadgeX();
+        int y = rankBadgeY();
+        int right = x + RANK_BADGE_WIDTH;
+        int bottom = y + RANK_BADGE_HEIGHT;
+        boolean hover = isOnRankBadge(mouseX, mouseY);
+        long xp = rankXp();
+        int rank = MasteryRank.rankFor(xp);
+        int primary = RankEmblem.primaryColor(rank);
+
+        // 和左下角按钮同款的描边底板，左边一道金属色竖条
+        guiGraphics.fill(x, y, right, bottom, hover ? 0xF01E1810 : 0xE0130F09);
+        int border = hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
+        guiGraphics.fill(x, y, right, y + 1, border);
+        guiGraphics.fill(x, bottom - 1, right, bottom, border);
+        guiGraphics.fill(right - 1, y, right, bottom, border);
+        guiGraphics.fill(x, y, x + 2, bottom, primary);
+
+        RankEmblem.draw(guiGraphics, rank, x + 6 + RANK_EMBLEM_SIZE / 2.0F, y + RANK_BADGE_HEIGHT / 2.0F,
+                RANK_EMBLEM_SIZE, 1.0F, RankEmblem.clockSeconds());
+
+        int textX = x + 12 + RANK_EMBLEM_SIZE;
+        int textRight = right - 6;
+        guiGraphics.drawString(this.font, trimToWidth(MasteryRank.name(rank).getString(), textRight - textX),
+                textX, y + 6, primary, false);
+
+        boolean max = rank >= MasteryRank.MAX_RANK;
+        float progress = max ? 1.0F : MasteryRank.progress(xp);
+        guiGraphics.drawString(this.font, I18n.get("gui.albionmastery.rank.badge.rank", rank),
+                textX, y + 17, MasteryPalette.TEXT_DIM, false);
+        String percent = max ? I18n.get("gui.albionmastery.rank.badge.max")
+                : (int) Math.floor(progress * 100.0F) + "%";
+        guiGraphics.drawString(this.font, percent, textRight - this.font.width(percent), y + 17,
+                MasteryPalette.TEXT_DIM, false);
+
+        int barTop = y + 29;
+        guiGraphics.fill(textX, barTop, textRight, barTop + BAR_HEIGHT, 0xFF17120A);
+        int fillRight = textX + Math.round((textRight - textX) * progress);
+        if (fillRight > textX) {
+            guiGraphics.fill(textX, barTop, fillRight, barTop + BAR_HEIGHT,
+                    max ? MasteryPalette.GOLD_BRIGHT : primary);
+        }
+    }
+
+    /**
+     * 段位徽章的悬停卡片：当前段位、段位经验、下一段位和门槛、还差多少、
+     * 每级给多少段位经验、计入了几件武器。样式和节点的悬停提示一致，挂在徽章正下方。
+     *
+     * @param guiGraphics 绘图上下文
+     */
+    private void drawRankTooltip(GuiGraphics guiGraphics) {
+        long xp = rankXp();
+        int rank = MasteryRank.rankFor(xp);
+        int primary = RankEmblem.primaryColor(rank);
+        // 件数和等级合计只在悬停时数：武器表可能上千条，没必要每帧都走
+        long levelSum = 0L;
+        int weapons = 0;
+        for (MasteryData.WeaponRecord record : this.data.getWeaponsView().values()) {
+            if (record.level > 0) {
+                weapons++;
+                levelSum += record.level;
+            }
+        }
+
+        String name = MasteryRank.name(rank).getString();
+        String rankLabel = I18n.get("gui.albionmastery.rank.badge.rank", rank);
+        List<String> lines = new ArrayList<>();
+        lines.add(I18n.get("gui.albionmastery.rank.tooltip.xp", groupDigits(xp)));
+        boolean max = rank >= MasteryRank.MAX_RANK;
+        if (max) {
+            lines.add(I18n.get("gui.albionmastery.rank.tooltip.max"));
+        } else {
+            long need = MasteryRank.xpForRank(rank + 1);
+            lines.add(I18n.get("gui.albionmastery.rank.tooltip.next",
+                    MasteryRank.name(rank + 1).getString(), groupDigits(need)));
+            lines.add(I18n.get("gui.albionmastery.rank.tooltip.remaining", groupDigits(need - xp)));
+        }
+        lines.add(I18n.get("gui.albionmastery.rank.tooltip.per_level", groupDigits(ClientRank.xpPerLevel())));
+        lines.add(I18n.get("gui.albionmastery.rank.tooltip.weapons", weapons, groupDigits(levelSum)));
+
+        int width = this.font.width(name) + 6 + this.font.width(rankLabel);
+        for (String line : lines) {
+            width = Math.max(width, this.font.width(line));
+        }
+        int textHeight = (lines.size() + 1) * LINE - (LINE - this.font.lineHeight);
+        int height = textHeight + TOOLTIP_PAD_Y * 2 + BAR_HEIGHT + 3;
+
+        // 右边和徽章对齐，往下挂；屏幕放不下就往上收
+        int x = Math.max(TOOLTIP_PAD_X + 2, rankBadgeX() + RANK_BADGE_WIDTH - TOOLTIP_PAD_X - width);
+        int y = rankBadgeY() + RANK_BADGE_HEIGHT + 4;
+        if (y + height > this.height) {
+            y = Math.max(2, this.height - height - 2);
+        }
+        int left = x - TOOLTIP_PAD_X;
+        int right = x + width + TOOLTIP_PAD_X;
+        int top = y;
+        int bottom = y + height;
+
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(0.0F, 0.0F, 600.0F);
+        guiGraphics.fill(left, top, right, bottom, MasteryPalette.PANEL);
+        guiGraphics.fill(left, top, right, top + 1, MasteryPalette.EDGE);
+        guiGraphics.fill(left, bottom - 1, right, bottom, MasteryPalette.EDGE);
+        guiGraphics.fill(left, top, left + 1, bottom, MasteryPalette.GOLD_DARK);
+        guiGraphics.fill(right - 1, top, right, bottom, MasteryPalette.GOLD_DARK);
+
+        int cursor = y + TOOLTIP_PAD_Y;
+        guiGraphics.drawString(this.font, name, x, cursor, primary, false);
+        guiGraphics.drawString(this.font, rankLabel, x + this.font.width(name) + 6, cursor,
+                MasteryPalette.TEXT_DIM, false);
+        cursor += LINE;
+        for (int i = 0; i < lines.size(); i++) {
+            // 第一行段位经验是主信息，亮一档
+            guiGraphics.drawString(this.font, lines.get(i), x, cursor,
+                    i == 0 ? MasteryPalette.TEXT : MasteryPalette.TEXT_DIM, false);
+            cursor += LINE;
+        }
+        float progress = max ? 1.0F : MasteryRank.progress(xp);
+        int barTop = bottom - TOOLTIP_PAD_Y - BAR_HEIGHT;
+        guiGraphics.fill(x, barTop, x + width, barTop + BAR_HEIGHT, 0xFF17120A);
+        int fillRight = x + Math.round(width * progress);
+        if (fillRight > x) {
+            guiGraphics.fill(x, barTop, fillRight, barTop + BAR_HEIGHT, max ? MasteryPalette.GOLD_BRIGHT : primary);
+        }
+        guiGraphics.pose().popPose();
+    }
+
+    /**
+     * 千位分隔的整数，段位经验动辄几十上百万，不分隔看不清。
+     *
+     * @param value 数值
+     * @return 文本
+     */
+    private static String groupDigits(long value) {
+        return String.format(Locale.ROOT, "%,d", value);
     }
 
     /**
@@ -1408,12 +1654,16 @@ public class MasteryScreen extends Screen {
         guiGraphics.pose().translate(0.0F, 0.0F, 600.0F);
         drawResetButton(guiGraphics, mouseX, mouseY);
         drawSecondButton(guiGraphics, mouseX, mouseY);
+        drawRankBadge(guiGraphics, mouseX, mouseY);
         guiGraphics.pose().popPose();
 
         super.render(guiGraphics, mouseX, mouseY, partialTick);
 
         if (this.hovered != null && this.hovered != this.selected) {
             drawHoverTooltip(guiGraphics, this.hovered, mouseX, mouseY);
+        }
+        if (isOnRankBadge(mouseX, mouseY)) {
+            drawRankTooltip(guiGraphics);
         }
     }
 
@@ -3439,6 +3689,10 @@ public class MasteryScreen extends Screen {
             clickSecondButton();
             return true;
         }
+        if (isOnRankBadge(mouseX, mouseY)) {
+            // 徽章只看不点，吞掉这一下，免得按在上面拖跑了地图
+            return true;
+        }
         if (this.searchBox != null && mouseY < HEADER_HEIGHT) {
             // 顶栏整条都不参与地图操作，免得点标题就把镜头拖跑了
             return this.searchBox.mouseClicked(mouseX, mouseY, button);
@@ -3648,9 +3902,10 @@ public class MasteryScreen extends Screen {
 
     @Nullable
     private MasteryNode pickNode(double mouseX, double mouseY) {
-        // 面板、顶栏、左下两个按钮底下的节点不算：不然鼠标停在按钮上，底下节点的悬停提示会盖住按钮
+        // 面板、顶栏、左下两个按钮、右上段位徽章底下的节点不算：不然鼠标停在按钮上，底下节点的悬停提示会盖住按钮
         if (isInPanel(mouseX, mouseY) || mouseY < HEADER_HEIGHT
-                || isOnButton(mouseX, mouseY) || isOnSecondButton(mouseX, mouseY)) {
+                || isOnButton(mouseX, mouseY) || isOnSecondButton(mouseX, mouseY)
+                || isOnRankBadge(mouseX, mouseY)) {
             return null;
         }
         for (int i = this.nodes.size() - 1; i >= 0; i--) {

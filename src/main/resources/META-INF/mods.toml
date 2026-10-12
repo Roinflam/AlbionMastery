@@ -61,6 +61,14 @@ ${mod_description}
     ordering="AFTER"
     side="BOTH"
 
+# FTB 任务也是可选依赖：装了就多一种「专精段位」任务（按段位 / 段位经验比较），没装不受影响
+[[dependencies.${mod_id}]]
+    modId="ftbquests"
+    mandatory=false
+    versionRange="[2001.4,)"
+    ordering="AFTER"
+    side="BOTH"
+
 # 本模组的 Mixin；可选模组没装时对应的 Mixin 由 AlbionMixinPlugin 跳过
 [[mixins]]
 config="${mod_id}.mixins.json"
