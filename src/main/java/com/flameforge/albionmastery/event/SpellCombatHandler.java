@@ -45,9 +45,10 @@ import io.redspace.ironsspellbooks.api.events.SpellPreCastEvent;
 /**
  * 铁魔法法术的伤害加成。
  *
- * <p>基础倍率（专精加成 × 特化强度）不在这里：它乘在「法术强度」上（{@code AbstractSpellPowerMixin}），
- * 伤害、治疗、控制时长、提示框显示一起吃到。这里的 {@code SpellDamageEvent} 只负责
+ * <p>本体法术的基础倍率（专精加成 × 特化强度）不在这里：它乘在「法术强度」上（{@code AbstractSpellPowerMixin}），
+ * 伤害、治疗、控制时长、提示框显示一起吃到。这里的受伤事件只负责
  * 必须知道目标才能算的那几层：条件倍率、暴击、连击。
+ * 附属法术的基础倍率不进强度（强度会放大它们的范围和召唤数量），在受伤事件里乘到伤害上，治疗和时长不加。
  *
  * <p>专精加成还会按配置比例折一份到冷却和法力上（{@code IronsSpellsSupport.masteryReductionFactor}），
  * 传送、净化这类没有数值的法术靠这个体现等级。
@@ -63,8 +64,8 @@ import io.redspace.ironsspellbooks.api.events.SpellPreCastEvent;
  * <ul>
  *     <li>法力消耗：{@code SpellOnCastEvent}，施放前改 mana cost；</li>
  *     <li>冷却时间：{@code SpellCooldownAddedEvent.Pre}，冷却挂上去之前改时长；</li>
- *     <li>法术等级：{@code ModifySpellLevelEvent}，铁魔法算法术等级时统一走它，
- *         施放和提示框显示的等级都会跟着变。</li>
+ *     <li>法术等级：{@code ModifySpellLevelEvent}，铁魔法算法术等级时统一走它。
+ *         等级会间接放大范围和实体数量，运行快照里这一项恒为 0，这里实际不再加等级。</li>
  * </ul>
  * 这几个事件在客户端也会触发（用于预测和显示），所以取数据走 {@code forWeapon}，两端各读各的。
  *
@@ -112,11 +113,15 @@ public final class SpellCombatHandler {
         MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
         SpecializationValues spec = SpecializationEffects.forData(data, weapon, snapshot);
 
-        // 专精加成和特化的强度倍率已经在 AbstractSpellPowerMixin 里乘进法术强度了，
-        // 这里只乘「看目标」才知道的那几层：条件倍率、暴击、连击。再乘一遍基础倍率就是双倍
+        // 本体法术的专精加成和特化强度倍率已经在 AbstractSpellPowerMixin 里乘进法术强度了，
+        // 这里只乘「看目标」才知道的那几层：条件倍率、暴击、连击。再乘一遍基础倍率就是双倍。
+        // 附属法术的倍率不进强度（强度会放大它们的范围和召唤数量），基础倍率在这里乘到伤害上
         double multiplier = SpecializationEffects.conditionalMultiplier(spec, player, target, null)
                 * SpecializationEffects.critMultiplier(spec, player.getRandom())
                 * ComboTracker.hit(player, target, spec);
+        if (!IronsSpellsSupport.scalesSpellPower(spellSource.spell())) {
+            multiplier *= IronsSpellsSupport.powerMultiplier(player, spellSource.spell());
+        }
         if (Math.abs(multiplier - 1.0D) > 1.0E-6D) {
             event.setAmount((float) (amount * multiplier));
         }

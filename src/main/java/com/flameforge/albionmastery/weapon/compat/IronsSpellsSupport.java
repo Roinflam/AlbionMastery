@@ -270,6 +270,28 @@ public final class IronsSpellsSupport {
     }
 
     /**
+     * 这个法术的专精倍率要不要乘进「法术强度」。
+     *
+     * <p>只有铁魔法本体的法术乘：本体每个用强度算半径、距离、生成数量的地方都核过，
+     * 由 {@code mixin.range} 下的 Mixin 改成不含专精加成的强度。附属法术（学徒法典、风之魔法书……）
+     * 拿强度算范围、召唤数量的地方没法一个个核，乘进去就会跟着专精一起放大成几倍，
+     * 所以它们的专精倍率不进强度，改在受伤事件里只乘伤害（{@code SpellCombatHandler.onSpellHurt}）。
+     *
+     * @param spell 法术，可能为 null
+     * @return 本体法术返回 true
+     */
+    public static boolean scalesSpellPower(@Nullable AbstractSpell spell) {
+        if (spell == null) {
+            return false;
+        }
+        ResourceLocation id = spell.getSpellResource();
+        return id != null && IRONS_NAMESPACE.equals(id.getNamespace());
+    }
+
+    /** 铁魔法本体法术的命名空间。 */
+    private static final String IRONS_NAMESPACE = "irons_spellbooks";
+
+    /**
      * 一个法术对应的武器。
      *
      * @param spell 法术

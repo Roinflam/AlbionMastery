@@ -43,6 +43,7 @@
     "range.CrystallineConduitSpellRangeMixin",
     "range.ErodingBoulderSpellRangeMixin",
     "range.SeismicSurfSpellRangeMixin",
+    "range.AcupunctureSpellRangeMixin",
     "GunBurstRateMixin",
     "GunScriptBurstMixin",
     "SpellManaCheckMixin",

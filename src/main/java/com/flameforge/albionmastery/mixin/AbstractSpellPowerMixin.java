@@ -12,7 +12,9 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * 把专精加成乘进铁魔法的「法术强度」，但在范围计算上下文中跳过。
+ * 把专精加成乘进铁魔法本体法术的「法术强度」，但在范围计算上下文中跳过。
+ *
+ * <p>只对本体法术生效（{@link IronsSpellsSupport#scalesSpellPower}）；附属法术的专精倍率在受伤事件里只乘伤害。
  *
  * <p>范围 Mixin 只在计算半径、距离等尺寸时进入保护上下文；本类检查该标记，
  * 防止伤害倍率被用于扩张实体搜索范围、方块遍历和粒子尺寸。伤害与治疗计算仍按原方式加成。
@@ -71,7 +73,12 @@ public abstract class AbstractSpellPowerMixin {
         if (SpellRangeProtection.isSuppressed() || !(caster instanceof Player player)) {
             return;
         }
-        double multiplier = IronsSpellsSupport.powerMultiplier(player, (AbstractSpell) (Object) this);
+        AbstractSpell spell = (AbstractSpell) (Object) this;
+        // 附属法术不乘：它们用强度算范围、召唤数量的地方没核过，倍率改在受伤事件里只乘伤害
+        if (!IronsSpellsSupport.scalesSpellPower(spell)) {
+            return;
+        }
+        double multiplier = IronsSpellsSupport.powerMultiplier(player, spell);
         if (multiplier != 1.0D) {
             callbackInfo.setReturnValue((float) (callbackInfo.getReturnValueF() * multiplier));
         }

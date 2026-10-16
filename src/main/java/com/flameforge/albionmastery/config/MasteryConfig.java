@@ -82,7 +82,7 @@ public final class MasteryConfig {
             Map.entry("durability", "武器耐久消耗倍率（0.5 = 只扣一半，1.5 = 多扣五成）"),
             Map.entry("manaCost", "法术法力消耗倍率（0.7 = 省三成）"),
             Map.entry("spellCooldown", "法术冷却时间倍率（0.7 = 快三成）"),
-            Map.entry("spellLevel", "法术等级加成，整数；开启 preventMasterySpellRangeScaling 时暂停此项，避免等级间接扩大范围"),
+            Map.entry("spellLevel", "法术等级加成，已停用（等级会间接放大法术范围和实体数量），填了也不生效"),
             Map.entry("gunVolume", "枪声音量倍率（0.3 = 只剩三成响，传播距离也跟着缩）"),
             Map.entry("bulletSpeed", "子弹初速倍率（1.2 = 快两成；上限 2.5，太快会穿墙漏判）"),
             Map.entry("recoil", "后座倍率（0.7 = 只剩七成后座）"),
@@ -174,7 +174,7 @@ public final class MasteryConfig {
                 COMMON.specSlot1Percent.get(),
                 COMMON.specSlot2Percent.get(),
                 collectSpecValues(),
-                COMMON.preventMasterySpellRangeScaling.get(),
+                true,
                 List.copyOf(COMMON.extraWeapons.get()),
                 List.copyOf(COMMON.notWeapons.get()),
                 COMMON.spellMasteryManaShare.get(),
@@ -184,8 +184,7 @@ public final class MasteryConfig {
         );
         // 武器补录表两端各自按同一份配置刷新：服务端读自己的配置，客户端读同步过来的快照
         WeaponOverrides.applyFromConfig(serverSnapshot.extraWeapons, serverSnapshot.notWeapons);
-        AlbionMastery.LOGGER.info("Mastery configuration refreshed: independent source multipliers, spell range protection={}",
-                serverSnapshot.preventMasterySpellRangeScaling);
+        AlbionMastery.LOGGER.info("Mastery configuration refreshed: independent source multipliers");
     }
 
     /**
@@ -231,9 +230,9 @@ public final class MasteryConfig {
             SpecEntry config = entry.getValue();
             // 这个特化没定义的维度取中性默认值，所以不用管每个特化各自关心哪几项
             values.put(entry.getKey().key(), SpecializationValues.of(
-                    // 等级会影响范围、方块数量等多种公式，不能作为通用加成继续叠加。
-                    // 只屏蔽运行快照中的该项，原配置不删除；关闭范围保护后可恢复。
-                    key -> COMMON.preventMasterySpellRangeScaling.get() && "spellLevel".equals(key)
+                    // 法术等级会进到范围、实体数量、方块数量等各种公式里，专精不再加等级：
+                    // 运行快照里这一项恒为 0，配置文件里的旧值留着不删，读进来也不生效
+                    key -> "spellLevel".equals(key)
                             ? 0.0D : config.get(key, SpecializationValues.defaultOf(key))));
         }
         return values;
@@ -338,8 +337,6 @@ public final class MasteryConfig {
         public final ForgeConfigSpec.ConfigValue<List<? extends String>> dimensionXpMultipliers;
         public final ForgeConfigSpec.DoubleValue offhandXpRatio;
         public final ForgeConfigSpec.DoubleValue multiWeaponXpRatio;
-        /** 是否禁止专精和特化强度扩大已适配法术范围，默认开启。 */
-        public final ForgeConfigSpec.BooleanValue preventMasterySpellRangeScaling;
         public final ForgeConfigSpec.DoubleValue spellMasteryCooldownShare;
         public final ForgeConfigSpec.DoubleValue spellMasteryManaShare;
         public final ForgeConfigSpec.DoubleValue spellMasteryReductionCap;
@@ -425,14 +422,6 @@ public final class MasteryConfig {
             }
             this.sourceMasteryMultipliers = Collections.unmodifiableMap(multipliers);
             builder.pop();
-
-            this.preventMasterySpellRangeScaling = builder
-                    .comment("禁止专精与特化强度放大铁魔法及 Geomancy Plus 已适配法术的范围、距离和挖掘尺寸。",
-                            "保留装备、本体配置提供的强度，以及专精的伤害、治疗、时长加成。",
-                            "开启时暂停特化 spellLevel 加成，防止法术等级间接扩大范围；客户端使用服务端同步值。",
-                            "false 可恢复旧范围行为；修改后建议重启服务端并让客户端重新连接。",
-                            "Prevent mastery from increasing supported spell ranges; disables specialization spell-level bonuses.")
-                    .define("preventMasterySpellRangeScaling", true);
 
             this.xpBase = builder
                     .comment("经验曲线基数：升到第 L 级所需经验 = round(xpBase * L ^ xpExponent)。",
@@ -1732,7 +1721,7 @@ public final class MasteryConfig {
         public final double spellMasteryReductionCap;
         /** 每件武器每升一级给多少段位经验。进快照是为了让客户端看别人罗盘、看排行榜时自己算段位。 */
         public final int rankXpPerWeaponLevel;
-        /** 服务端同步的范围保护总开关。 */
+        /** 法术范围保护，现在恒为 true；字段留着是为了不改同步包格式。 */
         public final boolean preventMasterySpellRangeScaling;
         /** 补录成武器的物品，格式「物品id=大类」。 */
         public final List<String> extraWeapons;
