@@ -115,14 +115,6 @@ public class MasteryScreen extends Screen {
      */
     private static final double ZOOM_NOTCHES = 12.0D;
 
-    /**
-     * 在原始全貌最小值的基础上，额外往里抬多少格滚轮。
-     *
-     * <p>全貌缩放下外圈武器节点太小、整张图显得空，最远只缩到「全貌再放大三格」：
-     * 圆盘大部分还在屏幕里，节点已经认得出。
-     */
-    private static final int MIN_ZOOM_EXTRA_NOTCHES = 3;
-
     /** 每格倍数的取值范围，太小滚不动，太大跳得晃眼。 */
     private static final double ZOOM_STEP_MIN = 1.15D;
     private static final double ZOOM_STEP_MAX = 2.0D;
@@ -752,35 +744,18 @@ public class MasteryScreen extends Screen {
     }
 
     /**
-     * 不额外抬高之前，整张图按当前窗口「刚好看完」时对应的原始最小缩放。
+     * 当前这张图允许缩到多小：整张圆盘按当前窗口刚好放下。
      *
-     * <p>这是纯几何意义上的全貌缩放：整张圆盘放进屏幕，再乘上
-     * {@value #MIN_ZOOM_WHOLE_FACTOR} 这点留白系数。真正给玩家用的最小缩放在
-     * {@link #minZoom()} 里还会再往里抬 {@value #MIN_ZOOM_EXTRA_NOTCHES} 格。
+     * <p>跟着窗口尺寸和 GUI 缩放走，窗口再小、武器再多，往外滚到底都能看到全貌。
+     * 以前在全貌基础上再往里抬三格，可每格倍数是按范围算的——图越大、窗口越小，
+     * 一格放大得越多，三格叠起来能到四五倍，缩到底连半张图都看不到。
      *
-     * @return 原始全貌缩放下限
-     */
-    private double baseMinZoom() {
-        double whole = Math.min(this.width, this.height) * 0.44D / Math.max(1.0D, this.outerRadius);
-        // 原始下限不能高过上限的一半，否则滚轮只剩一两格可滚。
-        return Mth.clamp(whole * MIN_ZOOM_WHOLE_FACTOR, MIN_ZOOM_FLOOR, maxZoom() * 0.5D);
-    }
-
-    /**
-     * 当前这张图允许缩到多小。
-     *
-     * <p>不直接用原始全貌缩放：先算出原始最小值，再按那个范围下的滚轮倍率往里推
-     * {@value #MIN_ZOOM_EXTRA_NOTCHES} 格，推到的位置才是往外滚的尽头。
-     *
-     * @return 给玩家实际使用的缩放下限
+     * @return 缩放下限
      */
     private double minZoom() {
-        double base = baseMinZoom();
-        double max = maxZoom();
-        double baseStep = Mth.clamp(Math.pow(max / Math.max(base, 1.0E-6D), 1.0D / ZOOM_NOTCHES),
-                ZOOM_STEP_MIN, ZOOM_STEP_MAX);
+        double whole = Math.min(this.width, this.height) * 0.44D / Math.max(1.0D, this.outerRadius);
         // 下限不能高过上限的一半，否则滚轮只剩一两格可滚。
-        return Mth.clamp(base * Math.pow(baseStep, MIN_ZOOM_EXTRA_NOTCHES), MIN_ZOOM_FLOOR, max * 0.5D);
+        return Mth.clamp(whole * MIN_ZOOM_WHOLE_FACTOR, MIN_ZOOM_FLOOR, maxZoom() * 0.5D);
     }
 
     /**
@@ -795,8 +770,6 @@ public class MasteryScreen extends Screen {
 
     /**
      * 滚轮每格的缩放倍数，按当前范围分成 {@value #ZOOM_NOTCHES} 格。
-     *
-     * <p>用的是抬高后的 {@link #minZoom()}，滚轮在抬高后的范围里重新均分格数。
      *
      * @return 倍数，大于 1
      */
