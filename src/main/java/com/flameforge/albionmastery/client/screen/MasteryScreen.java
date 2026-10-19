@@ -35,6 +35,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
+import net.minecraftforge.fml.ModList;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
@@ -893,7 +894,8 @@ public class MasteryScreen extends Screen {
      * @param hover       是否悬停
      */
     private void drawFramedButton(GuiGraphics guiGraphics, int x, int y, Component label, boolean hover) {
-        guiGraphics.fill(x, y, x + BUTTON_WIDTH, y + BUTTON_HEIGHT, hover ? 0xF01E1810 : 0xC0130F09);
+        // 不透明，理由同面板：底下飘过的连线会从半透明的底色里透出来
+        guiGraphics.fill(x, y, x + BUTTON_WIDTH, y + BUTTON_HEIGHT, hover ? 0xFF1E1810 : 0xFF130F09);
         int border = hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
         guiGraphics.fill(x, y, x + BUTTON_WIDTH, y + 1, border);
         guiGraphics.fill(x, y + BUTTON_HEIGHT - 1, x + BUTTON_WIDTH, y + BUTTON_HEIGHT, border);
@@ -1069,7 +1071,7 @@ public class MasteryScreen extends Screen {
         int primary = RankEmblem.primaryColor(rank);
 
         // 和左下角按钮同款的描边底板，左边一道金属色竖条
-        guiGraphics.fill(x, y, right, bottom, hover ? 0xF01E1810 : 0xE0130F09);
+        guiGraphics.fill(x, y, right, bottom, hover ? 0xFF1E1810 : 0xFF130F09);
         int border = hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
         guiGraphics.fill(x, y, right, y + 1, border);
         guiGraphics.fill(x, bottom - 1, right, bottom, border);
@@ -3305,6 +3307,26 @@ public class MasteryScreen extends Screen {
         return drawSpecializationBlock(guiGraphics, group.key(), x, cursor + 6, width);
     }
 
+    /**
+     * 「所属」那一行的标签。只有 TACZ 和近战附属是真的按枪包 / 刀包分的，
+     * 拔刀剑、法术、原版武器的命名空间就是出它的模组，叫「枪包」不对。
+     */
+    private static Component packLabel(WeaponEntry weapon) {
+        String specific = "gui.albionmastery.panel.row_pack." + WeaponKeys.providerOf(weapon.key());
+        return Component.translatable(I18n.exists(specific) ? specific : "gui.albionmastery.panel.row_pack");
+    }
+
+    /**
+     * 「所属」那一行的值：命名空间对得上已装模组的显示模组名，枪包这种不是模组的照旧显示命名空间。
+     */
+    private static Component packValue(WeaponEntry weapon) {
+        String namespace = weapon.packNamespace();
+        return Component.literal(ModList.get().getModContainerById(namespace)
+                .map(container -> container.getModInfo().getDisplayName())
+                .filter(name -> !name.isBlank())
+                .orElse(namespace));
+    }
+
     private int drawWeaponPanel(GuiGraphics guiGraphics, int x, int y, int width) {
         WeaponEntry weapon = this.selected == null ? null : this.selected.weapon;
         if (weapon == null) {
@@ -3321,8 +3343,7 @@ public class MasteryScreen extends Screen {
 
         int cursor = drawTitle(guiGraphics, weapon.displayName(),
                 ClientWeaponRegistry.typeName(weapon.typeKey()), x, y, width);
-        cursor = drawRow(guiGraphics, Component.translatable("gui.albionmastery.panel.row_pack"),
-                Component.literal(weapon.packNamespace()), x, cursor, width) + 6;
+        cursor = drawRow(guiGraphics, packLabel(weapon), packValue(weapon), x, cursor, width) + 6;
 
         cursor = drawLevelBlock(guiGraphics, x, cursor, width, level,
                 data.getWeaponXp(weapon.key()), snapshot.weaponCurve(), snapshot.maxLevel) + 10;

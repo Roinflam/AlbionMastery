@@ -196,9 +196,18 @@ public final class ClientWeaponRegistry {
      * 那时注册表还是空的。这里在第一次用到时补建一次。
      */
     public static void ensureBuilt() {
-        if (dirty || sources.isEmpty()) {
+        if (dirty || sources.isEmpty() || anyProviderStale()) {
             rebuild();
         }
+    }
+
+    private static boolean anyProviderStale() {
+        for (IWeaponProvider provider : PROVIDERS) {
+            if (provider.isAvailable() && provider.isStale()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

@@ -14,8 +14,11 @@ public final class MasteryPalette {
     /** 背景。 */
     public static final int BG = 0xF20B0906;
 
-    /** 面板底色。 */
-    public static final int PANEL = 0xF6130F09;
+    /**
+     * 面板底色。不透明：罗盘的连线和节点铭牌是亮金色，压在半透明面板底下会透出一道，
+     * 看着像线画到了面板上面。
+     */
+    public static final int PANEL = 0xFF130F09;
 
     /** 面板与分隔线的暗金。 */
     public static final int EDGE = 0xFF6B5223;

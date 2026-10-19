@@ -178,7 +178,7 @@ public final class WeaponKeys {
     public static final String TYPE_UNKNOWN = "unknown";
 
     /** 来源与武器 ID 的分隔符。 */
-    private static final char WEAPON_SEPARATOR = '/';
+    public static final char WEAPON_SEPARATOR = '/';
 
     /** 来源与类型的分隔符。 */
     private static final char TYPE_SEPARATOR = '#';

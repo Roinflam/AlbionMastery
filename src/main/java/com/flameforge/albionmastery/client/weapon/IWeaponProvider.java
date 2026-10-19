@@ -44,6 +44,18 @@ public interface IWeaponProvider {
     void collect(List<WeaponEntry> out);
 
     /**
+     * 上次收集的清单是不是已经漏了东西，需要重建。
+     *
+     * <p>大多数来源的清单只随数据包、标签重载变化，那些时机已经会标记重建，这里默认不用管。
+     * 拔刀剑的形态刀不在定义表里，玩家切出一个新形态时清单得跟着补上。
+     *
+     * @return 需要重建返回 true
+     */
+    default boolean isStale() {
+        return false;
+    }
+
+    /**
      * 取得某个武器类型的显示名称。
      *
      * @param type 类型标识
