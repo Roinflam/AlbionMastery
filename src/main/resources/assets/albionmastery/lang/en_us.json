@@ -755,6 +755,7 @@
   "ftbquests.task.albionmastery.mastery_rank.hover.xp_reaches": "%s rank XP reaches: %s",
   "ftbquests.task.albionmastery.mastery_rank.hover.self_rank": "Your rank: %s (%s)",
   "ftbquests.task.albionmastery.mastery_rank.hover.self_rank_xp": "Your rank XP: %s",
+  "ftbquests.task.albionmastery.mastery_rank.hover.click_open": "Click to open the mastery screen",
   "ftbquests.task.albionmastery.mastery_rank.hover.warn_not_multiple": "Rank XP is always a multiple of %s, so it never lands exactly on this target",
   "ftbquests.task.albionmastery.mastery_rank.hover.warn_eq": "Rank XP rises in batches and can skip straight past this value, so \"=\" may never complete; use ≥ instead"
 }

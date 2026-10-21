@@ -2,13 +2,16 @@ package com.flameforge.albionmastery.compat.ftbquests;
 
 import com.flameforge.albionmastery.AlbionMastery;
 import com.flameforge.albionmastery.api.MasteryRankApi;
+import com.flameforge.albionmastery.client.ClientMasteryCache;
 import com.flameforge.albionmastery.client.rank.ClientRank;
+import com.flameforge.albionmastery.client.screen.MasteryScreen;
 import com.flameforge.albionmastery.mastery.rank.MasteryRank;
 import com.flameforge.albionmastery.mastery.rank.MasteryRankTracker;
 import dev.architectury.hooks.level.entity.PlayerHooks;
 import dev.ftb.mods.ftblibrary.config.ConfigGroup;
 import dev.ftb.mods.ftblibrary.config.NameMap;
 import dev.ftb.mods.ftblibrary.icon.Icon;
+import dev.ftb.mods.ftblibrary.ui.Button;
 import dev.ftb.mods.ftblibrary.util.TooltipList;
 import dev.ftb.mods.ftbquests.client.ClientQuestFile;
 import dev.ftb.mods.ftbquests.quest.Quest;
@@ -16,6 +19,7 @@ import dev.ftb.mods.ftbquests.quest.TeamData;
 import dev.ftb.mods.ftbquests.quest.task.Task;
 import dev.ftb.mods.ftbquests.quest.task.TaskType;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
@@ -331,6 +335,21 @@ public final class MasteryRankTask extends Task {
                 MasteryRank.name(selfRank), Integer.toString(selfRank)).withStyle(ChatFormatting.YELLOW));
         list.add(Component.translatable(LANG + ".hover.self_rank_xp",
                 formatNumber(ClientRank.selfRankXp())).withStyle(ChatFormatting.YELLOW));
+        list.add(Component.translatable(LANG + ".hover.click_open").withStyle(ChatFormatting.DARK_GRAY));
+    }
+
+    /**
+     * 左键点任务按钮打开自己的专精界面，ESC 回到任务书。
+     *
+     * <p>这个任务靠定时检查自动提交，FTB 默认的点击（手动提交）对它什么都不做，按钮空着不如拿来跳转。
+     * 已完成、还没解锁的任务点了也照样打开，看段位不需要条件。编辑模式下 Shift + 左键仍是 FTB 的编辑，走不到这里。
+     */
+    @Override
+    @OnlyIn(Dist.CLIENT)
+    public void onButtonClicked(Button button, boolean canClick) {
+        button.playClickSound();
+        Minecraft minecraft = Minecraft.getInstance();
+        minecraft.setScreen(new MasteryScreen(ClientMasteryCache.data(), null, minecraft.screen));
     }
 
     /**

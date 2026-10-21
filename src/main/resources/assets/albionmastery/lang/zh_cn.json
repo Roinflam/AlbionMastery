@@ -755,6 +755,7 @@
   "ftbquests.task.albionmastery.mastery_rank.hover.xp_reaches": "%s 段位经验对应段位：%s",
   "ftbquests.task.albionmastery.mastery_rank.hover.self_rank": "你的段位：%s (%s)",
   "ftbquests.task.albionmastery.mastery_rank.hover.self_rank_xp": "你的段位经验：%s",
+  "ftbquests.task.albionmastery.mastery_rank.hover.click_open": "点击打开专精界面",
   "ftbquests.task.albionmastery.mastery_rank.hover.warn_not_multiple": "段位经验总是 %s 的整数倍，不会正好等于这个目标值",
   "ftbquests.task.albionmastery.mastery_rank.hover.warn_eq": "段位经验按批次跳涨，可能直接跨过这个值，「=」就永远完成不了，建议改用 ≥"
 }
