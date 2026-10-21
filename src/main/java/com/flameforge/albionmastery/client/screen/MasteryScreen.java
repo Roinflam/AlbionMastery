@@ -473,6 +473,10 @@ public class MasteryScreen extends Screen {
     /** 是否只读：看别人的罗盘时特化卡片只显示不响应。 */
     private final boolean viewOnly;
 
+    /** 看别人的罗盘时是他的名字，点段位牌进段位之路要带过去；看自己的是 null。 */
+    @Nullable
+    private final Component owner;
+
     /** 缩放锚点是否有效。 */
     private boolean hasZoomAnchor;
 
@@ -509,6 +513,7 @@ public class MasteryScreen extends Screen {
         this.data = data;
         this.parentScreen = parent;
         this.viewOnly = owner != null;
+        this.owner = owner;
     }
 
     @Override
@@ -1145,6 +1150,7 @@ public class MasteryScreen extends Screen {
         }
         lines.add(I18n.get("gui.albionmastery.rank.tooltip.per_level", groupDigits(ClientRank.xpPerLevel())));
         lines.add(I18n.get("gui.albionmastery.rank.tooltip.weapons", weapons, groupDigits(levelSum)));
+        lines.add(I18n.get("gui.albionmastery.rank.tooltip.click"));
 
         int width = this.font.width(name) + 6 + this.font.width(rankLabel);
         for (String line : lines) {
@@ -3686,7 +3692,9 @@ public class MasteryScreen extends Screen {
             return true;
         }
         if (isOnRankBadge(mouseX, mouseY)) {
-            // 徽章只看不点，吞掉这一下，免得按在上面拖跑了地图
+            Minecraft.getInstance().getSoundManager().play(
+                    SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
+            Minecraft.getInstance().setScreen(new RankTrackScreen(this.data, this.owner, this));
             return true;
         }
         if (this.searchBox != null && mouseY < HEADER_HEIGHT) {
