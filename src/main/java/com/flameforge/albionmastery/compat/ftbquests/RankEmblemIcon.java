@@ -55,4 +55,26 @@ final class RankEmblemIcon extends Icon {
         RankEmblem.draw(graphics, rank, 0.0F, 0.0F, Math.min(w, h) * scale, 1.0F);
         pose.popPose();
     }
+
+    /*
+     * FTB 的 Icon.hashCode() 取 getJson().hashCode()，而 getJson() 默认又是 new JsonPrimitive(toString())，
+     * Object.toString() 再回头调 hashCode()——子类三个都不重写就是无限递归。JEI 的任务配方插件建索引时
+     * 会拿任务图标做哈希，栈溢出直接打断 JEI 启动，整个物品栏都出不来（只在有段位任务的服务器上出现）。
+     * 三个都按段位号自己实现，不再绕回父类。
+     */
+
+    @Override
+    public String toString() {
+        return "albionmastery:rank_emblem/" + rank;
+    }
+
+    @Override
+    public int hashCode() {
+        return 31 * RankEmblemIcon.class.hashCode() + rank;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        return o == this || (o instanceof RankEmblemIcon other && other.rank == rank);
+    }
 }
