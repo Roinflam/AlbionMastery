@@ -165,13 +165,34 @@ public final class RankEmblem {
      */
     static void drawInternal(GuiGraphics guiGraphics, int rank, float cx, float cy, float size, float alpha,
                              float timeSeconds, float glossPhase, float flash) {
+        drawInternal(guiGraphics, rank, cx, cy, size, alpha, timeSeconds, glossPhase, flash, 1.0F);
+    }
+
+    /**
+     * 画一枚压暗的徽章，透明的地方照样透明：段位之路上还没走到的段位用。
+     *
+     * @param guiGraphics 绘图上下文
+     * @param rank        段位
+     * @param cx          中心 X
+     * @param cy          中心 Y
+     * @param size        整体边长
+     * @param alpha       透明度 0~1
+     * @param brightness  亮度 0~1，1 为原色
+     */
+    public static void drawDimmed(GuiGraphics guiGraphics, int rank, float cx, float cy, float size, float alpha,
+                                  float brightness) {
+        drawInternal(guiGraphics, rank, cx, cy, size, alpha, 0.0F, -1.0F, 0.0F, brightness);
+    }
+
+    private static void drawInternal(GuiGraphics guiGraphics, int rank, float cx, float cy, float size, float alpha,
+                                     float timeSeconds, float glossPhase, float flash, float brightness) {
         if (alpha <= 0.004F || size < 2.0F) {
             return;
         }
         guiGraphics.flush();
         ResourceLocation texture = textureFor(rank);
         if (texture != null) {
-            drawTexture(guiGraphics, texture, cx, cy, size, alpha, flash);
+            drawTexture(guiGraphics, texture, cx, cy, size, alpha, flash, brightness);
             // 传奇 7 以后造型都一样，靠序号小牌区分
             if (rank > LAST_SHAPE_RANK && size >= NUMERAL_MIN_SIZE) {
                 drawNumeral(guiGraphics, MasteryRank.legendaryIndex(rank), cx, cy, size, alpha);
@@ -249,7 +270,7 @@ public final class RankEmblem {
      * 闪白时用叠加混合再画一遍同一张图，金属被冲成近白的亮色，再慢慢冷却回本色。
      */
     private static void drawTexture(GuiGraphics guiGraphics, ResourceLocation texture,
-                                    float cx, float cy, float size, float alpha, float flash) {
+                                    float cx, float cy, float size, float alpha, float flash, float brightness) {
         PoseStack pose = guiGraphics.pose();
         Matrix4f matrix = pose.last().pose();
         float poseScale = (float) Math.sqrt(matrix.m00() * matrix.m00() + matrix.m01() * matrix.m01());
@@ -262,7 +283,8 @@ public final class RankEmblem {
         pose.scale(size / TEXTURE_PIXELS, size / TEXTURE_PIXELS, 1.0F);
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
-        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, EmblemPainter.clamp01(alpha));
+        float light = EmblemPainter.clamp01(brightness);
+        RenderSystem.setShaderColor(light, light, light, EmblemPainter.clamp01(alpha));
         guiGraphics.blit(texture, 0, 0, 0.0F, 0.0F, TEXTURE_PIXELS, TEXTURE_PIXELS, TEXTURE_PIXELS, TEXTURE_PIXELS);
         float glow = EmblemPainter.clamp01(flash) * EmblemPainter.clamp01(alpha);
         if (glow > 0.004F) {

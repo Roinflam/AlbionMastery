@@ -54,8 +54,9 @@ public class RankTrackScreen extends Screen {
     private static final float EMBLEM = 24.0F;
     private static final float EMBLEM_CURRENT = 34.0F;
     private static final float EMBLEM_END = 28.0F;
-    /** 没走到的段位徽章的透明度。 */
-    private static final float LOCKED_ALPHA = 0.32F;
+    /** 没走到的段位徽章：半透明再压暗。 */
+    private static final float LOCKED_ALPHA = 0.7F;
+    private static final float LOCKED_BRIGHTNESS = 0.4F;
 
     private static final int MINIMAP_HEIGHT = 7;
     private static final int FOOTER_HEIGHT = 12;
@@ -431,28 +432,29 @@ public class RankTrackScreen extends Screen {
 
         drawTierBands(guiGraphics, from, to, lineY, shownRank);
 
-        // ---- 连线：底下一条暗线走全程，上面按进度填亮 ----
+        // ---- 连线：每两个段位之间一段，在徽章处断开，徽章镂空的地方不透出线 ----
+        // 底下一段暗线，上面按进度填亮
         float startX = xOf(0.0F);
         float endX = xOf(this.endRank);
         float headX = xOf(shown);
-        guiGraphics.fill(Math.round(startX), lineY - 1, Math.round(endX), lineY + 1, MasteryPalette.LINE_LOCKED);
-        if (headX > startX) {
-            guiGraphics.fill(Math.round(startX), lineY - 1, Math.round(headX), lineY + 1, MasteryPalette.PROGRESS);
-            guiGraphics.fill(Math.round(startX), lineY - 1, Math.round(headX), lineY, MasteryPalette.GOLD);
+        for (int i = Math.max(0, from - 1); i < Math.min(to + 1, this.endRank); i++) {
+            int x0 = Math.round(xOf(i) + nodeSize(i, shown, hovered) / 2.0F + 2.0F);
+            int x1 = Math.round(xOf(i + 1) - nodeSize(i + 1, shown, hovered) / 2.0F - 2.0F);
+            if (x1 <= x0) {
+                continue;
+            }
+            guiGraphics.fill(x0, lineY - 1, x1, lineY + 1, MasteryPalette.LINE_LOCKED);
+            int lit = Math.min(x1, Math.round(headX));
+            if (lit > x0) {
+                guiGraphics.fill(x0, lineY - 1, lit, lineY + 1, MasteryPalette.PROGRESS);
+                guiGraphics.fill(x0, lineY - 1, lit, lineY, MasteryPalette.GOLD);
+            }
         }
 
         Matrix4f matrix = guiGraphics.pose().last().pose();
-        // 徽章底下垫一块深色圆，连线不从徽章的镂空处透出来
-        BufferBuilder buffer = RenderUtil.begin();
-        for (int i = from; i <= to; i++) {
-            RenderUtil.disc(buffer, matrix, xOf(i), lineY, nodeSize(i, shown, hovered) * 0.42F,
-                    MasteryPalette.NODE_BACKPLATE);
-        }
-        RenderUtil.end();
-
         // 光：进度头的亮点、当前段位的呼吸光圈、终点的金圈
         float pulse = 0.75F + 0.25F * Mth.sin(time * 2.6F);
-        buffer = RenderUtil.beginAdditive();
+        BufferBuilder buffer = RenderUtil.beginAdditive();
         boolean moving = shown < currentPosition() - 1.0E-3F || this.animating;
         if (headX > startX && (moving || shown < this.endRank)) {
             RenderUtil.radialGradient(buffer, matrix, headX, lineY, 9.0F,
@@ -474,16 +476,13 @@ public class RankTrackScreen extends Screen {
         for (int i = from; i <= to; i++) {
             boolean reached = i <= shownRank;
             float size = nodeSize(i, shown, hovered);
-            RankEmblem.draw(guiGraphics, i, xOf(i), lineY, size, reached ? 1.0F : LOCKED_ALPHA,
-                    i == this.rank && reached ? time : 0.0F);
+            if (reached) {
+                RankEmblem.draw(guiGraphics, i, xOf(i), lineY, size, 1.0F, i == this.rank ? time : 0.0F);
+            } else {
+                // 光调透明度压不下金属高光，没走到的连颜色一起压暗，和走过的拉开
+                RankEmblem.drawDimmed(guiGraphics, i, xOf(i), lineY, size, LOCKED_ALPHA, LOCKED_BRIGHTNESS);
+            }
         }
-        // 光调透明度压不下金属高光，没走到的再盖一层暗色，和走过的拉开
-        buffer = RenderUtil.begin();
-        for (int i = Math.max(from, shownRank + 1); i <= to; i++) {
-            RenderUtil.disc(buffer, matrix, xOf(i), lineY, nodeSize(i, shown, hovered) * 0.46F,
-                    RenderUtil.withAlpha(MasteryPalette.NODE_BACKPLATE, 0.5F));
-        }
-        RenderUtil.end();
 
         // ---- 文字：上面门槛，下面名字和编号 ----
         for (int i = from; i <= to; i++) {
