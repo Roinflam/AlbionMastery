@@ -13,7 +13,9 @@ import com.flameforge.albionmastery.weapon.WeaponCatalog;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
@@ -58,6 +60,10 @@ public class AlbionMastery {
 
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, MasteryConfig.COMMON_SPEC);
         ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, MasteryConfig.CLIENT_SPEC);
+
+        // 模组列表里的配置按钮（Cloth Config 界面）；界面类引用客户端类，专用服务端不加载
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> com.flameforge.albionmastery.client.screen.MasteryConfigScreen::register);
 
         modBus.addListener(this::onConfigLoading);
         modBus.addListener(this::onConfigReloading);

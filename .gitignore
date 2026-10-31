@@ -41,3 +41,5 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+# 第三方模组 jar 只在本机编译用，不随源码分发
+libs/

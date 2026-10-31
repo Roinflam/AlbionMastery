@@ -147,6 +147,9 @@ repositories {
     // 少了这一行，任何普通的第三方库（比如下面的 mixinextras-common）都拉不到。
     mavenCentral()
 
+    // Cloth Config：模组列表里的配置界面
+    maven { url = 'https://maven.shedaniel.me/' }
+
     // 第三方模组走上面整理出来的平铺仓库，不需要在这里逐个登记。
     flatDir {
         dir modDepsDir
@@ -163,6 +166,14 @@ dependencies {
     // 自行处理，不需要我们手工解包。
     modDepNotations.each { String notation ->
         add('implementation', fg.deobf(notation))
+    }
+
+    // Cloth Config：配置界面，以 jar-in-jar 原样内嵌，玩家不用另装。
+    // 整合包里已经有更高版本时 Forge 取高版本加载，不会重复
+    implementation fg.deobf("me.shedaniel.cloth:cloth-config-forge:${cloth_config_version}")
+    jarJar(group: 'me.shedaniel.cloth', name: 'cloth-config-forge', version: "[${cloth_config_version},12)") {
+        jarJar.pin(it, cloth_config_version)
+        transitive = false
     }
 
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
@@ -199,6 +210,21 @@ tasks.named('processResources', ProcessResources).configure {
     }
 }
 
+// 发布的 jar 是 jarJar 的产物（带内嵌的 Cloth Config），不带后缀；不含内嵌库的普通 jar 加 -slim
+jarJar.enable()
+tasks.named('jarJar') {
+    archiveClassifier = ''
+}
+reobf {
+    jarJar {}
+}
+tasks.named('jarJar') {
+    finalizedBy 'reobfJarJar'
+}
+tasks.named('build') {
+    dependsOn 'jarJar'
+}
+
 // Example for how to get properties into the manifest for reading at runtime.
 tasks.named('jar', Jar).configure {
     manifest {
@@ -210,6 +236,8 @@ tasks.named('jar', Jar).configure {
                     "Implementation-Vendor"   : mod_authors,
                     "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")])
     }
+
+    archiveClassifier = 'slim'
 
     // This is the preferred method to reobfuscate your jar file
     finalizedBy 'reobfJar'

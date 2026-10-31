@@ -1,11 +1,14 @@
 modLoader="javafml"
 loaderVersion="${loader_version_range}"
 license="${mod_license}"
+issueTrackerURL="https://github.com/Roinflam/AlbionMastery/issues"
 
 [[mods]]
 modId="${mod_id}"
 version="${mod_version}"
 displayName="${mod_name}"
+displayURL="https://github.com/Roinflam/AlbionMastery"
+credits="内嵌 shedaniel 的 Cloth Config API（GNU LGPLv3），未作修改，以独立 jar-in-jar 形式提供，只用于配置界面。专精玩法灵感来自《阿尔比恩 Online》的命运之板，段位规则与徽章造型参考《星际战甲》的精通段位；《Albion Online》是 Sandbox Interactive GmbH 的商标，《Warframe》是 Digital Extremes Ltd. 的商标，本模组为非官方同人作品，与它们无关联。 / Cloth Config API by shedaniel (GNU LGPLv3) is bundled unmodified as a separate jar-in-jar library, used only for the config screen. The mastery system is inspired by the Destiny Board of Albion Online, and the rank rules and emblem designs are based on Warframe's Mastery Rank. Albion Online is a trademark of Sandbox Interactive GmbH and Warframe is a trademark of Digital Extremes Ltd.; this is an unofficial fan-made mod and is not affiliated with or endorsed by them."
 authors="${mod_authors}"
 description='''
 ${mod_description}

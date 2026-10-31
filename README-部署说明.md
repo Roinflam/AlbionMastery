@@ -1,17 +1,9 @@
 # 阿尔比恩专精系统（AlbionMastery）— 部署说明
 
-## 0. 这个压缩包不是开箱即编译的
+## 0. 先放依赖 jar
 
-解压后是一个完整的源码工程，但**缺少 Gradle Wrapper**（`gradlew`、`gradlew.bat`、
-`gradle/wrapper/gradle-wrapper.jar`、`gradle/wrapper/gradle-wrapper.properties`）。
-wrapper 里的 jar 是二进制文件，没法随源码一起给。补齐方式任选其一：
-
-- **最省事**：从你现有的 worldlevel 工程根目录，把 `gradlew`、`gradlew.bat`、
-  `gradle/` 整个目录复制过来。两个工程用的是同一套 Forge 1.20.1 MDK，wrapper 完全通用。
-- 或者本机装了 Gradle：在项目根目录执行 `gradle wrapper --gradle-version 8.1.1`
-- 或者直接用 IntelliJ 打开，让 IDE 用自带的 Gradle 跑
-
-另外 `libs/` 目录是空的，必须先放 TACZ 的 jar（见下一节），否则编译不过。
+仓库里带了 Gradle Wrapper，但**不带任何第三方模组 jar**（它们的版权归各自作者，不能随源码再分发）。
+编译前要自己下好放进 `libs/`，需要哪些见 [README](README.md) 的「从源码构建」一节。
 
 ## 1. 放置依赖 jar
 
@@ -19,14 +11,15 @@ wrapper 里的 jar 是二进制文件，没法随源码一起给。补齐方式�
 
 ```
 libs/tacz-1.20.1-1.1.7-hotfix2-all.jar
-libs/TACZ_lrtactical-1.20.1-0.4.1.jar
+libs/lrtactical-1.20.1-0.4.1.jar
+……
 ```
 
 `build.gradle` 会自动扫描这个目录，把每个 jar 过一遍 `fg.deobf` 后当模组依赖引入。
-以后接拔刀剑之类的，同样只要把 jar 丢进来就行。
+`libs/` 在 `.gitignore` 里，放进去的 jar 不会被提交。
 
-TACZ 编译期必需。lrtactical 编译期也必需（近战代码要引用它的 API），
-但运行期是**可选依赖**，服务端不装照样跑，只是刀包部分不出现。
+这些模组只是**编译期**要用（代码里引用了它们的 API）；运行期全部是可选依赖，
+没装的来源不出现在专精树上。
 
 ### 依赖是怎么被引入的
 
@@ -86,17 +79,18 @@ TACZ 的 `-all.jar` 里内嵌了 mixinextras / luaj-core / luaj-jse / bcel / com
 
 ```
 /albionmastery setlevel 100
-/albionmastery setcatlevel 100
+/albionmastery settypelevel 100
 ```
 
 ## 3. 运行时依赖
 
 - Minecraft 1.20.1
 - Forge 47.4.16+
-- TACZ 1.1+（强制依赖）
-- lrtactical 0.4+（可选依赖，装了才有刀包）
+- 不需要任何前置：配置界面用的 Cloth Config 已经内嵌在 jar 里
+- 武器来源全部可选：TACZ、TACZ 近战附属（lrtactical）、拔刀剑、铁魔法、新生魔艺、匠魂、甜蜜魔法，
+  原版和其它模组的近战武器、弓弩不装任何模组也有
 
-服务端（Mohist 混合端同样适用）与客户端都要装：伤害结算在服务端，界面与提示在客户端。
+服务端与客户端都要装：伤害结算在服务端，界面与提示在客户端。
 
 ## 4. 枪包适配情况
 
