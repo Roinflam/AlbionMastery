@@ -205,6 +205,11 @@ tasks.named('processResources', ProcessResources).configure {
 
     inputs.properties replaceProperties
 
+    // 内嵌的 Cloth Config 是 LGPLv3，分发时要附上 LGPLv3 和它所补充的 GPLv3 全文
+    from('licenses') {
+        into 'META-INF/licenses'
+    }
+
     filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
         expand replaceProperties + [project: project]
     }

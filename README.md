@@ -84,7 +84,7 @@ More details for server owners and developers (config, commands, how each source
 - Licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). Full text: [LICENSE](LICENSE). Free to use, modify and include in modpacks; no commercial use; redistributed or modified versions must credit the original author (Roinflam), state what was changed, and use the same license.
 - The mastery system is inspired by the Destiny Board of *Albion Online*; the Mastery Rank rules, rank titles and emblem designs are based on the Mastery Rank of *Warframe*. Albion Online is a trademark of Sandbox Interactive GmbH and Warframe is a trademark of Digital Extremes Ltd. This is an unofficial fan-made mod and is not affiliated with or endorsed by them.
 - The names of the supported mods belong to their respective authors. This mod contains no code or assets from them; when they are installed it only calls their classes and applies mixins to them at runtime.
-- Bundles [Cloth Config API](https://github.com/shedaniel/cloth-config) by shedaniel (GNU LGPLv3), unmodified, as a separate jar-in-jar file (`META-INF/jarjar/`), only for the config screen. It keeps its own license and can be replaced with any other compatible build.
+- Bundles [Cloth Config API](https://github.com/shedaniel/cloth-config) by shedaniel (GNU LGPLv3), unmodified, as a separate jar-in-jar file (`META-INF/jarjar/`), only for the config screen. It keeps its own license and can be replaced with any other compatible build; the LGPLv3 and GPLv3 texts are in [`licenses/`](licenses) and in the jar under `META-INF/licenses/`.
 
 </details>
 
@@ -161,6 +161,6 @@ FTB 任务也是可选的：装了以后多一种「专精段位」任务。
 - 本模组采用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh-hans)（知识共享 署名-非商业性使用-相同方式共享 4.0 国际）协议，全文见 [LICENSE](LICENSE)：可以免费使用、修改、加入整合包；不得用于商业用途；转载或发布修改版需署名原作者 Roinflam、注明改动，并沿用同一协议。
 - 专精玩法的灵感来自《阿尔比恩 Online》（Albion Online）的命运之板；段位的规则、称号和徽章造型参考《星际战甲》（Warframe）的精通段位。Albion Online 是 Sandbox Interactive GmbH 的商标，Warframe 是 Digital Extremes Ltd. 的商标。本模组为非官方同人作品，与它们无关联，也未获其认可。
 - 文中提到的各个模组名称归其作者所有。本模组不含它们的任何代码或素材，只在它们装着时于运行期调用其类、对其应用 Mixin。
-- 内嵌 shedaniel 的 [Cloth Config API](https://github.com/shedaniel/cloth-config)（GNU LGPLv3），未作修改，以独立 jar-in-jar 文件的形式提供（位于 `META-INF/jarjar/`），只用于配置界面；它沿用自己的许可证，可自行替换为其它兼容版本。
+- 内嵌 shedaniel 的 [Cloth Config API](https://github.com/shedaniel/cloth-config)（GNU LGPLv3），未作修改，以独立 jar-in-jar 文件的形式提供（位于 `META-INF/jarjar/`），只用于配置界面；它沿用自己的许可证，可自行替换为其它兼容版本；LGPLv3 和 GPLv3 全文见 [`licenses/`](licenses)，jar 里在 `META-INF/licenses/`。
 
 </details>
