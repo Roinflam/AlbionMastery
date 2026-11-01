@@ -8,10 +8,36 @@ modId="${mod_id}"
 version="${mod_version}"
 displayName="${mod_name}"
 displayURL="https://github.com/Roinflam/AlbionMastery"
-credits="内嵌 shedaniel 的 Cloth Config API（GNU LGPLv3），未作修改，以独立 jar-in-jar 形式提供，只用于配置界面。专精玩法灵感来自《阿尔比恩 Online》的命运之板，段位规则与徽章造型参考《星际战甲》的精通段位；《Albion Online》是 Sandbox Interactive GmbH 的商标，《Warframe》是 Digital Extremes Ltd. 的商标，本模组为非官方同人作品，与它们无关联。 / Cloth Config API by shedaniel (GNU LGPLv3) is bundled unmodified as a separate jar-in-jar library, used only for the config screen. The mastery system is inspired by the Destiny Board of Albion Online, and the rank rules and emblem designs are based on Warframe's Mastery Rank. Albion Online is a trademark of Sandbox Interactive GmbH and Warframe is a trademark of Digital Extremes Ltd.; this is an unofficial fan-made mod and is not affiliated with or endorsed by them."
 authors="${mod_authors}"
+# 简介直接写在这里（不走 gradle.properties 的单行 mod_description）：模组列表按换行分段，
+# 一整行中英混排的长文会挤成一堵墙；每行控制在列表信息栏一行放得下的长度。
+# 灵感出处、内嵌库和商标声明都放在简介末尾，不用 credits（它排在作者前面，长了会占满首屏）
 description='''
-${mod_description}
+阿尔比恩式武器专精系统
+任何 1.20.1 Forge 整合包都能装。
+
+· 自动识别已装的枪包、刀包、拔刀剑、法术、弓弩
+· 来源 - 类型 - 单件武器三圈专精，越练伤害越高
+· 有得有失的特化、段位和排行榜
+· FTB 任务可设段位门槛
+· 游戏内配置界面，每一项都有说明
+
+A weapon mastery system for any 1.20.1 Forge modpack.
+· Reads gun packs, melee packs, SlashBlade, spells and bows
+· Source, type and weapon mastery: the more you use it, the harder it hits
+· Trade-off specializations, mastery ranks and leaderboards
+· FTB Quests tasks can require a mastery rank
+· In-game config screen with a description for every option
+
+灵感来自《阿尔比恩 Online》的命运之板，
+段位规则与徽章造型参考《星际战甲》的精通段位。
+内嵌 shedaniel 的 Cloth Config API（GNU LGPLv3），
+未作修改，以独立 jar-in-jar 形式提供，只用于配置界面。
+《Albion Online》是 Sandbox Interactive GmbH 的商标，
+《Warframe》是 Digital Extremes Ltd. 的商标；
+本模组为非官方同人作品，与它们无关联。
+
+The mastery system is inspired by the Destiny Board of Albion Online, and the rank rules and emblem designs are based on Warframe's Mastery Rank. Cloth Config API by shedaniel (GNU LGPLv3) is bundled unmodified as a separate jar-in-jar library, used only for the config screen. Albion Online is a trademark of Sandbox Interactive GmbH and Warframe is a trademark of Digital Extremes Ltd.; this is an unofficial fan-made mod and is not affiliated with or endorsed by them.
 '''
 
 [[dependencies.${mod_id}]]
