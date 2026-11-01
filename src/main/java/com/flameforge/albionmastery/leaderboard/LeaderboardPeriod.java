@@ -1,9 +1,11 @@
 package com.flameforge.albionmastery.leaderboard;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.temporal.WeekFields;
+import java.util.Locale;
 
 /**
  * 榜单的时间范围。
@@ -91,6 +93,46 @@ public enum LeaderboardPeriod {
             }
             case MONTH -> YearMonth.now(zone).toString();
         };
+    }
+
+    /**
+     * 期号对应的日期范围，给存档文件和指令输出看的：周号「2026-W44」光看认不出是哪几天。
+     *
+     * @param key 期号
+     * @return 日榜是那一天，周榜是「周一 ~ 周日」，月榜是「1 号 ~ 月末」；期号认不出时原样返回
+     */
+    public String describeKey(String key) {
+        try {
+            return switch (this) {
+                case ALL -> key;
+                case DAY -> key;
+                case WEEK -> {
+                    int split = key.indexOf("-W");
+                    int year = Integer.parseInt(key.substring(0, split));
+                    int week = Integer.parseInt(key.substring(split + 2));
+                    // 1 月 4 日一定落在当年的第 1 周（ISO 规则），从它推到目标周的周一
+                    LocalDate monday = LocalDate.of(year, 1, 4)
+                            .with(WeekFields.ISO.weekOfWeekBasedYear(), week)
+                            .with(DayOfWeek.MONDAY);
+                    yield monday + " ~ " + monday.plusDays(6);
+                }
+                case MONTH -> {
+                    YearMonth month = YearMonth.parse(key);
+                    yield month.atDay(1) + " ~ " + month.atEndOfMonth();
+                }
+            };
+        } catch (RuntimeException exception) {
+            return key;
+        }
+    }
+
+    /**
+     * 小写的英文名，用在文件名和指令参数里。
+     *
+     * @return day / week / month / all
+     */
+    public String id() {
+        return name().toLowerCase(Locale.ROOT);
     }
 
     /**

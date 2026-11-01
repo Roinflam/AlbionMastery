@@ -110,6 +110,7 @@ public final class MasteryCommand {
         // 批量满级、发武器、改特化、改配置这些管理指令放在另一个类里，挂到同一个根下面
         MasteryAdminCommand.attach(root);
         MasteryRankCommand.attach(root);
+        MasteryLeaderboardCommand.attach(root);
         dispatcher.register(root);
     }
 
@@ -145,6 +146,7 @@ public final class MasteryCommand {
         List<String[]> entries = new ArrayList<>(Arrays.asList(HELP_ENTRIES));
         entries.addAll(Arrays.asList(MasteryAdminCommand.HELP));
         entries.addAll(Arrays.asList(MasteryRankCommand.HELP));
+        entries.addAll(Arrays.asList(MasteryLeaderboardCommand.HELP));
         for (String[] entry : entries) {
             // 用法用可点击的建议：点一下直接填进聊天框，省得手敲长指令
             Component line = Component.literal(entry[0])

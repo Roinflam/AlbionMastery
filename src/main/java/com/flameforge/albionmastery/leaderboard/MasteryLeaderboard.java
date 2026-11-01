@@ -15,9 +15,18 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.level.saveddata.SavedData;
 
+import net.minecraft.world.level.storage.LevelResource;
+
 import javax.annotation.Nullable;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -62,6 +71,12 @@ public final class MasteryLeaderboard extends SavedData {
     /** 广播看前几名。 */
     private static final int BROADCAST_TOP = 3;
 
+    /** 换期时存下上一期的前几名。 */
+    private static final int HISTORY_TOP = 50;
+
+    /** 换期时往服务端日志里写前几名。 */
+    private static final int HISTORY_LOG_TOP = 10;
+
     /** 限流用的请求种类：要榜单。 */
     public static final String REQUEST_LIST = "list";
 
@@ -88,6 +103,15 @@ public final class MasteryLeaderboard extends SavedData {
      * 会连着弹一串「某某成为了第一」，其实谁也没进步。不存盘，每次看完前三就清空。
      */
     private final Set<UUID> firstSeen = new HashSet<>();
+
+    /**
+     * 日 / 周 / 月三种范围上一次看到的期号，存盘。期号一变就说明换期了，先把上一期的榜存下来再说。
+     * 没有这个键的（老存档、刚装上这个版本）第一次只记下当前期号、不存档：不知道上一期是哪期。
+     */
+    private final Map<LeaderboardPeriod, String> seenKeys = new EnumMap<>(LeaderboardPeriod.class);
+
+    /** 存下来的往期榜单，每种范围一张表，新的在前。存盘。 */
+    private final Map<LeaderboardPeriod, List<PastPeriod>> history = new EnumMap<>(LeaderboardPeriod.class);
 
     /**
      * 新建一份空榜单。
@@ -150,6 +174,8 @@ public final class MasteryLeaderboard extends SavedData {
         if (data == null) {
             return;
         }
+        // 必须赶在 rollBaselines 之前：这个人一记录，他的基线就滚到新的一期，上一期的起点就没了
+        checkRollover(player.getServer());
         UUID uuid = player.getUUID();
         this.pending.remove(uuid);
         if (!hasAnyProgress(data)) {
@@ -188,6 +214,8 @@ public final class MasteryLeaderboard extends SavedData {
      * @param server 服务端
      */
     public void flushChanged(MinecraftServer server) {
+        // 没人在线也要按时换期，存档的时刻才贴近期末；清理过期条目之前做，免得清掉上一期还榜上有名的人
+        checkRollover(server);
         pruneExpired(server);
         if (this.pending.isEmpty()) {
             return;
@@ -233,6 +261,139 @@ public final class MasteryLeaderboard extends SavedData {
             setDirty();
             AlbionMastery.LOGGER.info("排行榜清理了 {} 条超过 {} 天没更新的记录", removed, days);
         }
+    }
+
+    // ======================================================================
+    // 换期存档
+    // ======================================================================
+
+    /**
+     * 看日 / 周 / 月有没有换期，换了就把上一期的最终榜单存下来。
+     *
+     * <p>基线是每个人记录时各自滚动的：换期之后谁先上线，谁的基线就先被新一期覆盖，
+     * 上一期的起点跟着没了，事后再也排不出上一期的榜。所以要在第一个人滚动之前、
+     * 趁所有人的基线都还是上一期的，把整张榜排一遍存起来。此时每个人的「当前值」
+     * 都是他上一期最后一次记录的值（换期后还没记录过），排出来就是上一期的最终结果。
+     *
+     * @param server 服务端，写存档文件用；为 null 时只存进榜单数据、不写文件
+     */
+    private void checkRollover(@Nullable MinecraftServer server) {
+        for (LeaderboardPeriod period : LeaderboardPeriod.values()) {
+            if (!period.isDelta()) {
+                continue;
+            }
+            String current = period.currentKey();
+            String seen = this.seenKeys.get(period);
+            if (current.equals(seen)) {
+                continue;
+            }
+            this.seenKeys.put(period, current);
+            setDirty();
+            if (seen != null) {
+                closePeriod(server, period, seen);
+            }
+        }
+    }
+
+    /**
+     * 排出某一期的最终榜单，存进往期记录、写日志和存档文件。
+     *
+     * @param server 服务端，可为 null
+     * @param period 时间范围
+     * @param key    结束的那一期的期号
+     */
+    private void closePeriod(@Nullable MinecraftServer server, LeaderboardPeriod period, String key) {
+        List<LeaderboardRow> rows = new ArrayList<>();
+        for (Entry entry : this.entries.values()) {
+            LeaderboardRow row = entry.deltaRow(period, key);
+            if (row != null) {
+                rows.add(row);
+            }
+        }
+        LeaderboardSort sort = LeaderboardSort.defaultFor(period);
+        rows.sort(sort.comparator());
+        List<LeaderboardRow> top = List.copyOf(rows.subList(0, Math.min(HISTORY_TOP, rows.size())));
+        PastPeriod past = new PastPeriod(period, key, System.currentTimeMillis(), rows.size(), top);
+
+        List<PastPeriod> list = this.history.computeIfAbsent(period, ignored -> new ArrayList<>());
+        list.removeIf(old -> old.key().equals(key));
+        list.add(0, past);
+        while (list.size() > historyLimit(period)) {
+            list.remove(list.size() - 1);
+        }
+        setDirty();
+
+        StringBuilder log = new StringBuilder();
+        for (int i = 0; i < Math.min(HISTORY_LOG_TOP, top.size()); i++) {
+            LeaderboardRow row = top.get(i);
+            log.append(String.format(Locale.ROOT, "%n  %2d. %s +%,d", i + 1, row.name(), row.xpSum()));
+        }
+        AlbionMastery.LOGGER.info("排行榜 {} {}（{}）已结束，共 {} 人有进展，按本期经验排前 {}：{}", period.id(), key,
+                period.describeKey(key), rows.size(), Math.min(HISTORY_LOG_TOP, top.size()), log);
+        if (server != null) {
+            writeHistoryFile(server, past);
+        }
+    }
+
+    /**
+     * 每种范围留几期：日榜一个月，周榜半年，月榜两年。一期最多 {@value #HISTORY_TOP} 行，加起来也就几百 KB。
+     */
+    private static int historyLimit(LeaderboardPeriod period) {
+        return switch (period) {
+            case DAY -> 31;
+            case WEEK -> 26;
+            default -> 24;
+        };
+    }
+
+    /**
+     * 往期榜单所在的目录：存档根目录下的 {@code albionmastery/leaderboard-history}。
+     *
+     * @param server 服务端
+     * @return 目录路径（不保证已存在）
+     */
+    public static Path historyDirectory(MinecraftServer server) {
+        return server.getWorldPath(LevelResource.ROOT).resolve(AlbionMastery.MOD_ID).resolve("leaderboard-history")
+                .toAbsolutePath().normalize();
+    }
+
+    /**
+     * 把一期的最终榜单写成文本文件，服主按期发奖时直接打开看，不用进游戏。
+     * 写不出来只记日志：榜单数据里已经存了一份，指令照样查得到。
+     */
+    private static void writeHistoryFile(MinecraftServer server, PastPeriod past) {
+        Path file = historyDirectory(server).resolve(past.period().id() + "-" + past.key() + ".txt");
+        StringBuilder text = new StringBuilder();
+        text.append(past.key()).append("（").append(past.period().describeKey(past.key())).append("）\n");
+        text.append("存档时间：").append(Instant.ofEpochMilli(past.closedAt()).atZone(ZoneId.systemDefault())
+                .toLocalDateTime().withNano(0).toString().replace('T', ' ')).append('\n');
+        text.append("本期有进展的共 ").append(past.participants()).append(" 人，按本期涨的经验排，存前 ")
+                .append(past.rows().size()).append(" 名\n\n");
+        text.append("名次\t玩家\t本期经验\t本期升级\t本期满级\t本期新解锁\tUUID\n");
+        for (int i = 0; i < past.rows().size(); i++) {
+            LeaderboardRow row = past.rows().get(i);
+            text.append(i + 1).append('\t').append(row.name()).append('\t')
+                    .append(String.format(Locale.ROOT, "%,d", row.xpSum())).append('\t')
+                    .append(row.levelSum()).append('\t').append(row.maxed()).append('\t')
+                    .append(row.unlocked()).append('\t').append(row.uuid()).append('\n');
+        }
+        try {
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, text.toString(), StandardCharsets.UTF_8);
+        } catch (IOException | RuntimeException exception) {
+            AlbionMastery.LOGGER.warn("往期排行榜写不出文件 {}", file, exception);
+        }
+    }
+
+    /**
+     * 某种范围存下来的往期榜单。
+     *
+     * @param period 时间范围
+     * @return 新的在前；没有就是空表
+     */
+    public List<PastPeriod> history(LeaderboardPeriod period) {
+        List<PastPeriod> list = this.history.get(period);
+        return list == null ? List.of() : Collections.unmodifiableList(list);
     }
 
     /**
@@ -644,6 +805,25 @@ public final class MasteryLeaderboard extends SavedData {
         if (skipped > 0) {
             AlbionMastery.LOGGER.warn("排行榜读档时跳过了 {} 条空的或坏掉的记录", skipped);
         }
+        CompoundTag seen = root.getCompound("Seen");
+        CompoundTag history = root.getCompound("History");
+        for (LeaderboardPeriod period : LeaderboardPeriod.values()) {
+            String key = period.nbtKey();
+            if (key == null) {
+                continue;
+            }
+            if (seen.contains(key, Tag.TAG_STRING)) {
+                board.seenKeys.put(period, seen.getString(key));
+            }
+            ListTag pastList = history.getList(key, Tag.TAG_COMPOUND);
+            if (!pastList.isEmpty()) {
+                List<PastPeriod> periods = new ArrayList<>(pastList.size());
+                for (int i = 0; i < pastList.size(); i++) {
+                    periods.add(PastPeriod.read(period, pastList.getCompound(i)));
+                }
+                board.history.put(period, periods);
+            }
+        }
         // 读档时记下当前前三，重启后第一次写入不会把「已经是第一」误当成「刚成为第一」广播出去
         board.rememberTop(board.topRows(MasteryConfig.COMMON.leaderboardBroadcastSort.get(), BROADCAST_TOP));
         AlbionMastery.LOGGER.info("排行榜已读入 {} 名玩家", board.entries.size());
@@ -664,7 +844,72 @@ public final class MasteryLeaderboard extends SavedData {
             list.add(tag);
         }
         root.put("Players", list);
+        CompoundTag seen = new CompoundTag();
+        for (Map.Entry<LeaderboardPeriod, String> mapEntry : this.seenKeys.entrySet()) {
+            seen.putString(mapEntry.getKey().nbtKey(), mapEntry.getValue());
+        }
+        root.put("Seen", seen);
+        CompoundTag history = new CompoundTag();
+        for (Map.Entry<LeaderboardPeriod, List<PastPeriod>> mapEntry : this.history.entrySet()) {
+            ListTag pastList = new ListTag();
+            for (PastPeriod past : mapEntry.getValue()) {
+                pastList.add(past.write());
+            }
+            history.put(mapEntry.getKey().nbtKey(), pastList);
+        }
+        root.put("History", history);
         return root;
+    }
+
+    /**
+     * 存下来的一期榜单。
+     *
+     * <p>行里只有四个增量（经验、升级、满级、新解锁）和名字、UUID 是有意义的，其余字段都是 0：
+     * 存档只为看名次和发奖，不用再拿它分平手。
+     *
+     * @param period       时间范围
+     * @param key          期号
+     * @param closedAt     存档时刻（毫秒）
+     * @param participants 这一期有进展的总人数
+     * @param rows         前若干名，已按 {@link LeaderboardSort#defaultFor} 排好
+     */
+    public record PastPeriod(LeaderboardPeriod period, String key, long closedAt, int participants,
+                             List<LeaderboardRow> rows) {
+
+        CompoundTag write() {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("K", this.key);
+            tag.putLong("T", this.closedAt);
+            tag.putInt("N", this.participants);
+            ListTag list = new ListTag();
+            for (LeaderboardRow row : this.rows) {
+                CompoundTag rowTag = new CompoundTag();
+                rowTag.putUUID("Id", row.uuid());
+                rowTag.putString("Name", row.name());
+                rowTag.putLong("X", row.xpSum());
+                rowTag.putInt("L", row.levelSum());
+                rowTag.putInt("M", row.maxed());
+                rowTag.putInt("U", row.unlocked());
+                list.add(rowTag);
+            }
+            tag.put("R", list);
+            return tag;
+        }
+
+        static PastPeriod read(LeaderboardPeriod period, CompoundTag tag) {
+            ListTag list = tag.getList("R", Tag.TAG_COMPOUND);
+            List<LeaderboardRow> rows = new ArrayList<>(list.size());
+            for (int i = 0; i < list.size(); i++) {
+                CompoundTag rowTag = list.getCompound(i);
+                if (!rowTag.hasUUID("Id")) {
+                    continue;
+                }
+                rows.add(new LeaderboardRow(rowTag.getUUID("Id"), rowTag.getString("Name"), false, 0L,
+                        rowTag.getInt("M"), rowTag.getInt("L"), rowTag.getLong("X"), rowTag.getInt("U"),
+                        0, 0L, 0, 0, 0));
+            }
+            return new PastPeriod(period, tag.getString("K"), tag.getLong("T"), tag.getInt("N"), List.copyOf(rows));
+        }
     }
 
     /**
