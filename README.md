@@ -1,7 +1,11 @@
 <div align="center">
 
+<img src="https://cdn.modrinth.com/data/cached_images/6d4fe62679315f9998eea2225731a16ae3a1ec5b_0.webp" alt="Albion Mastery" width="800">
+
 # Albion Mastery | 阿尔比恩专精
 
+[![CurseForge Downloads](https://cf.way2muchnoise.eu/full_albion-mastery_downloads.svg?badge_style=for_the_badge)](https://www.curseforge.com/minecraft/mc-mods/albion-mastery)
+[![Modrinth Downloads](https://img.shields.io/modrinth/dt/albionmastery?style=for-the-badge&logo=modrinth&label=Modrinth)](https://modrinth.com/mod/albionmastery)
 [![MC Version](https://img.shields.io/badge/Minecraft-1.20.1-brightgreen?style=for-the-badge&logo=minecraft)](https://minecraft.net)
 [![Forge](https://img.shields.io/badge/Forge-47.x-orange?style=for-the-badge)](https://files.minecraftforge.net/net/minecraftforge/forge/index_1.20.1.html)
 [![License](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey?style=for-the-badge)](LICENSE)
