@@ -1,4 +1,3 @@
-// 路径：src/main/java/com/flameforge/albionmastery/client/screen/NodeLayout.java
 package com.flameforge.albionmastery.client.screen;
 
 import com.flameforge.albionmastery.config.MasteryConfig;

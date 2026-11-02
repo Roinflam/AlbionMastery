@@ -162,7 +162,7 @@ public class MasteryScreen extends Screen {
      * 来源节点在「节点最小屏幕半径」完全接管尺寸时，图标最少缩到节点图标正常尺寸的多少。
      *
      * <p>来源节点本体保留较大的点击区和导航轮廓，但全貌视角下不再让物品图标把六边形塞满，
-     * 避免内圈看起来和中心总汇抢视觉重心；但也不能缩成空壳，所以这一版继续往回拉一些。
+     * 避免内圈看起来和中心总汇抢视觉重心；但也不能缩成空壳。
      */
     private static final float SOURCE_ICON_MIN_SCALE = 0.68F;
 
@@ -170,7 +170,7 @@ public class MasteryScreen extends Screen {
      * 类型节点在「节点最小屏幕半径」完全接管尺寸时，图标最少缩到节点图标正常尺寸的多少。
      *
      * <p>中圈节点数量比来源多，远景下更容易挤成一圈大图标，所以比来源再收一点；
-     * 全貌视角依然比近景更收敛，但这次会更接近“把格子填满”的观感。
+     * 全貌视角依然比近景更收敛，但图标仍要基本填满格子。
      */
     private static final float TYPE_ICON_MIN_SCALE = 0.62F;
 
@@ -1491,7 +1491,7 @@ public class MasteryScreen extends Screen {
     /**
      * 额外把图标内容往节点内部铺满一点。
      *
-     * <p>前几轮把来源 / 类型图标压得太狠，副作用就是六边形壳还在，里面却像贴了一张小缩略图。
+     * <p>来源 / 类型图标压得太小时，六边形壳还在，里面却像贴了一张小缩略图。
      * 这里不去把黑底和描边重新做粗，而是在远景时只把“图标内容”轻轻放大一点：
      * 节点下限介入越多，额外填充越明显；近景自动退回 1.0。
      *
@@ -2092,7 +2092,7 @@ public class MasteryScreen extends Screen {
         }
         if (candidates.size() > MAX_ICONS_PER_FRAME) {
             // 距离先算好再排：放在比较器里的话，每比较一次就要重算两个节点的屏幕坐标，
-            // 节点一多（这个整合包里上千个）排一次就是几千次多余的坐标变换
+            // 节点一多（大型整合包里上千个）排一次就是几千次多余的坐标变换
             double centerX = baseX();
             double centerY = baseY();
             record Ranked(MasteryNode node, double distance) {
@@ -2538,7 +2538,7 @@ public class MasteryScreen extends Screen {
     private int drawHeaderChip(GuiGraphics guiGraphics, Component text, int x, int y, int color, int limit) {
         int textX = x + this.font.width("\u00B7") + 6;
         // 放不下就整块不画：顶栏和搜索框都在 z=600，搜索框底色只是半透明，压上去就是两层字叠在一起。
-        // 排行榜那边早就这么做了，罗盘这边漏了
+        // 排行榜界面也是这么处理的
         if (textX + this.font.width(text) > limit) {
             return x;
         }

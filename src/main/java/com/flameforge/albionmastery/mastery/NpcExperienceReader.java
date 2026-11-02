@@ -1,4 +1,3 @@
-// 路径：src/main/java/com/flameforge/albionmastery/mastery/NpcExperienceReader.java
 package com.flameforge.albionmastery.mastery;
 
 import com.flameforge.albionmastery.AlbionMastery;

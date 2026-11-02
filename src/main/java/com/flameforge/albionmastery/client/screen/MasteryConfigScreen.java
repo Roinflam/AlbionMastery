@@ -80,13 +80,17 @@ public final class MasteryConfigScreen {
     /**
      * 语言文件里本来就有名字的几类配置项，按配置值对象认，不按路径拼。
      */
-    private record Labels(Map<Object, Component> byValue, Map<String, Specialization> specBySection) {
+    private record Labels(Map<Object, Component> byValue, Map<String, Specialization> specBySection,
+                          Map<Object, String> sourceByValue) {
 
         static Labels collect() {
             Map<Object, Component> byValue = new IdentityHashMap<>();
             Map<String, Specialization> specBySection = new HashMap<>();
-            MasteryConfig.COMMON.sourceMasteryMultipliers.forEach((source, value) ->
-                    byValue.put(value, Component.translatable("albionmastery.source." + source)));
+            Map<Object, String> sourceByValue = new IdentityHashMap<>();
+            MasteryConfig.COMMON.sourceMasteryMultipliers.forEach((source, value) -> {
+                byValue.put(value, Component.translatable("albionmastery.source." + source));
+                sourceByValue.put(value, source);
+            });
             for (Specialization spec : Specialization.values()) {
                 MasteryConfig.SpecEntry entry = MasteryConfig.specEntry(spec);
                 if (entry == null) {
@@ -100,7 +104,7 @@ public final class MasteryConfigScreen {
                     }
                 });
             }
-            return new Labels(byValue, specBySection);
+            return new Labels(byValue, specBySection, sourceByValue);
         }
     }
 
@@ -239,7 +243,7 @@ public final class MasteryConfigScreen {
                 return null;
             }
             Component name = valueName(key, path, value);
-            Component[] tooltip = valueTooltip(key, valueSpec);
+            Component[] tooltip = valueTooltip(key, valueSpec, value);
             ForgeConfigSpec.Range<?> range = valueSpec.getRange();
 
             if (value instanceof ForgeConfigSpec.BooleanValue v) {
@@ -319,9 +323,16 @@ public final class MasteryConfigScreen {
             return known != null ? known : Component.literal(path.get(path.size() - 1));
         }
 
-        private Component[] valueTooltip(String key, ForgeConfigSpec.ValueSpec valueSpec) {
+        private Component[] valueTooltip(String key, ForgeConfigSpec.ValueSpec valueSpec, Object value) {
             if (I18n.exists(PREFIX + key + ".tooltip")) {
                 return split(I18n.get(PREFIX + key + ".tooltip"));
+            }
+            // 来源倍率一个来源一行、按来源清单生成，语言文件里只有一条共用说明，把来源名填进去；
+            // 不然会退回配置文件里那句中文注释
+            String source = this.labels.sourceByValue().get(value);
+            if (source != null && I18n.exists(PREFIX + "source_multiplier.tooltip")) {
+                return split(I18n.get(PREFIX + "source_multiplier.tooltip",
+                        I18n.get("albionmastery.source." + source), source));
             }
             // 特化数值的说明按维度共用一份，同一维度在每个特化里意思都一样
             String stat = PREFIX + "spec_value." + key.substring(key.lastIndexOf('.') + 1) + ".tooltip";

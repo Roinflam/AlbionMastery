@@ -133,7 +133,7 @@ public class AlbionMastery {
                     MasteryConfig.refreshServerSnapshot();
                     DimensionXpBonus.reload();
                     // 补录表、拆分口径都可能变了，服务端那份武器目录得跟着作废，
-                    // 不然管理指令还按旧口径写键（`/albionmastery config set` 那条路早就清了，这条漏了）
+                    // 不然管理指令还按旧口径写键（`/albionmastery config set` 那条路也会清）
                     WeaponCatalog.invalidate();
                     // 在线玩家按新曲线重算等级、拿到新的配置快照：伤害结算读的是缓存的等级，
                     // 不重算的话改了等级上限或经验曲线要等重登才生效，客户端也一直拿着旧快照

@@ -1277,7 +1277,7 @@ public class LeaderboardScreen extends Screen {
         boolean top3 = rank <= 3;
         boolean top10 = rank <= TOP_BADGE_RANK;
         // 底一律是暗的，名次高低靠描边和数字的亮度分：前三名用各自那档金，前十用主金，其余暗金。
-        // 早先前三名是亮底黑字，黑数字在一屏金色里像个洞，改掉了
+        // 前三名不用亮底黑字：黑数字在一屏金色里像个洞
         int fill = top10 ? MasteryPalette.NODE_FILL : MasteryPalette.NODE_FILL_LOCKED;
         int outline = top3 ? rankColor(rank) : (top10 ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK);
 

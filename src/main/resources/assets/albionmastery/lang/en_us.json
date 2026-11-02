@@ -860,6 +860,7 @@
   "config.albionmastery.mastery.specialization.tooltip": "Each weapon type (middle ring) has a primary and a secondary slot. Once you reach the threshold you can equip one option in each and both apply.\nEvery option has gains and costs; the first option of each source changes nothing.\nAll multipliers apply to the original value; for times, below 1 means faster.",
   "config.albionmastery.mastery.leaderboard.tooltip": "Global leaderboard, opened from the bottom-left of the mastery screen.\nData is kept in the overworld save, so offline players stay on the board.",
   "config.albionmastery.mastery.sourceDamageMultiplier.tooltip": "Multiplies the mastery damage bonus of each weapon source (overall, type, weapon and synergy alike).\nDefault 1.0 keeps the normal strength. New sources get their own line automatically.",
+  "config.albionmastery.source_multiplier.tooltip": "Mastery damage multiplier for %s (source ID: %s).\nDefault 1.0 keeps the normal strength.",
   "config.albionmastery.mastery.rank.tooltip": "Account-wide progress modelled on Warframe's Mastery Rank.\nRank XP only comes from weapon (outer ring) levels. Ranks 1-30 need 2500 x rank squared in total, then every 147,500 is one Legendary rank.\nRanks are recomputed from weapon levels, so lowering the level cap or raising the XP curve can lower them.",
   "config.albionmastery.client.tooltip": "Client-side presentation.",
   "config.albionmastery.mastery.maxLevel.tooltip": "Mastery level cap, shared by all three rings",
