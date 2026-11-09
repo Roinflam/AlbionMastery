@@ -43,7 +43,8 @@ public final class MasteryConfigScreen {
     private static final String PREFIX = "config.albionmastery.";
 
     /** 由模组自己维护、不该给人改的项。 */
-    private static final Set<String> HIDDEN = Set.of("mastery.specialization.specBalanceVersion");
+    private static final Set<String> HIDDEN = Set.of("mastery.specialization.specBalanceVersion",
+            "client.specGuideVersion");
 
     /** 特化小节都在这一节下面，按来源再分一层，不然一百多个小节平铺在一页里没法找。 */
     private static final String SPEC_SECTION = "mastery.specialization";

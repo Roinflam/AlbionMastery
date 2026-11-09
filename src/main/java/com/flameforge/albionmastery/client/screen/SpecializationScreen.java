@@ -63,6 +63,18 @@ import java.util.Set;
  *
  * <p>点数、门槛、能不能装都在服务端重新判一遍；服务端的结果提示本来发在物品栏上方，被这个不透明的界面挡住了，
  * 这里在底部原样再显示一遍。看别人的罗盘时同样能打开，只能看不能点。
+ *
+ * <p>上手引导有三层，三种布局都有：
+ * <ul>
+ *     <li><b>引导条</b>：B 版在槽位条下面、A / C 版在顶栏下面，按选中的槽列出该走的几步（普通槽三步、突破槽四步，
+ *         做完打勾、当前那步高亮），后面一句「下一步」按玩家现状生成，要点的按钮外面套一圈呼吸的金框；
+ *         点那句话把列表滚到目标。能收起（写回客户端配置 {@code specGuideBar}）。</li>
+ *     <li><b>分步遮罩</b>：第一次打开时压暗整页，依次照亮槽位、卡片、点数框、要突破的那张卡，各配一段说明，
+ *         说明里的数字从 {@link SpecRules} 生成；看完记下版本号（{@code specGuideVersion}），顶栏「?」随时重看，
+ *         重看时收起的引导条也重新打开。</li>
+ *     <li><b>原地说明</b>：空槽写收什么、锁住的槽带进度条、点数框悬停列出点数来源、卡片角标「可升级 / 可突破」、
+ *         重置按钮写退几点、底栏跟着选中的槽说怎么装。引导条开着时底栏和空槽不再重复引导条那句话。</li>
+ * </ul>
  */
 public class SpecializationScreen extends Screen {
 
@@ -94,6 +106,31 @@ public class SpecializationScreen extends Screen {
     private static final long FEEDBACK_WINDOW_MS = 6000L;
     /** 重置按钮点第一下之后，多久之内再点一下才算确认。 */
     private static final long CONFIRM_WINDOW_MS = 3000L;
+
+    /** 上手引导的版本：引导内容大改时 +1，看过旧版的玩家会再弹一次。 */
+    private static final int GUIDE_VERSION = 1;
+    /** 引导条高：1 框 + 1 空 + 12 步骤块 + 1 空 + 1 框。 */
+    private static final int BAR_HEIGHT = 16;
+    /** 步骤号 / 问号小方块，和一行字的格子一样高。 */
+    private static final int BADGE = 8;
+    /** 顶栏「?」按钮宽。 */
+    private static final int QUESTION_WIDTH = 16;
+    /** 分步遮罩说明框宽（窄窗口另算）。 */
+    private static final int CALLOUT_WIDTH = 220;
+    private static final int CALLOUT_NARROW_WIDTH = 196;
+    /** 分步遮罩压暗的颜色（黑，约 62% 不透明）。 */
+    private static final int OVERLAY = 0x9E000000;
+    private static final int TOUR_STEPS = 4;
+    /** 勾号（8×8，# 是点亮的像素）。 */
+    private static final String[] CHECK = {
+            "........",
+            "......#.",
+            ".....##.",
+            ".#..##..",
+            ".####...",
+            "..##....",
+            "........",
+            "........"};
 
     private static final int TEXT_FAINT = 0xFF6F634C;
     private static final int CARD_EDGE = 0xFF2C2314;
@@ -164,7 +201,51 @@ public class SpecializationScreen extends Screen {
     private MasteryConfig.Snapshot entryCacheSnapshot;
 
     /** 本帧的版面。 */
-    private Regions regions = new Regions(SpecScreenLayout.B, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    private Regions regions = new Regions(SpecScreenLayout.B, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
+    /** 分步遮罩走到第几步（0 起），-1 = 没在走。 */
+    private int tourStep = -1;
+    /** 打开页面时检查过要不要自动弹引导（缩放窗口也会走 init，只查一次）。 */
+    private boolean tourChecked;
+    /** 遮罩已经为哪一步把目标滚进视野。 */
+    private int tourScrolledFor = -1;
+
+    /** 本帧的引导状态（引导条开着或者在走遮罩时才算）。 */
+    @Nullable
+    private Guide guide;
+
+    // 本帧记下的几块位置（屏幕坐标 x, y, 宽, 高），给引导条的金框、遮罩照亮和「点那句话滚过去」用
+    @Nullable
+    private int[] slotsRect;
+    @Nullable
+    private int[] pointsRect;
+    @Nullable
+    private int[] firstRowRect;
+    @Nullable
+    private int[] detailRect;
+    @Nullable
+    private int[] listClip;
+    @Nullable
+    private int[] detailClip;
+    @Nullable
+    private int[] sideClip;
+    @Nullable
+    private int[] modBoxRect;
+    @Nullable
+    private int[] breakBoxRect;
+    private final Map<Specialization, int[]> cardRects = new HashMap<>();
+    private final Map<Specialization, int[]> buttonRects = new HashMap<>();
+    /** 卡片 / 列表行在列表内容里的 Y（不扣滚动），滚到目标时用。 */
+    private final Map<Specialization, Integer> contentY = new HashMap<>();
+    @Nullable
+    private int[] detailProgressRect;
+    @Nullable
+    private int[] detailEquipRect;
+    @Nullable
+    private int[] selectedSlotRect;
+    /** 点了引导条那句话、等下一帧滚过去的目标（筛掉了要先清筛选，位置下一帧才有）。 */
+    @Nullable
+    private Specialization pendingFocus;
 
     /**
      * @param data     要显示的专精数据（自己的是客户端缓存那一份，别人的是拿来的副本）
@@ -227,6 +308,12 @@ public class SpecializationScreen extends Screen {
         this.searchBox.setValue(previous);
         this.searchBox.setResponder(text -> this.listScroll = 0.0D);
         addRenderableWidget(this.searchBox);
+        if (!this.tourChecked) {
+            this.tourChecked = true;
+            if (!this.viewOnly && MasteryConfig.CLIENT.specGuideVersion.get() < GUIDE_VERSION) {
+                startTour();
+            }
+        }
         computeRegions();
     }
 
@@ -272,14 +359,25 @@ public class SpecializationScreen extends Screen {
         int stripBottom = stripTop;
         int sideWidth;
         int sideTop = HEADER_HEIGHT + 6;
+        int barTop = 0;
+        boolean bar = guideBarVisible();
         switch (layout) {
             case B -> {
                 stripBottom = stripTop + stripRows() * (SLOT_TILE_HEIGHT + 4) - 4;
                 sideTop = stripBottom + 8;
+                if (bar) {
+                    barTop = stripBottom + 4;
+                    sideTop = barTop + BAR_HEIGHT + 4;
+                }
                 sideWidth = this.width < C_MIN_WIDTH ? 120 : 150;
             }
             case C -> sideWidth = Mth.clamp(this.width * 26 / 100, 140, 190);
             default -> sideWidth = Mth.clamp(this.width * 30 / 100, 150, 210);
+        }
+        // A、C 没有槽位条，引导条放在顶栏下面，整页往下让
+        if (bar && layout != SpecScreenLayout.B) {
+            barTop = HEADER_HEIGHT + 6;
+            sideTop = barTop + BAR_HEIGHT + 4;
         }
         int sideLeft = MARGIN;
         int sideRight = sideLeft + sideWidth;
@@ -291,7 +389,7 @@ public class SpecializationScreen extends Screen {
             detailLeft = mainRight + 13;
         }
         this.regions = new Regions(layout, sideLeft, sideTop, sideRight, this.height - MARGIN,
-                mainLeft, sideTop, mainRight, footerTop, stripTop, stripBottom, detailLeft);
+                mainLeft, sideTop, mainRight, footerTop, stripTop, stripBottom, detailLeft, barTop);
         if (this.searchBox != null) {
             this.searchBox.setX(mainLeft + 4);
             this.searchBox.setY(sideTop + 3);
@@ -326,6 +424,7 @@ public class SpecializationScreen extends Screen {
         this.hits.clear();
         this.pendingTooltip = null;
         this.hoveredSpec = null;
+        clearGeometry();
         if (this.armedPool != null && Util.getMillis() > this.armedUntil) {
             this.armedPool = null;
         }
@@ -333,32 +432,86 @@ public class SpecializationScreen extends Screen {
             this.selectedSlot = 1;
         }
         Regions r = this.regions;
+        // 走遮罩时底下的页面不响应鼠标：悬停、预览、悬停面板都不出
+        boolean touring = this.tourStep >= 0;
+        int mx = touring ? -10000 : mouseX;
+        int my = touring ? -10000 : mouseY;
+        this.guide = r.barTop() > 0 || touring ? computeGuide(snapshot) : null;
 
         // 主区先画（要知道鼠标停在哪张卡上），左栏的预览再按它画
         drawSearchFrame(guiGraphics, r);
         if (r.layout() == SpecScreenLayout.C) {
-            drawList(guiGraphics, snapshot, r, mouseX, mouseY);
-            drawDetail(guiGraphics, snapshot, r, mouseX, mouseY);
+            drawList(guiGraphics, snapshot, r, mx, my);
+            drawDetail(guiGraphics, snapshot, r, mx, my);
             guiGraphics.fill(r.mainRight() + 6, r.mainTop(), r.mainRight() + 7, r.sideBottom(), 0x596B5223);
         } else {
-            int chipsBottom = drawChips(guiGraphics, mouseX, mouseY, r.mainLeft(), r.mainRight(),
+            int chipsBottom = drawChips(guiGraphics, mx, my, r.mainLeft(), r.mainRight(),
                     r.mainTop() + SEARCH_HEIGHT + 4);
-            drawCardGrid(guiGraphics, snapshot, r, chipsBottom + 6, mouseX, mouseY);
+            drawCardGrid(guiGraphics, snapshot, r, chipsBottom + 6, mx, my);
+        }
+        if (r.barTop() > 0 && !touring) {
+            drawGuideRing(guiGraphics);
         }
         if (r.layout() == SpecScreenLayout.B) {
-            drawStrip(guiGraphics, snapshot, r, mouseX, mouseY);
+            drawStrip(guiGraphics, snapshot, r, mx, my);
         }
         guiGraphics.fill(r.sideRight() + 6, r.sideTop(), r.sideRight() + 7, r.sideBottom(), 0x596B5223);
-        drawSide(guiGraphics, snapshot, r, mouseX, mouseY);
-        drawHeader(guiGraphics, mouseX, mouseY);
+        drawSide(guiGraphics, snapshot, r, mx, my);
+        if (r.barTop() > 0) {
+            drawGuideBar(guiGraphics, r, mx, my);
+        }
+        drawHeader(guiGraphics, mx, my);
         drawFooter(guiGraphics, r);
-        super.render(guiGraphics, mouseX, mouseY, partialTick);
+        // 位置这一帧才量出来，滚动下一帧生效
+        if (touring) {
+            applyTourScroll();
+        }
+        applyPendingFocus();
+        super.render(guiGraphics, mx, my, partialTick);
         if (this.pendingTooltip != null) {
             guiGraphics.pose().pushPose();
             guiGraphics.pose().translate(0.0F, 0.0F, 400.0F);
             this.pendingTooltip.run();
             guiGraphics.pose().popPose();
         }
+        if (touring) {
+            // 遮罩期间只认说明框上的按钮
+            this.hits.clear();
+            guiGraphics.pose().pushPose();
+            guiGraphics.pose().translate(0.0F, 0.0F, 450.0F);
+            drawTour(guiGraphics, snapshot, mouseX, mouseY);
+            guiGraphics.pose().popPose();
+        }
+    }
+
+    private void clearGeometry() {
+        this.slotsRect = null;
+        this.pointsRect = null;
+        this.firstRowRect = null;
+        this.detailRect = null;
+        this.listClip = null;
+        this.detailClip = null;
+        this.sideClip = null;
+        this.modBoxRect = null;
+        this.breakBoxRect = null;
+        this.detailProgressRect = null;
+        this.detailEquipRect = null;
+        this.selectedSlotRect = null;
+        this.cardRects.clear();
+        this.buttonRects.clear();
+        this.contentY.clear();
+    }
+
+    /** 两块矩形的并（null 当空）。 */
+    private static int[] union(@Nullable int[] a, int x, int y, int width, int height) {
+        if (a == null) {
+            return new int[]{x, y, width, height};
+        }
+        int left = Math.min(a[0], x);
+        int top = Math.min(a[1], y);
+        int right = Math.max(a[0] + a[2], x + width);
+        int bottom = Math.max(a[1] + a[3], y + height);
+        return new int[]{left, top, right - left, bottom - top};
     }
 
     /**
@@ -374,16 +527,18 @@ public class SpecializationScreen extends Screen {
                 configured.name() + (configured != this.regions.layout() ? "*" : ""));
         int layoutWidth = this.font.width(layoutLabel) + 12;
         int layoutX = backX - 4 - layoutWidth;
+        // 「?」重看上手引导（只读时没有）
+        int questionX = this.viewOnly ? layoutX : layoutX - 4 - QUESTION_WIDTH;
 
         int cursor = MARGIN;
-        int titleRoom = layoutX - 8 - cursor;
+        int titleRoom = questionX - 8 - cursor;
         String title = ellipsis(this.title.getString(), titleRoom);
         guiGraphics.drawString(this.font, title, cursor, textY, MasteryPalette.GOLD_BRIGHT, false);
         // 和标题里的「 · 」同样的间距
         cursor += this.font.width(title) + this.font.width(" ");
         String source = "· " + I18n.get("albionmastery.source." + this.providerId);
         int extra = this.viewOnly ? this.font.width(I18n.get("gui.albionmastery.spec_page.view_only")) + 8 : 0;
-        if (cursor + this.font.width(source) + extra < layoutX - 8) {
+        if (cursor + this.font.width(source) + extra < questionX - 8) {
             guiGraphics.drawString(this.font, source, cursor, textY, MasteryPalette.TEXT_DIM, false);
             cursor += this.font.width(source) + 8;
         }
@@ -392,6 +547,32 @@ public class SpecializationScreen extends Screen {
             if (cursor + this.font.width(hint) < layoutX - 8) {
                 guiGraphics.drawString(this.font, hint, layoutX - 8 - this.font.width(hint), textY,
                         MasteryPalette.WARN, false);
+            }
+        }
+
+        if (!this.viewOnly) {
+            boolean onQuestion = inside(mouseX, mouseY, questionX, 2, QUESTION_WIDTH, HEADER_HEIGHT - 4);
+            drawButton(guiGraphics, questionX, 2, QUESTION_WIDTH, HEADER_HEIGHT - 4, Component.literal("?"),
+                    onQuestion, true, false);
+            this.hits.add(new Hit(questionX, 2, QUESTION_WIDTH, HEADER_HEIGHT - 4, button -> {
+                if (button != 0) {
+                    return false;
+                }
+                playClick();
+                if (!MasteryConfig.CLIENT.specGuideBar.get()) {
+                    MasteryConfig.CLIENT.specGuideBar.set(true);
+                    MasteryConfig.CLIENT.specGuideBar.save();
+                }
+                startTour();
+                return true;
+            }));
+            if (onQuestion) {
+                List<String> lines = new ArrayList<>();
+                lines.add(I18n.get("gui.albionmastery.spec_page.guide.replay"));
+                if (!MasteryConfig.CLIENT.specGuideBar.get()) {
+                    lines.add(I18n.get("gui.albionmastery.spec_page.guide.replay_bar"));
+                }
+                showTextTooltip(guiGraphics, lines, mouseX, mouseY);
             }
         }
 
@@ -449,9 +630,9 @@ public class SpecializationScreen extends Screen {
         frame(guiGraphics, x, y, width, height, border);
         int color = !enabled ? TEXT_FAINT : hover ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT;
         String text = ellipsis(label.getString(), width - 6);
-        // 文字按自身宽度居中，奇偶差的 1 像素统一往左
-        int textX = x + (width - this.font.width(text) + 1) / 2;
-        guiGraphics.drawString(this.font, text, textX, y + (height - 8) / 2, color, false);
+        // 文字按不取整的亮像素宽（宽度含末尾 1 像素字距，扣掉）居中；落到屏幕像素格时往左取整
+        drawAt(guiGraphics, Component.literal(text), x + (width - (fw(text) - 1.0F)) / 2.0F,
+                y + (height - 8) / 2, color);
     }
 
     private void drawSearchFrame(GuiGraphics guiGraphics, Regions r) {
@@ -528,15 +709,20 @@ public class SpecializationScreen extends Screen {
             int y = r.stripTop() + (index / columns) * (SLOT_TILE_HEIGHT + 4);
             SlotView view = slotView(slot, snapshot);
             boolean hover = inside(mouseX, mouseY, x, y, width, SLOT_TILE_HEIGHT);
-            drawSlotTile(guiGraphics, view, x, y, width, hover);
+            drawSlotTile(guiGraphics, snapshot, view, x, y, width, hover);
             addSlotHit(view, x, y, width, SLOT_TILE_HEIGHT);
+            this.slotsRect = union(this.slotsRect, x, y, width, SLOT_TILE_HEIGHT);
+            if (slot == this.selectedSlot) {
+                this.selectedSlotRect = new int[]{x, y, width, SLOT_TILE_HEIGHT};
+            }
         }
     }
 
     /**
      * B 版的一个槽：顶上一道色条（普通金、突破橙），槽名、种类，装着的特化和等级；没开的写差什么。
      */
-    private void drawSlotTile(GuiGraphics guiGraphics, SlotView view, int x, int y, int width, boolean hover) {
+    private void drawSlotTile(GuiGraphics guiGraphics, MasteryConfig.Snapshot snapshot, SlotView view, int x, int y,
+                              int width, boolean hover) {
         boolean selected = view.slot() == this.selectedSlot;
         guiGraphics.fill(x, y, x + width, y + SLOT_TILE_HEIGHT, 0xBF130F09);
         if (selected) {
@@ -555,15 +741,25 @@ public class SpecializationScreen extends Screen {
         guiGraphics.drawString(this.font, ellipsis(view.label().getString(), inner - fw(tag) - NAME_VALUE_GAP),
                 x + PAD, y + 6, view.unlocked() ? MasteryPalette.TEXT_DIM : TEXT_FAINT, false);
         if (!view.unlocked()) {
-            List<String> lines = splitNeed(view.need(), inner);
-            for (int i = 0; i < lines.size(); i++) {
-                guiGraphics.drawString(this.font, lines.get(i), x + PAD, y + 18 + i * LINE, TEXT_FAINT, false);
-            }
+            // 「类型 100 级解锁」+ 进度条「72 / 100」
+            Need need = need(view.slot(), snapshot);
+            guiGraphics.drawString(this.font, ellipsis(need.text(), inner), x + PAD, y + 18, TEXT_FAINT, false);
+            drawNeedProgress(guiGraphics, need, x + PAD, x + width - PAD, y + 29);
             return;
         }
         if (view.spec() == null) {
-            guiGraphics.drawString(this.font, I18n.get("gui.albionmastery.spec_page.slot_empty"), x + PAD, y + 18,
-                    TEXT_FAINT, false);
+            // 选中的空槽写收什么；引导条收起时再写一句怎么装（开着时引导条那句已经说了）
+            boolean guide = selected && !this.viewOnly;
+            String first = guide && this.regions.barTop() == 0
+                    ? I18n.get(this.regions.layout() == SpecScreenLayout.C
+                    ? "gui.albionmastery.spec_page.slot_empty_pick_c" : "gui.albionmastery.spec_page.slot_empty_pick")
+                    : I18n.get("gui.albionmastery.spec_page.slot_empty");
+            guiGraphics.drawString(this.font, ellipsis(first, inner), x + PAD, y + 18,
+                    guide && this.regions.barTop() == 0 ? MasteryPalette.TEXT : TEXT_FAINT, false);
+            if (guide) {
+                guiGraphics.drawString(this.font, ellipsis(acceptsText(view), inner), x + PAD, y + 29, TEXT_FAINT,
+                        false);
+            }
             return;
         }
         guiGraphics.drawString(this.font, ellipsis(slotSpecName(view), inner), x + PAD, y + 18,
@@ -582,7 +778,8 @@ public class SpecializationScreen extends Screen {
     /**
      * A、C 版左栏的一个槽：左边一道色条，第一行槽名和种类，第二行装着的特化（等级点右对齐）或者差什么。
      */
-    private int drawSlotRow(GuiGraphics guiGraphics, SlotView view, int x, int y, int width, boolean hover) {
+    private int drawSlotRow(GuiGraphics guiGraphics, MasteryConfig.Snapshot snapshot, SlotView view, int x, int y,
+                            int width, boolean hover) {
         boolean selected = view.slot() == this.selectedSlot;
         guiGraphics.fill(x, y, x + width, y + SLOT_ROW_HEIGHT, 0x60000000);
         if (selected) {
@@ -602,11 +799,20 @@ public class SpecializationScreen extends Screen {
                 left, y + 3, view.unlocked() ? MasteryPalette.TEXT_DIM : TEXT_FAINT, false);
         int lineY = y + 14;
         if (!view.unlocked()) {
-            guiGraphics.drawString(this.font, ellipsis(view.need(), right - left), left, lineY, TEXT_FAINT, false);
+            // 一行放下：「类型 100 级解锁」靠左，「72 / 100」靠右，中间放得下就画进度条
+            Need need = need(view.slot(), snapshot);
+            String count = need.now() + " / " + need.need();
+            float countWidth = fw(count) - 1.0F;
+            String text = ellipsis(need.text(), right - left - countWidth - NAME_VALUE_GAP - 1);
+            guiGraphics.drawString(this.font, text, left, lineY, TEXT_FAINT, false);
+            drawNeedProgress(guiGraphics, need, left + (int) Math.ceil(fw(text) - 1.0F) + NAME_VALUE_GAP + 1, right,
+                    lineY);
             return y + SLOT_ROW_HEIGHT;
         }
         if (view.spec() == null) {
-            guiGraphics.drawString(this.font, I18n.get("gui.albionmastery.spec_page.slot_empty"), left, lineY,
+            boolean guide = selected && !this.viewOnly;
+            guiGraphics.drawString(this.font, ellipsis(guide ? acceptsText(view)
+                            : I18n.get("gui.albionmastery.spec_page.slot_empty"), right - left), left, lineY,
                     TEXT_FAINT, false);
             return y + SLOT_ROW_HEIGHT;
         }
@@ -650,21 +856,57 @@ public class SpecializationScreen extends Screen {
         return view.breakthrough() ? I18n.get("gui.albionmastery.spec_page.break_name", name) : name;
     }
 
+    /** 空槽收什么：突破槽「只收突破过的（★1 起）」，普通槽「收普通版（Lv1 起）」。 */
+    private String acceptsText(SlotView view) {
+        return I18n.get(view.breakthrough() ? "gui.albionmastery.spec_page.slot_accepts_break"
+                : "gui.albionmastery.spec_page.slot_accepts_normal");
+    }
+
     /**
-     * 「类型 100 级解锁（现在 81）」放不下一行时在「（」前断开，不在数字中间折行。
+     * 锁住的槽的进度：右边「72 / 100」，左边到 {@code left} 之间放进度条（窄于 12 像素不画）。
+     *
+     * @param y 这一行字的顶
      */
-    private List<String> splitNeed(String need, int width) {
-        if (fw(need) <= width) {
-            return List.of(need);
+    private void drawNeedProgress(GuiGraphics guiGraphics, Need need, int left, int right, int y) {
+        String count = need.now() + " / " + need.need();
+        drawRight(guiGraphics, count, right, y, MasteryPalette.TEXT_DIM);
+        int barRight = right - (int) Math.ceil(fw(count) - 1.0F) - NAME_VALUE_GAP;
+        if (barRight - left < 12) {
+            return;
         }
-        int cut = need.indexOf('（');
-        if (cut < 0) {
-            cut = need.indexOf('(');
+        // 3 像素高，竖直居中在字格里（字格 8 高，亮的是上 7 行）
+        int barTop = y + 2;
+        guiGraphics.fill(left, barTop, barRight, barTop + 3, 0x806B5223);
+        int filled = (int) ((long) (barRight - left) * Mth.clamp(need.now(), 0, need.need()) / Math.max(1, need.need()));
+        if (filled > 0) {
+            guiGraphics.fill(left, barTop, left + filled, barTop + 3, MasteryPalette.PROGRESS);
         }
-        if (cut <= 0) {
-            return List.of(ellipsis(need, width));
+    }
+
+    /**
+     * 槽没开时差什么（短句 + 现在 / 要求），给原地说明的进度条用。
+     *
+     * @param text 「类型 100 级解锁」
+     * @param now  现在几级
+     * @param need 要几级
+     */
+    private record Need(String text, int now, int need) {
+    }
+
+    private Need need(int slot, MasteryConfig.Snapshot snapshot) {
+        if (!SpecializationEffects.slotConditionMet(this.data, this.typeKey, slot, snapshot)) {
+            int level = SpecializationEffects.slotNeedLevel(slot, snapshot);
+            return switch (SpecializationEffects.slotNeed(slot)) {
+                case TYPE -> new Need(I18n.get("gui.albionmastery.spec_page.need_type_short", level),
+                        this.data.getTypeLevel(this.typeKey), level);
+                case SOURCE -> new Need(I18n.get("gui.albionmastery.spec_page.need_source_short", level),
+                        this.data.getOverallLevel(WeaponKeys.overallKey(this.providerId)), level);
+                case NONE -> new Need("", 0, 0);
+            };
         }
-        return List.of(ellipsis(need.substring(0, cut).trim(), width), ellipsis(need.substring(cut), width));
+        int gate = SpecializationEffects.weaponGate(this.data, this.typeKey, snapshot);
+        int now = this.weaponKey != null ? this.data.getWeaponLevel(this.weaponKey) : highestWeaponLevel();
+        return new Need(I18n.get("gui.albionmastery.spec_page.need_weapon_short", gate), now, gate);
     }
 
     // ---------------------------------------------------------------- 左栏
@@ -683,13 +925,15 @@ public class SpecializationScreen extends Screen {
         int viewBottom = buttonsTop - (this.viewOnly ? 0 : 6);
 
         guiGraphics.enableScissor(left, top, right, viewBottom);
+        this.sideClip = new int[]{left, top, width, viewBottom - top};
         int start = top - (int) Math.round(this.sideScroll);
         int cursor = start;
         cursor = drawModeBlock(guiGraphics, left, cursor, width, mouseX, mouseY, top, viewBottom);
         if (this.weaponKey != null) {
             cursor = drawWeaponGate(guiGraphics, snapshot, left, cursor, width);
         }
-        cursor = drawPoints(guiGraphics, snapshot, left, cursor, width, r.layout() != SpecScreenLayout.B);
+        cursor = drawPoints(guiGraphics, snapshot, left, cursor, width, r.layout() != SpecScreenLayout.B,
+                mouseX, mouseY, top, viewBottom);
         if (r.layout() != SpecScreenLayout.B) {
             cursor += 4;
             for (int slot = 1; slot <= rules().slotCount; slot++) {
@@ -697,7 +941,11 @@ public class SpecializationScreen extends Screen {
                 boolean visible = cursor + SLOT_ROW_HEIGHT > top && cursor < viewBottom;
                 boolean hover = visible && inside(mouseX, mouseY, left, cursor, width, SLOT_ROW_HEIGHT)
                         && mouseY >= top && mouseY < viewBottom;
-                drawSlotRow(guiGraphics, view, left, cursor, width, hover);
+                drawSlotRow(guiGraphics, snapshot, view, left, cursor, width, hover);
+                this.slotsRect = union(this.slotsRect, left, cursor, width, SLOT_ROW_HEIGHT);
+                if (slot == this.selectedSlot) {
+                    this.selectedSlotRect = new int[]{left, cursor, width, SLOT_ROW_HEIGHT};
+                }
                 if (visible) {
                     int hitTop = Math.max(cursor, top);
                     addSlotHit(view, left, hitTop, width, Math.min(cursor + SLOT_ROW_HEIGHT, viewBottom) - hitTop);
@@ -841,7 +1089,7 @@ public class SpecializationScreen extends Screen {
      * @param sideBySide 两个框并排（A、C）还是上下叠（B）
      */
     private int drawPoints(GuiGraphics guiGraphics, MasteryConfig.Snapshot snapshot, int x, int y, int width,
-                           boolean sideBySide) {
+                           boolean sideBySide, int mouseX, int mouseY, int viewTop, int viewBottom) {
         String overallKey = WeaponKeys.overallKey(this.providerId);
         int modAvailable = SpecPoints.modPointsAvailable(this.data, this.providerId, snapshot);
         int modTotal = SpecPoints.modPointsTotal(this.data, this.providerId, snapshot);
@@ -855,38 +1103,270 @@ public class SpecializationScreen extends Screen {
                 this.typeName.getString(), this.data.getTypeLevel(this.typeKey));
         String modShort = I18n.get("gui.albionmastery.spec_page.points_level", this.data.getOverallLevel(overallKey));
         String breakShort = I18n.get("gui.albionmastery.spec_page.points_level", this.data.getTypeLevel(this.typeKey));
+        int modNext = nextModLevel(snapshot);
+        int breakNext = nextBreakLevel(snapshot);
+        String modNextText = modNext > 0 ? I18n.get("gui.albionmastery.spec_page.points_next", modNext) : "";
+        String breakNextText = breakNext > 0 ? I18n.get("gui.albionmastery.spec_page.points_next", breakNext) : "";
+        int modX = x;
+        int modY = y;
+        int breakX;
+        int breakY;
+        int boxWidth;
+        int end;
         if (sideBySide) {
-            int boxWidth = (width - 4) / 2;
-            drawPointsBox(guiGraphics, x, y, boxWidth, modLabel, modAvailable, modTotal, modSource, modShort,
-                    MasteryPalette.GOLD);
-            drawPointsBox(guiGraphics, x + width - boxWidth, y, boxWidth, breakLabel, breakAvailable, breakTotal,
-                    breakSource, breakShort, BREAK);
-            return y + POINTS_BOX_HEIGHT + 2;
+            boxWidth = (width - 4) / 2;
+            breakX = x + width - boxWidth;
+            breakY = y;
+            end = y + POINTS_BOX_HEIGHT + 2;
+        } else {
+            boxWidth = width;
+            breakX = x;
+            breakY = y + POINTS_BOX_HEIGHT + 4;
+            end = y + POINTS_BOX_HEIGHT * 2 + 4 + 2;
         }
-        drawPointsBox(guiGraphics, x, y, width, modLabel, modAvailable, modTotal, modSource, modShort,
-                MasteryPalette.GOLD);
-        drawPointsBox(guiGraphics, x, y + POINTS_BOX_HEIGHT + 4, width, breakLabel, breakAvailable, breakTotal,
-                breakSource, breakShort, BREAK);
-        return y + POINTS_BOX_HEIGHT * 2 + 4 + 2;
+        drawPointsBox(guiGraphics, modX, modY, boxWidth, modLabel, modAvailable, modTotal, modSource, modShort,
+                modNextText, MasteryPalette.GOLD);
+        drawPointsBox(guiGraphics, breakX, breakY, boxWidth, breakLabel, breakAvailable, breakTotal,
+                breakSource, breakShort, breakNextText, BREAK);
+        this.modBoxRect = new int[]{modX, modY, boxWidth, POINTS_BOX_HEIGHT};
+        this.breakBoxRect = new int[]{breakX, breakY, boxWidth, POINTS_BOX_HEIGHT};
+        this.pointsRect = union(this.modBoxRect, breakX, breakY, boxWidth, POINTS_BOX_HEIGHT);
+        // 鼠标停在点数框上：列出点数从哪来、花在哪、下一点在几级
+        if (mouseY >= viewTop && mouseY < viewBottom) {
+            if (inside(mouseX, mouseY, modX, modY, boxWidth, POINTS_BOX_HEIGHT)) {
+                this.pendingTooltip = () -> drawPointsTooltip(guiGraphics, snapshot, false, mouseX, mouseY);
+            } else if (inside(mouseX, mouseY, breakX, breakY, boxWidth, POINTS_BOX_HEIGHT)) {
+                this.pendingTooltip = () -> drawPointsTooltip(guiGraphics, snapshot, true, mouseX, mouseY);
+            }
+        }
+        return end;
     }
 
+    /**
+     * 一个点数框：左上「改装点 ?」，右上点数从哪来（「枪械 85 级」），左下「剩 / 共」，右下「90 级再 +1」。
+     */
     private void drawPointsBox(GuiGraphics guiGraphics, int x, int y, int width, String label, int available,
-                               int total, String source, String sourceShort, int color) {
+                               int total, String source, String sourceShort, String next, int color) {
         guiGraphics.fill(x, y, x + width, y + POINTS_BOX_HEIGHT, 0xB3130F09);
         frame(guiGraphics, x, y, width, POINTS_BOX_HEIGHT, CARD_EDGE);
         int inner = width - PAD * 2;
+        // 标签后面跟一个「?」小方块，提示鼠标停上来能看明细
+        float labelWidth = fw(label) + 2 + BADGE;
         // 右上角放得下整句就写「枪械 85 级」，放不下只写「85 级」，再放不下不写
-        String shown = fw(label) + NAME_VALUE_GAP + fw(source) <= inner ? source
-                : fw(label) + NAME_VALUE_GAP + fw(sourceShort) <= inner ? sourceShort : "";
-        guiGraphics.drawString(this.font, ellipsis(label, inner - (shown.isEmpty() ? 0 : fw(shown) + NAME_VALUE_GAP)),
-                x + PAD, y + 3, MasteryPalette.TEXT_DIM, false);
+        String shown = labelWidth + NAME_VALUE_GAP + fw(source) <= inner ? source
+                : labelWidth + NAME_VALUE_GAP + fw(sourceShort) <= inner ? sourceShort : "";
+        String labelText = ellipsis(label, inner - 2 - BADGE - (shown.isEmpty() ? 0 : fw(shown) + NAME_VALUE_GAP));
+        guiGraphics.drawString(this.font, labelText, x + PAD, y + 3, MasteryPalette.TEXT_DIM, false);
+        drawBadge(guiGraphics, x + PAD + (int) Math.ceil(fw(labelText)) + 1, y + 3, 3, "?");
         if (!shown.isEmpty()) {
             drawRight(guiGraphics, shown, x + width - PAD, y + 3, TEXT_FAINT);
         }
         String left = Integer.toString(available);
         guiGraphics.drawString(this.font, left, x + PAD, y + 13, available < 0 ? MasteryPalette.WARN : color, false);
-        guiGraphics.drawString(this.font, "/ " + total, x + PAD + this.font.width(left) + 2, y + 13,
-                MasteryPalette.TEXT_DIM, false);
+        String totalText = "/ " + total;
+        int totalX = x + PAD + this.font.width(left) + 2;
+        guiGraphics.drawString(this.font, totalText, totalX, y + 13, MasteryPalette.TEXT_DIM, false);
+        if (!next.isEmpty() && totalX + fw(totalText) - 1 + NAME_VALUE_GAP * 2 + fw(next) - 1 <= x + width - PAD) {
+            drawRight(guiGraphics, next, x + width - PAD, y + 13, TEXT_FAINT);
+        }
+    }
+
+    /** 来源等级再升到几级多 1 改装点；已经到顶返回 0。 */
+    private int nextModLevel(MasteryConfig.Snapshot snapshot) {
+        SpecRules rules = snapshot.specRules;
+        int level = this.data.getOverallLevel(WeaponKeys.overallKey(this.providerId));
+        int now = rules.modPointsFromLevel(level, snapshot.maxLevel);
+        for (int next = level + 1; next <= snapshot.maxLevel; next++) {
+            if (rules.modPointsFromLevel(next, snapshot.maxLevel) > now) {
+                return next;
+            }
+        }
+        return 0;
+    }
+
+    /** 类型等级再升到几级多 1 突破点；已经到顶返回 0。 */
+    private int nextBreakLevel(MasteryConfig.Snapshot snapshot) {
+        SpecRules rules = snapshot.specRules;
+        int level = this.data.getTypeLevel(this.typeKey);
+        int now = rules.breakthroughPointsFromLevel(level, snapshot.maxLevel);
+        for (int next = level + 1; next <= snapshot.maxLevel; next++) {
+            if (rules.breakthroughPointsFromLevel(next, snapshot.maxLevel) > now) {
+                return next;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * 点数框的悬停明细：一行一项来源、已花多少、剩多少，下面几行规则说明（每几级 +1、段位 / 满级武器加成、
+     * 每级花几点、重置）。数字全按当前规则算。
+     */
+    private void drawPointsTooltip(GuiGraphics guiGraphics, MasteryConfig.Snapshot snapshot, boolean breakPool,
+                                   int mouseX, int mouseY) {
+        SpecRules rules = snapshot.specRules;
+        String pointName = SpecTerms.of(this.providerId, "point").getString();
+        String specTerm = SpecTerms.of(this.providerId, "spec").getString();
+        String sourceName = ClientWeaponRegistry.sourceName(WeaponKeys.overallKey(this.providerId)).getString();
+        String typeName = this.typeName.getString();
+        String unit = I18n.get("gui.albionmastery.spec_page.points_tip.unit_name");
+        String title;
+        List<String[]> rows = new ArrayList<>();
+        List<Integer> colors = new ArrayList<>();
+        List<String> notes = new ArrayList<>();
+        int spent;
+        int left;
+        int count = 0;
+        if (!breakPool) {
+            int level = this.data.getOverallLevel(WeaponKeys.overallKey(this.providerId));
+            int fromLevel = rules.modPointsFromLevel(level, snapshot.maxLevel);
+            int rank = SpecializationEffects.rankOf(this.data, snapshot);
+            int fromRank = rules.modPointsFromRank(rank);
+            spent = SpecPoints.modPointsSpent(this.data, this.providerId, rules);
+            left = SpecPoints.modPointsAvailable(this.data, this.providerId, snapshot);
+            for (Specialization spec : this.specs) {
+                if (this.data.getSpecLevel(spec.key()) > 0) {
+                    count++;
+                }
+            }
+            title = I18n.get("gui.albionmastery.spec_page.points_tip.mod_title", pointName, sourceName);
+            rows.add(new String[]{I18n.get("gui.albionmastery.spec_page.points_source", sourceName, level),
+                    I18n.get("gui.albionmastery.spec_page.points_tip.value", fromLevel)});
+            colors.add(MasteryPalette.TEXT);
+            if (rules.rankModPointMax > 0) {
+                rows.add(new String[]{I18n.get("gui.albionmastery.spec_page.points_tip.rank", rank),
+                        I18n.get("gui.albionmastery.spec_page.points_tip.plus", fromRank)});
+                colors.add(MasteryPalette.TEXT);
+            }
+            notes.add(levelRule(sourceName, rules.modPointsAtMaxSource, snapshot.maxLevel, nextModLevel(snapshot)));
+            if (rules.rankModPointMax > 0) {
+                notes.add(I18n.get("gui.albionmastery.spec_page.points_tip.rank_rule", rules.rankModPointStart,
+                        rules.rankModPointEvery, rules.rankModPointMax));
+            }
+            notes.add(costRule(I18n.get("gui.albionmastery.spec_page.points_tip.normal_range", rules.normalMax()),
+                    costs(rules, false), unit));
+        } else {
+            int level = this.data.getTypeLevel(this.typeKey);
+            int fromLevel = rules.breakthroughPointsFromLevel(level, snapshot.maxLevel);
+            int maxed = this.data.getMaxedWeaponCount(this.typeKey);
+            int fromMaxed = rules.breakthroughPointsFromMaxed(maxed);
+            spent = SpecPoints.breakthroughPointsSpent(this.data, this.typeKey, rules);
+            left = SpecPoints.breakthroughPointsAvailable(this.data, this.typeKey, snapshot);
+            for (Specialization spec : this.specs) {
+                if (this.data.getBreakthrough(this.typeKey, spec.key()) > 0) {
+                    count++;
+                }
+            }
+            title = I18n.get("gui.albionmastery.spec_page.points_tip.break_title", typeName);
+            rows.add(new String[]{I18n.get("gui.albionmastery.spec_page.points_source", typeName, level),
+                    I18n.get("gui.albionmastery.spec_page.points_tip.value", fromLevel)});
+            colors.add(MasteryPalette.TEXT);
+            if (rules.maxedWeaponBreakthroughPointMax > 0) {
+                rows.add(new String[]{I18n.get("gui.albionmastery.spec_page.points_tip.maxed", maxed),
+                        I18n.get("gui.albionmastery.spec_page.points_tip.plus", fromMaxed)});
+                colors.add(MasteryPalette.TEXT);
+            }
+            notes.add(levelRule(typeName, rules.breakthroughPointsAtMaxType, snapshot.maxLevel,
+                    nextBreakLevel(snapshot)));
+            if (rules.maxedWeaponBreakthroughPointMax > 0) {
+                notes.add(I18n.get("gui.albionmastery.spec_page.points_tip.maxed_rule",
+                        rules.maxedWeaponBreakthroughPoint, rules.maxedWeaponBreakthroughPointMax));
+            }
+            notes.add(costRule(I18n.get("gui.albionmastery.spec_page.points_tip.break_range",
+                    rules.breakthroughMax()), costs(rules, true), unit));
+        }
+        rows.add(new String[]{I18n.get("gui.albionmastery.spec_page.points_tip.spent", count, specTerm),
+                I18n.get("gui.albionmastery.spec_page.points_tip.minus", spent)});
+        colors.add(MasteryPalette.WARN);
+        rows.add(null);
+        colors.add(0);
+        rows.add(new String[]{I18n.get("gui.albionmastery.spec_page.points_tip.left"),
+                I18n.get("gui.albionmastery.spec_page.points_tip.value", left)});
+        colors.add(left < 0 ? MasteryPalette.WARN : MasteryPalette.GOLD_BRIGHT);
+        notes.add(I18n.get("gui.albionmastery.spec_page.points_tip.respec", duration(rules.respecCooldownSeconds)));
+
+        int maxText = Math.min(220, this.width - 8 - 12);
+        float widest = fw(title);
+        for (String[] row : rows) {
+            if (row != null) {
+                widest = Math.max(widest, fw(row[0]) + 16 + fw(row[1]));
+            }
+        }
+        List<String> noteLines = new ArrayList<>();
+        for (String note : notes) {
+            noteLines.addAll(TextWrap.wrap(this.font, note, maxText));
+        }
+        for (String line : noteLines) {
+            widest = Math.max(widest, fw(line));
+        }
+        int width = (int) Math.ceil(Math.min(widest, maxText));
+        int rowsHeight = 0;
+        for (String[] row : rows) {
+            rowsHeight += row == null ? 4 : LINE;
+        }
+        int height = LINE + 3 + rowsHeight + 3 + noteLines.size() * LINE;
+        int boxWidth = width + 12;
+        int boxHeight = height + 10;
+        int x = Mth.clamp(mouseX + 12, 4, Math.max(4, this.width - 4 - boxWidth));
+        int y = Mth.clamp(mouseY - 8, HEADER_HEIGHT + 2, Math.max(HEADER_HEIGHT + 2, this.height - 4 - boxHeight));
+        panel(guiGraphics, x, y, boxWidth, boxHeight);
+        guiGraphics.drawString(this.font, ellipsis(title, width), x + 6, y + 5, MasteryPalette.GOLD, false);
+        int cy = y + 5 + LINE + 3;
+        for (int i = 0; i < rows.size(); i++) {
+            String[] row = rows.get(i);
+            if (row == null) {
+                guiGraphics.fill(x + 6, cy + 1, x + 6 + width, cy + 2, DIVIDER);
+                cy += 4;
+                continue;
+            }
+            guiGraphics.drawString(this.font, ellipsis(row[0], width - fw(row[1]) - NAME_VALUE_GAP), x + 6, cy,
+                    MasteryPalette.TEXT_DIM, false);
+            drawRight(guiGraphics, row[1], x + 6 + width, cy, colors.get(i));
+            cy += LINE;
+        }
+        cy += 3;
+        for (String line : noteLines) {
+            guiGraphics.drawString(this.font, line, x + 6, cy, TEXT_FAINT, false);
+            cy += LINE;
+        }
+    }
+
+    /** 「枪械每升 5 级 +1，满级 20 点；下一点在 55 级」：除不尽时只写满级给多少。 */
+    private String levelRule(String name, int atMax, int maxLevel, int next) {
+        String rule = atMax > 0 && maxLevel % atMax == 0
+                ? I18n.get("gui.albionmastery.spec_page.points_tip.every", name, maxLevel / atMax, atMax)
+                : I18n.get("gui.albionmastery.spec_page.points_tip.at_max", name, atMax);
+        return next > 0 ? I18n.get("gui.albionmastery.spec_page.points_tip.with_next", rule, next) : rule;
+    }
+
+    /** 普通版 Lv1～N（或突破版 ★1～N）每一级的价格。 */
+    private static int[] costs(SpecRules rules, boolean breakthrough) {
+        int max = breakthrough ? rules.breakthroughMax() : rules.normalMax();
+        int[] costs = new int[max];
+        for (int level = 1; level <= max; level++) {
+            costs[level - 1] = breakthrough ? rules.breakthroughCost(level) : rules.normalCost(level);
+        }
+        return costs;
+    }
+
+    /** 「普通版 Lv1～5，每级 1 点」：每级价格不一样时写一共多少。 */
+    private static String costRule(String range, int[] costs, String unit) {
+        boolean same = true;
+        int sum = 0;
+        for (int cost : costs) {
+            same &= cost == costs[0];
+            sum += cost;
+        }
+        return same && costs.length > 0
+                ? I18n.get("gui.albionmastery.spec_page.points_tip.cost_each", range, costs[0], unit)
+                : I18n.get("gui.albionmastery.spec_page.points_tip.cost_total", range, sum, unit);
+    }
+
+    /** 秒数写成「24 小时」「30 分钟」。 */
+    private static String duration(int seconds) {
+        if (seconds > 0 && seconds % 3600 == 0) {
+            return I18n.get("gui.albionmastery.spec_page.guide.hours", seconds / 3600);
+        }
+        return I18n.get("gui.albionmastery.spec_page.guide.minutes", Math.max(1, (seconds + 59) / 60));
     }
 
     /**
@@ -959,7 +1439,8 @@ public class SpecializationScreen extends Screen {
         String mod = I18n.get("gui.albionmastery.spec_page.respec_source", SpecTerms.of(this.providerId, "point")
                 .getString());
         String cooldown = I18n.get("gui.albionmastery.spec_page.respec_cooldown", mod, "23:59");
-        return this.font.width(cooldown) <= half;
+        String refund = I18n.get("gui.albionmastery.spec_page.respec_refund", mod, 99);
+        return Math.max(this.font.width(cooldown), this.font.width(refund)) <= half;
     }
 
     /**
@@ -986,9 +1467,12 @@ public class SpecializationScreen extends Screen {
                     : SpecPoints.breakthroughPointsSpent(this.data, this.typeKey, rules);
             boolean enabled = remaining <= 0L && spent > 0;
             boolean armed = pool.equals(this.armedPool);
+            // 能点时写退几点，没花过写「还没花」，冷却中写还剩多久
             String label = remaining > 0L
                     ? I18n.get("gui.albionmastery.spec_page.respec_cooldown", base, clock(remaining))
-                    : armed ? I18n.get("gui.albionmastery.spec_page.respec_confirm") : base;
+                    : armed ? I18n.get("gui.albionmastery.spec_page.respec_confirm")
+                    : spent > 0 ? I18n.get("gui.albionmastery.spec_page.respec_refund", base, spent)
+                    : I18n.get("gui.albionmastery.spec_page.respec_nothing", base);
             boolean hover = inside(mouseX, mouseY, bx, by, buttonWidth, SIDE_BUTTON_HEIGHT);
             drawButton(guiGraphics, bx, by, buttonWidth, SIDE_BUTTON_HEIGHT, Component.literal(label),
                     hover && enabled, enabled, armed);
@@ -1052,6 +1536,21 @@ public class SpecializationScreen extends Screen {
         this.listMaxScroll = Math.max(0.0D, cursor - viewport);
         this.listScroll = Mth.clamp(this.listScroll, 0.0D, this.listMaxScroll);
         int offset = listTop - (int) Math.round(this.listScroll);
+        this.listClip = new int[]{left, listTop, r.mainRight() - left, listBottom - listTop};
+        int firstRowY = -1;
+        for (Block block : blocks) {
+            if (block.spec() == null) {
+                continue;
+            }
+            this.contentY.put(block.spec(), block.y());
+            if (firstRowY < 0) {
+                firstRowY = block.y();
+            }
+            if (block.y() == firstRowY) {
+                this.firstRowRect = union(this.firstRowRect, left + block.x(), offset + block.y(), block.width(),
+                        block.height());
+            }
+        }
 
         guiGraphics.enableScissor(left, listTop, r.mainRight(), listBottom);
         if (visible.isEmpty()) {
@@ -1062,6 +1561,9 @@ public class SpecializationScreen extends Screen {
         boolean mouseInList = mouseY >= listTop && mouseY < listBottom;
         for (Block block : blocks) {
             int top = offset + block.y();
+            if (block.spec() != null) {
+                this.cardRects.put(block.spec(), new int[]{left + block.x(), top, block.width(), block.height()});
+            }
             if (top + block.height() < listTop || top > listBottom) {
                 continue;
             }
@@ -1142,15 +1644,13 @@ public class SpecializationScreen extends Screen {
             guiGraphics.fill(x + 1, y + 1, x + 3, y + height - 1, MasteryPalette.GOLD);
         }
         int inner = width - PAD * 2;
-        int tagWidth = card.tag() == null ? 0 : (int) Math.ceil(fw(card.tag()));
+        int tagWidth = tagWidth(card);
         String name = I18n.get(card.spec().nameKey());
         int nameColor = equipped ? MasteryPalette.GOLD_BRIGHT : card.dimmed() ? MasteryPalette.TEXT_DIM
                 : MasteryPalette.TEXT;
         guiGraphics.drawString(this.font, ellipsis(name, inner - (tagWidth > 0 ? tagWidth + NAME_VALUE_GAP + 2 : 0)),
                 x + PAD, y + PAD, nameColor, false);
-        if (card.tag() != null) {
-            drawRight(guiGraphics, card.tag(), x + width - PAD, y + PAD, card.tagColor());
-        }
+        drawTag(guiGraphics, card, x + width - PAD, y + PAD);
         int levelY = y + PAD + LINE + 1;
         int marks = drawCardMarks(guiGraphics, card, x + PAD, levelY);
         guiGraphics.drawString(this.font, ellipsis(card.levelText(), inner - marks - 5), x + PAD + marks + 5, levelY,
@@ -1177,6 +1677,36 @@ public class SpecializationScreen extends Screen {
         drawProgressButton(guiGraphics, card, x + width - PAD, buttonY, inner, mouseX, mouseY, clipTop, clipBottom);
     }
 
+    /** 右上角状态占多宽（带框的角标算上框）。 */
+    private int tagWidth(CardView card) {
+        if (card.tag() == null) {
+            return 0;
+        }
+        return card.tagFramed() ? (int) Math.ceil(fw(card.tag()) - 1.0F) + 6 : (int) Math.ceil(fw(card.tag()));
+    }
+
+    /**
+     * 右上角状态：槽名、未解锁、同组冲突是纯字；「可升级 / 可突破」是带框的角标——框的外边贴着 {@code right}，
+     * 和下面数值列的右边同一列像素，字在框里左右各空 2 像素。
+     *
+     * @param y 这一行字的顶
+     */
+    private void drawTag(GuiGraphics guiGraphics, CardView card, int right, int y) {
+        if (card.tag() == null) {
+            return;
+        }
+        if (!card.tagFramed()) {
+            drawRight(guiGraphics, card.tag(), right, y, card.tagColor());
+            return;
+        }
+        int boxWidth = tagWidth(card);
+        int boxLeft = right - boxWidth;
+        // 框高 12：汉字字形占满 8 行，上下各空 1 行
+        guiGraphics.fill(boxLeft, y - 2, right, y + 10, (card.tagColor() & 0xFFFFFF) | 0x26000000);
+        frame(guiGraphics, boxLeft, y - 2, boxWidth, 12, card.tagColor());
+        drawRight(guiGraphics, card.tag(), right - 3, y, card.tagColor());
+    }
+
     /**
      * 卡片右下角：升级 / 解锁 / 突破按钮；满级了写「已满级」。按钮右边对齐到 {@code right}。
      */
@@ -1192,6 +1722,7 @@ public class SpecializationScreen extends Screen {
         String label = progress.label();
         int width = Math.min(maxWidth, this.font.width(label) + 10);
         int x = right - width;
+        this.buttonRects.put(card.spec(), new int[]{x, y, width, BUTTON_HEIGHT});
         boolean visible = y + BUTTON_HEIGHT > clipTop && y < clipBottom;
         boolean hover = visible && progress.enabled() && inside(mouseX, mouseY, x, y, width, BUTTON_HEIGHT)
                 && mouseY >= clipTop && mouseY < clipBottom;
@@ -1314,6 +1845,8 @@ public class SpecializationScreen extends Screen {
         this.listMaxScroll = Math.max(0.0D, content - viewport);
         this.listScroll = Mth.clamp(this.listScroll, 0.0D, this.listMaxScroll);
         int cursor = listTop - (int) Math.round(this.listScroll);
+        int scrollOffset = cursor;
+        this.listClip = new int[]{left, listTop, right - left, listBottom - listTop};
 
         guiGraphics.enableScissor(left, listTop, right, listBottom);
         if (visible.isEmpty()) {
@@ -1335,6 +1868,8 @@ public class SpecializationScreen extends Screen {
                 drawListRow(guiGraphics, snapshot, spec, left, cursor, rowRight - left, mouseX, mouseY,
                         listTop, listBottom);
             }
+            this.cardRects.put(spec, new int[]{left, cursor, rowRight - left, LIST_ROW_HEIGHT});
+            this.contentY.put(spec, cursor - scrollOffset);
             cursor += LIST_ROW_HEIGHT;
         }
         guiGraphics.disableScissor();
@@ -1409,16 +1944,15 @@ public class SpecializationScreen extends Screen {
         }
         CardView card = cardView(spec, snapshot);
         guiGraphics.enableScissor(left, top, right, bottom);
+        this.detailClip = new int[]{left, top, width, bottom - top};
         int start = top - (int) Math.round(this.detailScroll);
-        int cursor = start;
+        // 顶上留 2 像素给「可升级 / 可突破」角标的框
+        int cursor = start + 2;
 
-        String tag = card.tag();
-        int tagWidth = tag == null ? 0 : (int) Math.ceil(fw(tag)) + NAME_VALUE_GAP;
+        int tagWidth = card.tag() == null ? 0 : tagWidth(card) + NAME_VALUE_GAP;
         guiGraphics.drawString(this.font, ellipsis(I18n.get(spec.nameKey()), width - tagWidth), left, cursor,
                 MasteryPalette.GOLD_BRIGHT, false);
-        if (tag != null) {
-            drawRight(guiGraphics, tag, right, cursor, card.tagColor());
-        }
+        drawTag(guiGraphics, card, right, cursor);
         cursor += LINE + 1;
         String family = I18n.get(spec.familyKey());
         Specialization clash = clashingSpec(spec, this.selectedSlot);
@@ -1480,6 +2014,10 @@ public class SpecializationScreen extends Screen {
                     && inside(mouseX, mouseY, equipX, cursor, buttonWidth, buttonHeight);
             drawButton(guiGraphics, equipX, cursor, buttonWidth, buttonHeight, Component.literal(equipLabel),
                     hoverEquip, equipEnabled, false);
+            this.detailProgressRect = new int[]{left, cursor, buttonWidth, buttonHeight};
+            this.detailEquipRect = new int[]{equipX, cursor, buttonWidth, buttonHeight};
+            // 遮罩第 4 步照亮的：名字到两个按钮这一段
+            this.detailRect = new int[]{left, start, width, cursor + buttonHeight - start};
             if (visible && equipEnabled) {
                 int hitTop = Math.max(cursor, top);
                 this.hits.add(new Hit(equipX, hitTop, buttonWidth, Math.min(cursor + buttonHeight, bottom) - hitTop,
@@ -1947,10 +2485,834 @@ public class SpecializationScreen extends Screen {
         if (this.viewOnly) {
             return;
         }
-        String hint = I18n.get(r.layout() == SpecScreenLayout.C ? "gui.albionmastery.spec_page.hint_c"
-                : "gui.albionmastery.spec_page.hint");
-        String text = ellipsis(hint, right - left);
-        guiGraphics.drawString(this.font, text, left, y, TEXT_FAINT, false);
+        if (r.barTop() > 0) {
+            // 引导条开着：「下一步」那句已经在上面了，这里只写通用的操作说明（右键卸下、数字键选槽这类）
+            String hint = I18n.get(r.layout() == SpecScreenLayout.C ? "gui.albionmastery.spec_page.hint_c"
+                    : "gui.albionmastery.spec_page.hint");
+            guiGraphics.drawString(this.font, ellipsis(hint, right - left), left, y, TEXT_FAINT, false);
+            return;
+        }
+        // 引导条收起：底栏跟着选中的槽说这个槽收什么、怎么装
+        MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
+        SlotView view = slotView(this.selectedSlot, snapshot);
+        Seg slot = new Seg(view.label().getString(), view.breakthrough() ? BREAK : MasteryPalette.GOLD);
+        String pointName = SpecTerms.of(this.providerId, "point").getString();
+        String max = Integer.toString(snapshot.specRules.normalMax());
+        List<Seg> full;
+        List<Seg> brief;
+        if (!view.unlocked()) {
+            full = segs("gui.albionmastery.spec_page.hint_locked_slot", TEXT_FAINT, slot,
+                    new Seg(need(view.slot(), snapshot).text(), TEXT_FAINT));
+            brief = full;
+        } else {
+            String c = r.layout() == SpecScreenLayout.C ? "_c" : "";
+            Seg arg = new Seg(view.breakthrough() ? max : pointName, TEXT_FAINT);
+            String base = view.breakthrough() ? "gui.albionmastery.spec_page.hint_break_slot"
+                    : "gui.albionmastery.spec_page.hint_normal_slot";
+            full = segs(base + c, TEXT_FAINT, slot, arg);
+            brief = segs(base + "_short", TEXT_FAINT, slot, arg);
+        }
+        drawSegments(guiGraphics, segWidth(full) <= right - left ? full : brief, left, y, right - left);
+    }
+
+    // ======================================================================
+    // 上手引导
+    // ======================================================================
+
+    private static final String K = "gui.albionmastery.spec_page.";
+    /** 拼带颜色的句子时，占位符先换成「这个字符 + 序号字母」，再按它切开。 */
+    private static final char MARK = 1;
+
+    /** 一段带颜色的字。 */
+    private record Seg(String text, int color) {
+    }
+
+    /**
+     * 引导条上的一步。
+     *
+     * @param state 0 没做、1 做完、2 当前这步
+     */
+    private record GuideStep(String label, int state) {
+    }
+
+    /**
+     * 引导条的内容（按选中的槽和玩家现状算）。
+     *
+     * @param sentence 「下一步」整句
+     * @param brief    放不下时换的短句
+     * @param target   要点的特化；没有为 null
+     * @param onButton 要点的是它的升级 / 突破按钮；false = 点卡片本身装进去
+     */
+    private record Guide(List<GuideStep> steps, List<Seg> sentence, List<Seg> brief,
+                         @Nullable Specialization target, boolean onButton) {
+    }
+
+    private boolean guideBarVisible() {
+        return !this.viewOnly && MasteryConfig.CLIENT.specGuideBar.get();
+    }
+
+    /**
+     * 按选中的槽列步骤、挑下一步：
+     * <ul>
+     *     <li>普通槽：选槽 → 点卡片装进去 → 花点数升级（装着的升满算做完）；</li>
+     *     <li>突破槽：选槽 → 升满普通版 → 花突破点突破 → 装进来；</li>
+     *     <li>下一步优先装现成能装的，其次突破 / 升级离突破最近的，再次解锁新的；点数不够写下一点在几级。</li>
+     * </ul>
+     * 候选都要和别的槽不冲突、没装在别的槽里，和服务端装槽的判定一致（{@link #equipBlocked}）。
+     */
+    private Guide computeGuide(MasteryConfig.Snapshot snapshot) {
+        SpecRules rules = snapshot.specRules;
+        int slot = this.selectedSlot;
+        SlotView view = slotView(slot, snapshot);
+        boolean c = this.regions.layout() == SpecScreenLayout.C;
+        String pointName = SpecTerms.of(this.providerId, "point").getString();
+        Seg slotSeg = new Seg(view.label().getString(), view.breakthrough() ? BREAK : MasteryPalette.GOLD_BRIGHT);
+        Seg pointSeg = new Seg(pointName, MasteryPalette.GOLD);
+        Specialization placed = view.spec();
+
+        String[] labels;
+        boolean[] done;
+        if (!view.breakthrough()) {
+            boolean maxed = placed != null && this.data.getSpecLevel(placed.key()) >= rules.normalMax();
+            labels = new String[]{I18n.get(K + "guide.step.select"),
+                    I18n.get(K + (c ? "guide.step.equip_c" : "guide.step.equip")),
+                    I18n.get(K + "guide.step.upgrade", pointName)};
+            done = new boolean[]{true, placed != null, maxed};
+        } else {
+            boolean anyMax = placed != null;
+            boolean anyStar = placed != null;
+            for (Specialization spec : this.specs) {
+                anyMax |= this.data.getSpecLevel(spec.key()) >= rules.normalMax();
+                anyStar |= this.data.getBreakthrough(this.typeKey, spec.key()) > 0;
+            }
+            labels = new String[]{I18n.get(K + "guide.step.select"),
+                    I18n.get(K + "guide.step.max", rules.normalMax()),
+                    I18n.get(K + "guide.step.break"),
+                    I18n.get(K + "guide.step.place", view.label().getString())};
+            done = new boolean[]{true, anyMax, anyStar, placed != null};
+        }
+        List<GuideStep> steps = new ArrayList<>();
+        boolean current = false;
+        for (int i = 0; i < labels.length; i++) {
+            int state = done[i] ? 1 : 0;
+            if (!done[i] && !current && view.unlocked()) {
+                state = 2;
+                current = true;
+            }
+            steps.add(new GuideStep(labels[i], state));
+        }
+
+        if (!view.unlocked()) {
+            // 一个槽都没开时没有「别的槽」可选，改说可以先把点数花起来
+            boolean anyOpen = false;
+            for (int other = 1; other <= rules.slotCount; other++) {
+                anyOpen |= SpecializationEffects.isSlotUnlocked(this.data, this.typeKey, other, snapshot);
+            }
+            Seg needSeg = new Seg(need(slot, snapshot).text(), MasteryPalette.TEXT_DIM);
+            return anyOpen ? guide(steps, "guide.next.locked", null, false, slotSeg, needSeg)
+                    : guide(steps, "guide.next.locked_all", null, false, slotSeg, needSeg, pointSeg);
+        }
+        int modAvailable = SpecPoints.modPointsAvailable(this.data, this.providerId, snapshot);
+        int breakAvailable = SpecPoints.breakthroughPointsAvailable(this.data, this.typeKey, snapshot);
+        if (!view.breakthrough()) {
+            if (placed == null) {
+                Specialization equip = equipCandidate(snapshot, slot, false);
+                if (equip != null) {
+                    return guide(steps, "guide.next.equip", equip, false, nameSeg(equip), slotSeg);
+                }
+                return unlockOrWait(steps, snapshot, slot, modAvailable, pointSeg);
+            }
+            int level = this.data.getSpecLevel(placed.key());
+            if (level < rules.normalMax()) {
+                if (modAvailable >= rules.normalCost(level + 1)) {
+                    return guide(steps, "guide.next.upgrade", placed, true, nameSeg(placed),
+                            buttonSeg(false, level + 1), pointSeg);
+                }
+                return waitForModPoints(steps, snapshot, pointSeg);
+            }
+            return guide(steps, "guide.next.done", null, false, slotSeg);
+        }
+
+        if (placed != null) {
+            int star = this.data.getBreakthrough(this.typeKey, placed.key());
+            if (star < rules.breakthroughMax()) {
+                if (breakAvailable >= rules.breakthroughCost(star + 1)) {
+                    return guide(steps, "guide.next.break_up", placed, true, nameSeg(placed),
+                            buttonSeg(true, star + 1));
+                }
+                return waitForBreakPoints(steps, snapshot);
+            }
+            return guide(steps, "guide.next.done", null, false, slotSeg);
+        }
+        Specialization equip = equipCandidate(snapshot, slot, true);
+        if (equip != null) {
+            return guide(steps, "guide.next.equip", equip, false, nameSeg(equip), slotSeg);
+        }
+        Seg maxSeg = new Seg(Integer.toString(rules.normalMax()), MasteryPalette.TEXT);
+        Specialization ready = null;
+        Specialization grow = null;
+        for (Specialization spec : this.specs) {
+            if (slotOf(spec) != 0 || clashingSpec(spec, slot) != null) {
+                continue;
+            }
+            int normal = this.data.getSpecLevel(spec.key());
+            if (normal >= rules.normalMax() && this.data.getBreakthrough(this.typeKey, spec.key()) == 0) {
+                if (ready == null) {
+                    ready = spec;
+                }
+            } else if (normal > 0 && normal < rules.normalMax()
+                    && (grow == null || normal > this.data.getSpecLevel(grow.key()))) {
+                grow = spec;
+            }
+        }
+        if (ready != null) {
+            if (breakAvailable >= rules.breakthroughCost(1)) {
+                return guide(steps, "guide.next.break", ready, true, nameSeg(ready), maxSeg, buttonSeg(true, 1),
+                        slotSeg);
+            }
+            return waitForBreakPoints(steps, snapshot);
+        }
+        if (grow != null) {
+            int normal = this.data.getSpecLevel(grow.key());
+            if (modAvailable >= rules.normalCost(normal + 1)) {
+                return guide(steps, "guide.next.upgrade_for_break", grow, true, nameSeg(grow),
+                        buttonSeg(false, normal + 1), maxSeg);
+            }
+            return waitForModPoints(steps, snapshot, pointSeg);
+        }
+        return unlockOrWait(steps, snapshot, slot, modAvailable, pointSeg);
+    }
+
+    /** 现成能装进这个槽的里面等级最高的（没装在别的槽、不冲突、这一版等级 &gt; 0）。 */
+    @Nullable
+    private Specialization equipCandidate(MasteryConfig.Snapshot snapshot, int slot, boolean breakthrough) {
+        Specialization best = null;
+        int bestLevel = 0;
+        for (Specialization spec : this.specs) {
+            if (slotOf(spec) != 0 || equipBlocked(snapshot, spec, slot) != null) {
+                continue;
+            }
+            int level = breakthrough ? this.data.getBreakthrough(this.typeKey, spec.key())
+                    : this.data.getSpecLevel(spec.key());
+            if (best == null || level > bestLevel) {
+                best = spec;
+                bestLevel = level;
+            }
+        }
+        return best;
+    }
+
+    /** 没有现成能装的：点数够就指一个能解锁的，不够就说下一点在几级。 */
+    private Guide unlockOrWait(List<GuideStep> steps, MasteryConfig.Snapshot snapshot, int slot, int modAvailable,
+                               Seg pointSeg) {
+        if (modAvailable >= snapshot.specRules.normalCost(1)) {
+            for (Specialization spec : this.specs) {
+                if (this.data.getSpecLevel(spec.key()) == 0 && slotOf(spec) == 0
+                        && clashingSpec(spec, slot) == null) {
+                    return guide(steps, "guide.next.unlock", spec, true, pointSeg, nameSeg(spec),
+                            new Seg(I18n.get(K + "guide.btn.unlock"), MasteryPalette.GOLD_BRIGHT));
+                }
+            }
+        }
+        return waitForModPoints(steps, snapshot, pointSeg);
+    }
+
+    private Guide waitForModPoints(List<GuideStep> steps, MasteryConfig.Snapshot snapshot, Seg pointSeg) {
+        int next = nextModLevel(snapshot);
+        if (next <= 0) {
+            return guide(steps, "guide.next.no_points_max", null, false, pointSeg);
+        }
+        String source = ClientWeaponRegistry.sourceName(WeaponKeys.overallKey(this.providerId)).getString();
+        return guide(steps, "guide.next.no_points", null, false, pointSeg, new Seg(source, MasteryPalette.TEXT),
+                new Seg(Integer.toString(next), MasteryPalette.GOLD_BRIGHT));
+    }
+
+    private Guide waitForBreakPoints(List<GuideStep> steps, MasteryConfig.Snapshot snapshot) {
+        int next = nextBreakLevel(snapshot);
+        if (next <= 0) {
+            return guide(steps, "guide.next.no_break_points_max", null, false);
+        }
+        return guide(steps, "guide.next.no_break_points", null, false,
+                new Seg(this.typeName.getString(), MasteryPalette.TEXT),
+                new Seg(Integer.toString(next), MasteryPalette.GOLD_BRIGHT));
+    }
+
+    private Guide guide(List<GuideStep> steps, String key, @Nullable Specialization target, boolean onButton,
+                        Seg... args) {
+        // C 版没有「点卡片」这回事，说「点卡片」的句子另有 _c 版（选中、按「装进」）
+        String base = K + key;
+        if (this.regions.layout() == SpecScreenLayout.C && I18n.exists(base + "_c")) {
+            base += "_c";
+        }
+        List<Seg> sentence = segs(base, MasteryPalette.TEXT, args);
+        List<Seg> brief = I18n.exists(base + ".short") ? segs(base + ".short", MasteryPalette.TEXT, args)
+                : sentence;
+        return new Guide(steps, sentence, brief, target, onButton);
+    }
+
+    private static Seg nameSeg(Specialization spec) {
+        return new Seg(I18n.get(spec.nameKey()), MasteryPalette.GOLD_BRIGHT);
+    }
+
+    /** 句子里提到的按钮名：「突破 ★1」橙、「升级 Lv4」金。 */
+    private static Seg buttonSeg(boolean breakthrough, int level) {
+        return breakthrough ? new Seg(I18n.get(K + "guide.btn.break", level), BREAK)
+                : new Seg(I18n.get(K + "guide.btn.upgrade", level), MasteryPalette.GOLD_BRIGHT);
+    }
+
+    /**
+     * 翻译一句话，参数各自带颜色：占位符先填成标记字符，再按标记切成几段。
+     *
+     * @param color 句子本身的颜色
+     */
+    private static List<Seg> segs(String key, int color, Seg... args) {
+        Object[] marks = new Object[args.length];
+        for (int i = 0; i < args.length; i++) {
+            marks[i] = String.valueOf(MARK) + (char) ('a' + i);
+        }
+        String text = I18n.get(key, marks);
+        List<Seg> out = new ArrayList<>();
+        int start = 0;
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) != MARK || i + 1 >= text.length()) {
+                continue;
+            }
+            if (i > start) {
+                out.add(new Seg(text.substring(start, i), color));
+            }
+            int index = text.charAt(i + 1) - 'a';
+            if (index >= 0 && index < args.length) {
+                out.add(args[index]);
+            }
+            i++;
+            start = i + 1;
+        }
+        if (start < text.length()) {
+            out.add(new Seg(text.substring(start), color));
+        }
+        return out;
+    }
+
+    /** 几段拼起来的宽度（含末尾 1 像素字距，和 {@link #fw} 同口径）。 */
+    private float segWidth(List<Seg> segs) {
+        float width = 0.0F;
+        for (Seg seg : segs) {
+            width += fw(seg.text());
+        }
+        return width;
+    }
+
+    /** 一段段接着画，超出 {@code maxWidth} 的那段截断加「..」，后面的不画。 */
+    private void drawSegments(GuiGraphics guiGraphics, List<Seg> segs, int x, int y, float maxWidth) {
+        float cursor = x;
+        float limit = x + maxWidth;
+        for (Seg seg : segs) {
+            float width = fw(seg.text());
+            if (cursor + width > limit + 1.0F) {
+                String cut = ellipsis(seg.text(), limit - cursor);
+                if (!cut.isEmpty()) {
+                    drawAt(guiGraphics, Component.literal(cut), cursor, y, seg.color());
+                }
+                return;
+            }
+            drawAt(guiGraphics, Component.literal(seg.text()), cursor, y, seg.color());
+            cursor += width;
+        }
+    }
+
+    /**
+     * 引导条：左边步骤（做完打勾、当前那步金底高亮），一条竖线，后面「下一步」那句，最右「收起」。
+     * 放不下时先把做完 / 没做的步骤缩成只剩小方块，再换短句，最后截断。点那句话把列表滚到要点的地方。
+     */
+    private void drawGuideBar(GuiGraphics guiGraphics, Regions r, int mouseX, int mouseY) {
+        Guide guide = this.guide;
+        if (guide == null) {
+            return;
+        }
+        int x = MARGIN;
+        int y = r.barTop();
+        int w = this.width - MARGIN * 2;
+        guiGraphics.fill(x, y, x + w, y + BAR_HEIGHT, 0xBF130F09);
+        frame(guiGraphics, x, y, w, BAR_HEIGHT, CARD_EDGE);
+        // 字格竖直居中在框里：框内 14 高，字格 8 高，上下各空 3
+        int row = y + (BAR_HEIGHT - 2 - 8) / 2 + 1;
+        int closeRight = x + w - PAD;
+        String close = I18n.get(K + "guide.collapse");
+        String sep = "›";
+        float sepWidth = 4 + (fw(sep) - 1.0F) + 4;
+
+        // 0：步骤全写名字；1：只有当前步写名字；2：再换短句
+        int level = 0;
+        int[] kinds = new int[guide.steps().size()];
+        float[] widths = new float[kinds.length];
+        List<Seg> sentence = guide.sentence();
+        for (; level < 3; level++) {
+            float steps = 0.0F;
+            for (int i = 0; i < kinds.length; i++) {
+                GuideStep step = guide.steps().get(i);
+                if (step.state() == 2) {
+                    kinds[i] = 2;
+                    widths[i] = (float) Math.ceil(fw(step.label()) + 16);
+                } else if (level == 0) {
+                    kinds[i] = 1;
+                    widths[i] = BADGE + 3 + fw(step.label()) - 1.0F;
+                } else {
+                    kinds[i] = 0;
+                    widths[i] = BADGE;
+                }
+                steps += widths[i] + (i > 0 ? sepWidth : 0.0F);
+            }
+            sentence = level < 2 ? guide.sentence() : guide.brief();
+            float total = steps + 6 + 1 + 6 + segWidth(sentence) - 1.0F + NAME_VALUE_GAP + fw(close) - 1.0F;
+            if (total <= w - PAD * 2 || level == 2) {
+                break;
+            }
+        }
+
+        float cx = x + PAD;
+        for (int i = 0; i < kinds.length; i++) {
+            GuideStep step = guide.steps().get(i);
+            if (i > 0) {
+                drawAt(guiGraphics, Component.literal(sep), cx + 4, row, TEXT_FAINT);
+                cx += sepWidth;
+            }
+            String number = Integer.toString(i + 1);
+            if (kinds[i] == 2) {
+                int chipX = (int) Math.floor(cx);
+                int chipWidth = (int) widths[i];
+                guiGraphics.fill(chipX, y + 2, chipX + chipWidth, y + 14, 0x40E8C25A);
+                frame(guiGraphics, chipX, y + 2, chipWidth, 12, MasteryPalette.GOLD);
+                drawBadge(guiGraphics, chipX + 3, row, 2, number);
+                guiGraphics.drawString(this.font, step.label(), chipX + 3 + BADGE + 3, row,
+                        MasteryPalette.GOLD_BRIGHT, false);
+                cx = chipX + chipWidth;
+            } else {
+                int badgeX = (int) Math.ceil(cx);
+                drawBadge(guiGraphics, badgeX, row, step.state() == 1 ? 1 : 0, number);
+                cx = badgeX + BADGE;
+                if (kinds[i] == 1) {
+                    guiGraphics.drawString(this.font, step.label(), badgeX + BADGE + 3, row,
+                            step.state() == 1 ? MasteryPalette.TEXT_DIM : TEXT_FAINT, false);
+                    cx = badgeX + BADGE + 3 + fw(step.label()) - 1.0F;
+                }
+            }
+        }
+        int dividerX = (int) Math.ceil(cx + 6);
+        guiGraphics.fill(dividerX, y + 3, dividerX + 1, y + BAR_HEIGHT - 3,
+                (MasteryPalette.EDGE & 0xFFFFFF) | 0x73000000);
+        int sentenceX = dividerX + 1 + 6;
+        float closeWidth = fw(close) - 1.0F;
+        float room = closeRight - closeWidth - NAME_VALUE_GAP - sentenceX;
+        int sentenceWidth = (int) Math.ceil(Math.min(room, segWidth(sentence) - 1.0F));
+        if (guide.target() != null && sentenceWidth > 0) {
+            boolean hover = inside(mouseX, mouseY, sentenceX - 2, y + 1, sentenceWidth + 4, BAR_HEIGHT - 2);
+            if (hover) {
+                guiGraphics.fill(sentenceX - 2, y + 2, sentenceX + sentenceWidth + 2, y + BAR_HEIGHT - 2,
+                        0x14FFFFFF);
+                showTextTooltip(guiGraphics, List.of(I18n.get(K + "guide.jump")), mouseX, mouseY);
+            }
+            this.hits.add(new Hit(sentenceX - 2, y + 1, sentenceWidth + 4, BAR_HEIGHT - 2, button -> {
+                if (button != 0) {
+                    return false;
+                }
+                playClick();
+                requestFocus(guide.target());
+                return true;
+            }));
+        }
+        drawSegments(guiGraphics, sentence, sentenceX, row, room);
+
+        int closeX = (int) Math.floor(closeRight - closeWidth);
+        boolean onClose = inside(mouseX, mouseY, closeX - 3, y + 1, (int) Math.ceil(closeWidth) + 6, BAR_HEIGHT - 2);
+        drawRight(guiGraphics, close, closeRight, row, onClose ? MasteryPalette.GOLD_BRIGHT : TEXT_FAINT);
+        this.hits.add(new Hit(closeX - 3, y + 1, (int) Math.ceil(closeWidth) + 6, BAR_HEIGHT - 2, button -> {
+            if (button != 0) {
+                return false;
+            }
+            playClick();
+            MasteryConfig.CLIENT.specGuideBar.set(false);
+            MasteryConfig.CLIENT.specGuideBar.save();
+            return true;
+        }));
+        if (onClose) {
+            showTextTooltip(guiGraphics, List.of(I18n.get(K + "guide.collapse_tip")), mouseX, mouseY);
+        }
+    }
+
+    /**
+     * 8×8 小方块（切掉四个角）。
+     *
+     * @param kind 0 没做（暗底暗字）、1 做完（绿底打勾）、2 当前（金底深色字）、3 说明（暗底问号）
+     */
+    private void drawBadge(GuiGraphics guiGraphics, int x, int y, int kind, String label) {
+        int fill = switch (kind) {
+            case 1 -> 0x407FD06A;
+            case 2 -> MasteryPalette.GOLD;
+            case 3 -> (MasteryPalette.GOLD_DARK & 0xFFFFFF) | 0xCC000000;
+            default -> (MasteryPalette.GOLD_DARK & 0xFFFFFF) | 0x8C000000;
+        };
+        guiGraphics.fill(x + 1, y, x + BADGE - 1, y + 1, fill);
+        guiGraphics.fill(x, y + 1, x + BADGE, y + BADGE - 1, fill);
+        guiGraphics.fill(x + 1, y + BADGE - 1, x + BADGE - 1, y + BADGE, fill);
+        if (kind == 1) {
+            for (int dy = 0; dy < CHECK.length; dy++) {
+                for (int dx = 0; dx < CHECK[dy].length(); dx++) {
+                    if (CHECK[dy].charAt(dx) == '#') {
+                        guiGraphics.fill(x + dx, y + dy, x + dx + 1, y + dy + 1, GREEN);
+                    }
+                }
+            }
+            return;
+        }
+        int color = kind == 2 ? 0xFF0B0906 : kind == 0 ? TEXT_FAINT : MasteryPalette.TEXT;
+        drawAt(guiGraphics, Component.literal(label), x + (BADGE - (fw(label) - 1.0F)) / 2.0F, y, color);
+    }
+
+    /**
+     * 引导条要点的地方套两圈金框：外圈淡金，内圈亮金按 1.6 秒一呼吸。卡片、按钮套在外面 2～3 像素
+     * （卡片间距 6、卡片内边距 5，都放得下）；C 版列表行一行挨一行，框画在行边上。
+     */
+    private void drawGuideRing(GuiGraphics guiGraphics) {
+        Guide guide = this.guide;
+        if (guide == null || guide.target() == null) {
+            return;
+        }
+        Specialization target = guide.target();
+        int[] rect;
+        int[] clip;
+        int outer = 3;
+        if (this.regions.layout() == SpecScreenLayout.C) {
+            if (target == this.detailSpec) {
+                rect = guide.onButton() ? this.detailProgressRect : this.detailEquipRect;
+                clip = this.detailClip;
+            } else {
+                rect = this.cardRects.get(target);
+                clip = this.listClip;
+                outer = 1;
+            }
+        } else {
+            rect = guide.onButton() ? this.buttonRects.get(target) : this.cardRects.get(target);
+            clip = this.listClip;
+        }
+        if (rect == null || clip == null) {
+            return;
+        }
+        double phase = (Util.getMillis() % 1600L) / 1600.0D;
+        float pulse = 0.55F + 0.45F * (float) Math.sin(phase * Math.PI * 2.0D);
+        guiGraphics.enableScissor(clip[0], clip[1], clip[0] + clip[2], clip[1] + clip[3]);
+        frame(guiGraphics, rect[0] - outer, rect[1] - outer, rect[2] + outer * 2, rect[3] + outer * 2,
+                RenderUtil.withAlpha(MasteryPalette.GOLD, 0.35F));
+        int inner = outer - 1;
+        frame(guiGraphics, rect[0] - inner, rect[1] - inner, rect[2] + inner * 2, rect[3] + inner * 2,
+                RenderUtil.withAlpha(MasteryPalette.GOLD_BRIGHT, pulse));
+        guiGraphics.disableScissor();
+    }
+
+    /** 把列表滚到某个特化（C 版顺带在右栏打开它）；被筛选 / 搜索挡住了先清掉，位置下一帧量出来再滚。 */
+    private void requestFocus(@Nullable Specialization target) {
+        if (target == null) {
+            return;
+        }
+        if (!filtered(ClientMasteryCache.snapshot()).contains(target)) {
+            this.familyFilter = null;
+            if (this.searchBox != null) {
+                this.searchBox.setValue("");
+            }
+        }
+        if (this.regions.layout() == SpecScreenLayout.C) {
+            this.detailSpec = target;
+            this.detailScroll = 0.0D;
+        }
+        this.pendingFocus = target;
+    }
+
+    private void applyPendingFocus() {
+        Specialization target = this.pendingFocus;
+        if (target == null) {
+            return;
+        }
+        Integer y = this.contentY.get(target);
+        if (y != null) {
+            this.listScroll = Mth.clamp(y - 4.0D, 0.0D, this.listMaxScroll);
+            this.pendingFocus = null;
+        }
+    }
+
+    // ---------------------------------------------------------------- 分步遮罩
+
+    private void startTour() {
+        this.tourStep = 0;
+        this.tourScrolledFor = -1;
+        if (this.searchBox != null) {
+            this.searchBox.setFocused(false);
+        }
+    }
+
+    private void finishTour() {
+        this.tourStep = -1;
+        this.tourScrolledFor = -1;
+        if (MasteryConfig.CLIENT.specGuideVersion.get() < GUIDE_VERSION) {
+            MasteryConfig.CLIENT.specGuideVersion.set(GUIDE_VERSION);
+            MasteryConfig.CLIENT.specGuideVersion.save();
+        }
+    }
+
+    private void advanceTour() {
+        playClick();
+        if (this.tourStep >= TOUR_STEPS - 1) {
+            finishTour();
+        } else {
+            this.tourStep++;
+        }
+    }
+
+    /** 第 4 步讲哪张卡：引导条要点的那张，没有就列表里第一张。 */
+    @Nullable
+    private Specialization tourCard() {
+        if (this.guide != null && this.guide.target() != null) {
+            return this.guide.target();
+        }
+        List<Specialization> visible = filtered(ClientMasteryCache.snapshot());
+        return visible.isEmpty() ? (this.specs.isEmpty() ? null : this.specs.get(0)) : visible.get(0);
+    }
+
+    /** 每进一步，把要照亮的那块滚进视野（左栏回到顶、卡片列表回到顶或滚到第 4 步那张卡）。 */
+    private void applyTourScroll() {
+        if (this.tourScrolledFor == this.tourStep) {
+            return;
+        }
+        this.tourScrolledFor = this.tourStep;
+        switch (this.tourStep) {
+            case 0, 2 -> this.sideScroll = 0.0D;
+            case 1 -> this.listScroll = 0.0D;
+            default -> requestFocus(tourCard());
+        }
+    }
+
+    /** 这一步照亮哪一块（已经裁到所在栏的可见范围）。 */
+    @Nullable
+    private int[] tourSpot() {
+        boolean c = this.regions.layout() == SpecScreenLayout.C;
+        return switch (this.tourStep) {
+            case 0 -> c || this.regions.layout() == SpecScreenLayout.A ? intersect(this.slotsRect, this.sideClip)
+                    : this.slotsRect;
+            case 1 -> c ? this.listClip : intersect(this.firstRowRect, this.listClip);
+            case 2 -> intersect(this.pointsRect, this.sideClip);
+            default -> {
+                Specialization card = tourCard();
+                yield c ? intersect(this.detailRect, this.detailClip)
+                        : intersect(card == null ? null : this.cardRects.get(card), this.listClip);
+            }
+        };
+    }
+
+    @Nullable
+    private static int[] intersect(@Nullable int[] a, @Nullable int[] clip) {
+        if (a == null || clip == null) {
+            return a;
+        }
+        int left = Math.max(a[0], clip[0]);
+        int top = Math.max(a[1], clip[1]);
+        int right = Math.min(a[0] + a[2], clip[0] + clip[2]);
+        int bottom = Math.min(a[1] + a[3], clip[1] + clip[3]);
+        return right > left && bottom > top ? new int[]{left, top, right - left, bottom - top} : null;
+    }
+
+    /**
+     * 画遮罩：照亮的那块四周压暗、描一圈亮金，旁边一个说明框（标题、页码、几段说明、跳过 / 下一步）。
+     * 说明框先按这一步偏好的方向放（第 3 步点数框放右边，其余放下面），放不下依次试下、上、右、左，
+     * 都放不下就放在屏幕中间；箭头落在说明框和照亮块之间 6 像素的空里。
+     */
+    private void drawTour(GuiGraphics guiGraphics, MasteryConfig.Snapshot snapshot, int mouseX, int mouseY) {
+        int index = this.tourStep;
+        int[] spot = tourSpot();
+        int sx0;
+        int sy0;
+        int sx1;
+        int sy1;
+        if (spot == null) {
+            sx0 = sx1 = this.width / 2;
+            sy0 = sy1 = this.height / 2;
+        } else {
+            sx0 = Math.max(0, spot[0] - 3);
+            sy0 = Math.max(0, spot[1] - 3);
+            sx1 = Math.min(this.width, spot[0] + spot[2] + 3);
+            sy1 = Math.min(this.height, spot[1] + spot[3] + 3);
+        }
+        guiGraphics.fill(0, 0, this.width, sy0, OVERLAY);
+        guiGraphics.fill(0, sy1, this.width, this.height, OVERLAY);
+        guiGraphics.fill(0, sy0, sx0, sy1, OVERLAY);
+        guiGraphics.fill(sx1, sy0, this.width, sy1, OVERLAY);
+        if (spot != null) {
+            frame(guiGraphics, sx0, sy0, sx1 - sx0, sy1 - sy0, MasteryPalette.GOLD_BRIGHT);
+        }
+
+        int calloutWidth = Math.min(this.width >= C_MIN_WIDTH ? CALLOUT_WIDTH : CALLOUT_NARROW_WIDTH,
+                this.width - 8);
+        int textWidth = calloutWidth - 12;
+        List<Seg> lines = new ArrayList<>();
+        for (Seg para : tourParagraphs(index, snapshot)) {
+            for (String line : TextWrap.wrap(this.font, para.text(), textWidth)) {
+                lines.add(new Seg(line, para.color()));
+            }
+        }
+        boolean last = index == TOUR_STEPS - 1;
+        int calloutHeight = 6 + LINE + 3 + lines.size() * LINE + 4 + BUTTON_HEIGHT + 6;
+
+        // 箭头指向：槽位那步指选中的槽，第 2 步指第一张卡，点数框指右边中间，第 4 步指照亮块顶边中间
+        int anchorX = (sx0 + sx1) / 2;
+        int anchorY = (sy0 + sy1) / 2;
+        int alignX = sx0 + 3;
+        if (index == 0 && this.selectedSlotRect != null) {
+            anchorX = this.selectedSlotRect[0] + this.selectedSlotRect[2] / 2;
+            alignX = this.selectedSlotRect[0];
+        } else if (index == 1 && this.regions.layout() != SpecScreenLayout.C && this.firstRowRect != null) {
+            anchorX = sx0 + 3 + Math.min(70, (sx1 - sx0) / 2);
+        } else if (index == 2) {
+            anchorX = sx1;
+        }
+        String[] order = index == 2 ? new String[]{"right", "below", "above", "left"}
+                : new String[]{"below", "above", "right", "left"};
+        String place = null;
+        int cx = 0;
+        int cy = 0;
+        for (String kind : order) {
+            switch (kind) {
+                case "below" -> {
+                    cx = Mth.clamp(alignX, 4, this.width - 4 - calloutWidth);
+                    cy = sy1 + 6;
+                }
+                case "above" -> {
+                    cx = Mth.clamp(alignX, 4, this.width - 4 - calloutWidth);
+                    cy = sy0 - 6 - calloutHeight;
+                }
+                case "right" -> {
+                    cx = sx1 + 6;
+                    cy = Mth.clamp(anchorY - calloutHeight / 2, 4, Math.max(4, this.height - 4 - calloutHeight));
+                }
+                default -> {
+                    cx = sx0 - 6 - calloutWidth;
+                    cy = Mth.clamp(anchorY - calloutHeight / 2, 4, Math.max(4, this.height - 4 - calloutHeight));
+                }
+            }
+            if (cx >= 4 && cx + calloutWidth <= this.width - 4 && cy >= 4 && cy + calloutHeight <= this.height - 4) {
+                place = kind;
+                break;
+            }
+        }
+        if (place == null) {
+            cx = (this.width - calloutWidth) / 2;
+            cy = Math.max(4, (this.height - calloutHeight) / 2);
+        }
+        guiGraphics.fill(cx, cy, cx + calloutWidth, cy + calloutHeight, 0xF5130F09);
+        frame(guiGraphics, cx, cy, calloutWidth, calloutHeight, MasteryPalette.GOLD);
+        // 4 行的小三角，尖朝照亮的那块，尖离亮金框 2 像素
+        if ("below".equals(place) || "above".equals(place)) {
+            int px = Mth.clamp(anchorX, cx + 8, cx + calloutWidth - 9);
+            for (int k = 0; k < 4; k++) {
+                int rowY = "below".equals(place) ? cy - 4 + k : cy + calloutHeight + 3 - k;
+                guiGraphics.fill(px - k, rowY, px + k + 1, rowY + 1, MasteryPalette.GOLD);
+            }
+        } else if (place != null) {
+            int py = Mth.clamp(anchorY, cy + 8, cy + calloutHeight - 9);
+            for (int k = 0; k < 4; k++) {
+                int colX = "right".equals(place) ? cx - 4 + k : cx + calloutWidth + 3 - k;
+                guiGraphics.fill(colX, py - k, colX + 1, py + k + 1, MasteryPalette.GOLD);
+            }
+        }
+
+        String title = I18n.get(K + "tour." + (index + 1) + ".title");
+        String page = (index + 1) + " / " + TOUR_STEPS;
+        guiGraphics.drawString(this.font, ellipsis(title, textWidth - fw(page) - NAME_VALUE_GAP), cx + 6, cy + 6,
+                MasteryPalette.GOLD_BRIGHT, false);
+        drawRight(guiGraphics, page, cx + calloutWidth - 6, cy + 6, TEXT_FAINT);
+        int ly = cy + 6 + LINE + 3;
+        for (Seg line : lines) {
+            guiGraphics.drawString(this.font, line.text(), cx + 6, ly, line.color(), false);
+            ly += LINE;
+        }
+
+        int buttonY = cy + calloutHeight - 6 - BUTTON_HEIGHT;
+        Component label = Component.translatable(K + (last ? "tour.done" : "tour.next"));
+        int buttonWidth = this.font.width(label) + 14;
+        int buttonX = cx + calloutWidth - 6 - buttonWidth;
+        boolean onNext = inside(mouseX, mouseY, buttonX, buttonY, buttonWidth, BUTTON_HEIGHT);
+        drawButton(guiGraphics, buttonX, buttonY, buttonWidth, BUTTON_HEIGHT, label, onNext, true, true);
+        this.hits.add(new Hit(buttonX, buttonY, buttonWidth, BUTTON_HEIGHT, button -> {
+            if (button != 0) {
+                return false;
+            }
+            advanceTour();
+            return true;
+        }));
+        int textY = buttonY + (BUTTON_HEIGHT - 8) / 2;
+        if (!last) {
+            String skip = I18n.get(K + "tour.skip");
+            int skipWidth = this.font.width(skip);
+            boolean onSkip = inside(mouseX, mouseY, cx + 4, buttonY, skipWidth + 4, BUTTON_HEIGHT);
+            guiGraphics.drawString(this.font, skip, cx + 6, textY,
+                    onSkip ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT_DIM, false);
+            this.hits.add(new Hit(cx + 4, buttonY, skipWidth + 4, BUTTON_HEIGHT, button -> {
+                if (button != 0) {
+                    return false;
+                }
+                playClick();
+                finishTour();
+                return true;
+            }));
+        } else {
+            guiGraphics.drawString(this.font, ellipsis(I18n.get(K + "tour.dont_show"),
+                    buttonX - 4 - (cx + 6)), cx + 6, textY, TEXT_FAINT, false);
+        }
+    }
+
+    /** 每一步的几段说明，数字按当前规则和这一页的来源 / 类型填。 */
+    private List<Seg> tourParagraphs(int index, MasteryConfig.Snapshot snapshot) {
+        SpecRules rules = snapshot.specRules;
+        String c = this.regions.layout() == SpecScreenLayout.C ? "_c" : "";
+        String pointName = SpecTerms.of(this.providerId, "point").getString();
+        String breakName = I18n.get(K + "break_points");
+        String source = ClientWeaponRegistry.sourceName(WeaponKeys.overallKey(this.providerId)).getString();
+        String type = this.typeName.getString();
+        List<Seg> out = new ArrayList<>();
+        switch (index) {
+            case 0 -> {
+                out.add(new Seg(I18n.get(K + "tour.1.body1" + c), MasteryPalette.TEXT));
+                out.add(new Seg(I18n.get(K + "tour.1.body2"), MasteryPalette.TEXT));
+            }
+            case 1 -> {
+                int cooldown = snapshot.specSwitchCooldownSeconds;
+                out.add(new Seg(cooldown > 0 ? I18n.get(K + "tour.2.body1" + c, duration(cooldown))
+                        : I18n.get(K + "tour.2.body1_free" + c), MasteryPalette.TEXT));
+                out.add(new Seg(I18n.get(K + "tour.2.body2" + c, pointName,
+                        costRule(I18n.get(K + "points_tip.normal_range", rules.normalMax()), costs(rules, false),
+                                pointName)), MasteryPalette.TEXT));
+            }
+            case 2 -> {
+                String mod = I18n.get(K + "tour.3.mod", pointName, source, rules.modPointsAtMaxSource);
+                if (rules.rankModPointMax > 0) {
+                    mod += I18n.get(K + "tour.3.mod_rank", rules.rankModPointStart, rules.rankModPointEvery,
+                            rules.rankModPointMax);
+                }
+                out.add(new Seg(mod + I18n.get(K + "tour.3.mod_end", source), MasteryPalette.TEXT));
+                String brk = I18n.get(K + "tour.3.break", type, rules.breakthroughPointsAtMaxType);
+                if (rules.maxedWeaponBreakthroughPointMax > 0) {
+                    brk += I18n.get(K + "tour.3.break_maxed", rules.maxedWeaponBreakthroughPoint,
+                            rules.maxedWeaponBreakthroughPointMax);
+                }
+                out.add(new Seg(brk + I18n.get(K + "tour.3.break_end", type), MasteryPalette.TEXT));
+                out.add(new Seg(I18n.get(K + "tour.3.respec", duration(rules.respecCooldownSeconds)),
+                        MasteryPalette.TEXT_DIM));
+            }
+            default -> {
+                out.add(new Seg(I18n.get(K + "tour.4.body1" + c, rules.normalMax(),
+                        costRule(I18n.get(K + "points_tip.break_range", rules.breakthroughMax()), costs(rules, true),
+                                breakName)), MasteryPalette.TEXT));
+                out.add(new Seg(I18n.get(K + "tour.4.body2"), MasteryPalette.TEXT));
+                out.add(new Seg(I18n.get(K + "tour.4.body3"), TEXT_FAINT));
+            }
+        }
+        return out;
     }
 
     // ---------------------------------------------------------------- 小画法
@@ -2039,8 +3401,11 @@ public class SpecializationScreen extends Screen {
     }
 
     private void drawAt(GuiGraphics guiGraphics, Component text, float x, int y, int color) {
-        int whole = Mth.floor(x);
-        float fraction = x - whole;
+        // 落到屏幕像素格上（往左取整），GUI 缩放 3 时半个 GUI 像素 = 1.5 屏幕像素，不对齐会把字形采样糊
+        double scale = Minecraft.getInstance().getWindow().getGuiScale();
+        float snapped = (float) (Math.floor(x * scale + 0.001D) / scale);
+        int whole = Mth.floor(snapped);
+        float fraction = snapped - whole;
         if (fraction < 0.01F) {
             guiGraphics.drawString(this.font, text, whole, y, color, false);
             return;
@@ -2325,11 +3690,13 @@ public class SpecializationScreen extends Screen {
      * @param star         这个类型里的突破等级
      * @param levelText    等级那一行的文字
      * @param tag          右上角的状态，可为 null
+     * @param tagFramed    右上角是带框的角标（可升级 / 可突破）
      * @param dimmed       名字压暗（还没解锁）
      */
     private record CardView(Specialization spec, int inSlot, boolean breakthrough, int level, boolean preview,
                             int normalLevel, int star, String levelText, @Nullable String tag, int tagColor,
-                            boolean dimmed, SpecDescriber.Entries entries, @Nullable Progress progress) {
+                            boolean tagFramed, boolean dimmed, SpecDescriber.Entries entries,
+                            @Nullable Progress progress) {
     }
 
     /**
@@ -2359,29 +3726,35 @@ public class SpecializationScreen extends Screen {
         int shownLevel = preview ? 1 : level;
         String levelText;
         if (breakthrough && normal < rules.normalMax()) {
-            levelText = I18n.get("gui.albionmastery.spec_page.level_need_max", normal);
+            levelText = I18n.get("gui.albionmastery.spec_page.level_need_max", normal, rules.normalMax());
         } else if (preview) {
             levelText = I18n.get("gui.albionmastery.spec_page.level_preview", levelText(breakthrough, 1));
         } else {
             levelText = levelText(breakthrough, level);
         }
+        Progress progress = progressFor(spec, snapshot);
         String tag = null;
         int tagColor = TEXT_FAINT;
+        boolean framed = false;
+        Specialization clash = inSlot != 0 || normal <= 0 ? null : clashingSpec(spec, 0);
         if (inSlot != 0) {
             tag = SpecTerms.slot(this.providerId, inSlot).getString();
             tagColor = MasteryPalette.GOLD;
         } else if (normal <= 0) {
             tag = I18n.get("gui.albionmastery.spec_page.tag_locked");
-        } else {
-            Specialization clash = clashingSpec(spec, 0);
-            if (clash != null) {
-                tag = I18n.get("gui.albionmastery.panel.spec_tag_conflict",
-                        SpecTerms.slot(this.providerId, slotOf(clash)).getString(),
-                        SpecTerms.of(this.providerId, "group").getString());
-            }
+        } else if (clash != null) {
+            tag = I18n.get("gui.albionmastery.panel.spec_tag_conflict",
+                    SpecTerms.slot(this.providerId, slotOf(clash)).getString(),
+                    SpecTerms.of(this.providerId, "group").getString());
+        } else if (progress != null && progress.enabled()) {
+            // 点数够、能往上走的卡打个角标，一眼看出现在能做什么
+            framed = true;
+            tag = I18n.get(progress.breakthrough() ? "gui.albionmastery.spec_page.tag_can_break"
+                    : "gui.albionmastery.spec_page.tag_can_upgrade");
+            tagColor = progress.breakthrough() ? BREAK : MasteryPalette.GOLD;
         }
         return new CardView(spec, inSlot, breakthrough, shownLevel, preview, normal, star, levelText, tag, tagColor,
-                preview, entries(snapshot, spec, breakthrough, shownLevel), progressFor(spec, snapshot));
+                framed, preview, entries(snapshot, spec, breakthrough, shownLevel), progress);
     }
 
     /**
@@ -2499,6 +3872,16 @@ public class SpecializationScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (this.tourStep >= 0) {
+            // 遮罩期间 hits 里只有说明框的按钮，点别处什么都不做
+            for (int i = this.hits.size() - 1; i >= 0; i--) {
+                Hit hit = this.hits.get(i);
+                if (hit.contains(mouseX, mouseY) && hit.click().on(button)) {
+                    break;
+                }
+            }
+            return true;
+        }
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
@@ -2519,6 +3902,9 @@ public class SpecializationScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (this.tourStep >= 0) {
+            return true;
+        }
         Regions r = this.regions;
         if (mouseX < r.sideRight() + 6) {
             this.sideScroll = Mth.clamp(this.sideScroll - delta * SCROLL_STEP, 0.0D, this.sideMaxScroll);
@@ -2532,6 +3918,17 @@ public class SpecializationScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (this.tourStep >= 0) {
+            // ESC 跳过引导（不关页面），回车 / 右方向键下一步
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                playClick();
+                finishTour();
+            } else if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER
+                    || keyCode == GLFW.GLFW_KEY_RIGHT) {
+                advanceTour();
+            }
+            return true;
+        }
         boolean typing = this.searchBox != null && this.searchBox.isFocused();
         if (typing && keyCode != GLFW.GLFW_KEY_ESCAPE && this.searchBox.keyPressed(keyCode, scanCode, modifiers)) {
             return true;
@@ -2557,6 +3954,9 @@ public class SpecializationScreen extends Screen {
 
     @Override
     public boolean charTyped(char codePoint, int modifiers) {
+        if (this.tourStep >= 0) {
+            return true;
+        }
         if (this.searchBox != null && this.searchBox.isFocused()) {
             return this.searchBox.charTyped(codePoint, modifiers);
         }
@@ -2583,10 +3983,11 @@ public class SpecializationScreen extends Screen {
      * @param stripTop    B 版槽位条的顶
      * @param stripBottom B 版槽位条的底
      * @param detailLeft  C 版右栏的左边
+     * @param barTop      引导条的顶；0 = 不显示引导条
      */
     private record Regions(SpecScreenLayout layout, int sideLeft, int sideTop, int sideRight, int sideBottom,
                            int mainLeft, int mainTop, int mainRight, int mainBottom,
-                           int stripTop, int stripBottom, int detailLeft) {
+                           int stripTop, int stripBottom, int detailLeft, int barTop) {
     }
 
     /**

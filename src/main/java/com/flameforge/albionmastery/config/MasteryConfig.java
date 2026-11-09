@@ -1846,6 +1846,8 @@ public final class MasteryConfig {
         public final ForgeConfigSpec.BooleanValue rankUpAnimation;
         public final ForgeConfigSpec.BooleanValue rankUpSound;
         public final ForgeConfigSpec.EnumValue<SpecScreenLayout> specScreenLayout;
+        public final ForgeConfigSpec.BooleanValue specGuideBar;
+        public final ForgeConfigSpec.IntValue specGuideVersion;
 
         Client(ForgeConfigSpec.Builder builder) {
             builder.comment("武器专精系统 - 客户端表现")
@@ -1901,6 +1903,15 @@ public final class MasteryConfig {
                             "C = 列表 + 详情（右栏是选中特化的每级数值表）。特化页顶栏的按钮也能切换，切了会写回这里。",
                             "窗口窄到放不下 C 的三栏时按 B 显示，这里存的值不变。")
                     .defineEnum("specScreenLayout", SpecScreenLayout.B);
+
+            this.specGuideBar = builder
+                    .comment("特化页槽位下面的引导条：按选中的槽列出该走的几步，再写一句下一步点哪里。",
+                            "引导条右边的「收起」会把这里改成 false；顶栏的「?」重看引导时会重新打开。")
+                    .define("specGuideBar", true);
+
+            this.specGuideVersion = builder
+                    .comment("看过的特化页上手引导版本。小于当前版本时，第一次打开特化页会从头走一遍引导；改成 0 可以再看一次。")
+                    .defineInRange("specGuideVersion", 0, 0, 1000);
 
             builder.pop();
         }
