@@ -23,7 +23,12 @@
 ### Features
 
 - **Three mastery rings**: source (for example TACZ guns) → type (rifles) → single weapon. Kills give XP to all three; the inner rings need more XP per level.
-- **Specializations**: every weapon type has a primary and a secondary slot. Each source has its own options with real gains and costs: fire rate, ADS time, recoil and spread for guns; reach and backstab for swords; SA damage and proud souls for SlashBlade; mana cost, cooldown and double casting for spells, and more. The card text is generated from the actual config values.
+- **Specializations**: every weapon type has up to four slots (normal, breakthrough, normal, breakthrough). Each source has its own options with real gains and costs: fire rate, ADS time, recoil and spread for guns; reach and backstab for swords; SA damage and proud souls for SlashBlade; mana cost, cooldown and double casting for spells, and more. Gains and costs grow together as you level a specialization.
+  - **Long-term progression**: normal specializations level 1–5 with mod points earned from source level (plus a few from Mastery Rank); a maxed one can be pushed through to ★1–★5 with breakthrough points earned from type level and maxed weapons.
+  - **Weapon gate**: the first slot opens once a single weapon reaches its level cap; higher ranks lower that requirement, and a fully trained type skips it. Slots 2–4 open with type and source level.
+  - **Respec**: refund all mod points of a source or all breakthrough points of a type at any time (the first time is free, then a 24-hour cooldown).
+  - **Three page layouts**: left slot column, top slot bar (default) or list + detail. Switch with the button in the top bar; hover a card for the per-level table.
+  - Slot count, unlock thresholds, per-level scaling and costs, point income, rank reduction, per-weapon XP and damage multipliers are all configurable.
 - **Mastery Rank**: an account-wide rank that grows with the total level of all your weapons, with a promotion animation and a road view of every rank.
 - **Leaderboards**: overall, daily, weekly and monthly. Click a player to see their whole mastery map and specializations.
 - **Automatic weapon detection**: installed gun packs and blade packs are read automatically; sources that aren't installed simply don't appear. Server owners can add or exclude items in the config.
@@ -100,7 +105,12 @@ More details for server owners and developers (config, commands, how each source
 ### 特色
 
 - **三圈专精**：来源（如 TACZ 枪械）→ 类型（步枪）→ 单件武器。击杀给三圈同样的经验，越往内圈每级要的经验越多。
-- **特化**：每个武器类型有主、副两个栏位，每个来源都有自己的一套选项，项项有得有失：枪械有射速、开镜时间、后座、散布，剑有攻击距离、背刺，拔刀剑有 SA 伤害、耀魂，法术有法力消耗、冷却、双重施法等等。卡片上的说明按配置里的实际数值生成。
+- **特化**：每个武器类型最多 4 个槽（普通、突破、普通、突破），每个来源都有自己的一套选项，项项有得有失：枪械有射速、开镜时间、后座、散布，剑有攻击距离、背刺，拔刀剑有 SA 伤害、耀魂，法术有法力消耗、冷却、双重施法等等。特化升级时收益和代价按同一比例一起涨。
+  - **长期养成**：普通版 Lv1～5，花来源等级给的改装点（段位高了每个来源再多几点）；满级后可以突破到 ★1～★5，花类型等级和满级武器给的突破点。
+  - **武器门槛**：第一个槽要单件武器练满才开，段位越高要求越低，整个类型练透了直接免门槛；第 2～4 槽看类型和来源等级。
+  - **退点**：随时可以把一个来源的改装点或一个类型的突破点全部退回重配（第一次免费，之后冷却 24 小时）。
+  - **三种布局**：左栏槽位、顶部槽位条（默认）、列表 + 详情，顶栏按钮随时切换；鼠标停在卡片上能看每一级的数值表。
+  - 槽数、开槽门槛、每级系数和价格、点数来源、段位减免、单件武器的经验 / 伤害倍率都能在配置里改。
 - **段位**：账号级的总进度，跟着全部武器的等级总和上涨，有晋升动画，还能看所有段位排成的段位之路。
 - **排行榜**：总榜、日榜、周榜、月榜，点进去能看别人的整张专精图和选的特化。
 - **自动识别武器**：装了什么枪包、刀包就读什么，没装的来源不出现；服主可以在配置里补录或排除物品。
