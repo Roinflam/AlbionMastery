@@ -7,6 +7,10 @@ import com.flameforge.albionmastery.client.weapon.WeaponTypeGroup;
 import com.flameforge.albionmastery.client.screen.MasteryScreen;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.mastery.MasteryData;
+import com.flameforge.albionmastery.mastery.spec.SpecPoints;
+import com.flameforge.albionmastery.mastery.spec.SpecTerms;
+import com.flameforge.albionmastery.mastery.spec.SpecializationEffects;
+import com.flameforge.albionmastery.weapon.WeaponKeys;
 import com.flameforge.albionmastery.network.S2CSyncMasteryPacket;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
@@ -85,13 +89,15 @@ public final class ClientMasteryCache {
      * @param overalls    总体表
      * @param specializations 特化选择表
      * @param studyMultiplier 学习点倍率
+     * @param progress        特化等级、突破和退点冷却
      */
     public static void acceptFullSync(MasteryConfig.Snapshot newSnapshot,
                                       Map<String, S2CSyncMasteryPacket.WeaponSync> weapons,
                                       Map<String, Long> types,
                                       Map<String, Long> overalls,
                                       Map<String, String> specializations,
-                                      double studyMultiplier) {
+                                      double studyMultiplier,
+                                      S2CSyncMasteryPacket.SpecProgress progress) {
         // 登录后的第一次全量同步是一次性灌数据，弹一屏提示毫无意义；
         // 之后再来的全量同步一定是服务端那边动过数据（管理员改等级、切特化），这时候要提示
         boolean notify = synced && MasteryConfig.CLIENT.showLevelUpToast.get();
@@ -109,6 +115,13 @@ public final class ClientMasteryCache {
         DATA.clear();
         applyDelta(weapons, types, overalls, false);
         DATA.replaceSpecializations(specializations);
+        // 退点冷却换算成本机时刻：服务端发的是「还剩多少毫秒」，本机按同一个公式倒数
+        long now = System.currentTimeMillis();
+        long cooldown = newSnapshot.specRules.respecCooldownSeconds * 1000L;
+        Map<String, Long> respecTimes = new HashMap<>();
+        progress.respecRemaining().forEach((pool, remaining) ->
+                respecTimes.put(pool, Math.max(1L, now + Math.min(remaining, cooldown) - cooldown)));
+        DATA.replaceSpecProgress(progress.levels(), progress.breakthroughs(), respecTimes);
         DATA.setStudyMultiplier(studyMultiplier);
         DATA.recomputeLevels(newSnapshot.weaponCurve(), newSnapshot.typeCurve(), newSnapshot.overallCurve());
         DATA.clearDirty();
@@ -256,6 +269,13 @@ public final class ClientMasteryCache {
                                    Map<String, Long> overalls,
                                    boolean notify) {
         Map<String, Integer> before = notify ? snapshotLevels(weapons, types, overalls) : Map.of();
+        Set<String> touchedTypes = new HashSet<>(types.keySet());
+        for (S2CSyncMasteryPacket.WeaponSync sync : weapons.values()) {
+            if (!sync.typeKey().isEmpty()) {
+                touchedTypes.add(sync.typeKey());
+            }
+        }
+        Map<String, Integer> specBefore = notify ? specStatus(touchedTypes) : Map.of();
 
         for (Map.Entry<String, S2CSyncMasteryPacket.WeaponSync> entry : weapons.entrySet()) {
             String typeKey = entry.getValue().typeKey();
@@ -281,6 +301,101 @@ public final class ClientMasteryCache {
         for (String key : overalls.keySet()) {
             notifyIfLevelUp(before.get("o" + key), DATA.getOverallLevel(key), key, Tier.OVERALL);
         }
+        notifySpecChanges(specBefore, specStatus(touchedTypes));
+    }
+
+    /** 一次增量同步最多弹几条特化横幅（段位涨了会让每个来源都多一个改装点，别一下弹一屏）。 */
+    private static final int SPEC_NOTIFY_LIMIT = 3;
+
+    /**
+     * 特化相关的几项计数：各来源一共多少改装点；这次涉及到的类型一共多少突破点、开了几个槽。
+     *
+     * @param typeKeys 这次同步涉及到的类型
+     * @return 带前缀的键（m 来源 / b 类型突破点 / s 类型槽数）到数量
+     */
+    private static Map<String, Integer> specStatus(Set<String> typeKeys) {
+        Map<String, Integer> status = new HashMap<>();
+        if (!snapshot.enableSpecialization) {
+            return status;
+        }
+        for (String overall : DATA.getOverallsView().keySet()) {
+            status.put("m" + overall, SpecPoints.modPointsTotal(DATA, overall, snapshot));
+        }
+        for (String type : typeKeys) {
+            status.put("b" + type, SpecPoints.breakthroughPointsTotal(DATA, type, snapshot));
+            int opened = 0;
+            for (int slot = 1; slot <= snapshot.specRules.slotCount; slot++) {
+                if (SpecializationEffects.isSlotUnlocked(DATA, type, slot, snapshot)) {
+                    opened++;
+                }
+            }
+            status.put("s" + type, opened);
+        }
+        return status;
+    }
+
+    /**
+     * 拿到新的改装点 / 突破点、开了新槽时弹横幅。只提示涨了的，掉了（管理员改等级）不提示。
+     */
+    private static void notifySpecChanges(Map<String, Integer> before, Map<String, Integer> after) {
+        if (before.isEmpty()) {
+            return;
+        }
+        int shown = 0;
+        for (Map.Entry<String, Integer> entry : after.entrySet()) {
+            Integer old = before.get(entry.getKey());
+            int now = entry.getValue();
+            if (old == null || now <= old || shown >= SPEC_NOTIFY_LIMIT) {
+                continue;
+            }
+            String key = entry.getKey().substring(1);
+            ClientWeaponRegistry.ensureBuilt();
+            List<ItemStack> icons = new ArrayList<>();
+            Component title;
+            Component detail;
+            switch (entry.getKey().charAt(0)) {
+                case 'm' -> {
+                    title = ClientWeaponRegistry.sourceName(key);
+                    detail = Component.translatable("toast.albionmastery.spec_points", SpecTerms.of(key, "point"),
+                            old, now);
+                    WeaponSource source = ClientWeaponRegistry.source(key);
+                    if (source != null) {
+                        collectIcons(source.allWeapons(), icons);
+                    }
+                }
+                case 'b' -> {
+                    title = ClientWeaponRegistry.typeName(key);
+                    detail = Component.translatable("toast.albionmastery.spec_break_points", old, now);
+                    WeaponTypeGroup group = ClientWeaponRegistry.typeGroup(key);
+                    if (group != null) {
+                        collectIcons(group.weapons(), icons);
+                    }
+                }
+                default -> {
+                    title = ClientWeaponRegistry.typeName(key);
+                    // 开了几个槽就是前几个槽开了（槽 1 的门槛是其余槽的前提），新开的是第 now 个
+                    detail = Component.translatable("toast.albionmastery.spec_slot",
+                            SpecTerms.slot(WeaponKeys.providerOf(key), newestSlot(key)));
+                    WeaponTypeGroup group = ClientWeaponRegistry.typeGroup(key);
+                    if (group != null) {
+                        collectIcons(group.weapons(), icons);
+                    }
+                }
+            }
+            MasteryToastManager.pushNotice(title, detail, icons);
+            shown++;
+        }
+    }
+
+    /** 这个类型里编号最大的已开槽（四个槽的条件各看各的，开的不一定是连着的）。 */
+    private static int newestSlot(String typeKey) {
+        int newest = 1;
+        for (int slot = 1; slot <= snapshot.specRules.slotCount; slot++) {
+            if (SpecializationEffects.isSlotUnlocked(DATA, typeKey, slot, snapshot)) {
+                newest = slot;
+            }
+        }
+        return newest;
     }
 
     /**

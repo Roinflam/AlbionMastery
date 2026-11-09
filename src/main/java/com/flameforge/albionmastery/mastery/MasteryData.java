@@ -1,5 +1,6 @@
 package com.flameforge.albionmastery.mastery;
 
+import com.flameforge.albionmastery.config.SpecRules;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import com.flameforge.albionmastery.mastery.spec.Specialization;
 import net.minecraft.nbt.CompoundTag;
@@ -43,6 +44,33 @@ public class MasteryData {
     private final Map<String, Integer> typeLevelSum = new HashMap<>();
     /** 类型键 -> 已选特化的完整键。没选过的类型不在表里，按制式处理。 */
     private final Map<String, String> specializations = new HashMap<>();
+
+    /** 全部武器等级之和（增量维护，不参与序列化）。段位按它现算，热路径上不再遍历武器表。 */
+    private long totalWeaponLevels;
+
+    /** 类型键 -> 该类型下满级武器的数量（增量维护，不参与序列化）。 */
+    private final Map<String, Integer> typeMaxedCount = new HashMap<>();
+
+    /**
+     * 特化键 -> 普通版等级（Lv1 起）。普通版按来源共用，特化键里本来就带着来源，不用再分一层。
+     * 0 级的不在表里。
+     */
+    private final Map<String, Integer> specLevels = new HashMap<>();
+
+    /** 类型键 -> （特化键 -> 突破等级 ★1 起）。突破按类型分开。0 级的不在表里。 */
+    private final Map<String, Map<String, Integer>> breakthroughs = new HashMap<>();
+
+    /** 当前的特化存档版本。0 = 改版前（只有两个槽、没有等级）的存档，登录时迁移一次。 */
+    public static final int SPEC_DATA_VERSION = 1;
+
+    /** 这份存档的特化版本，见 {@link #SPEC_DATA_VERSION}。 */
+    private int specDataVersion;
+
+    /**
+     * 点数池 -> 上次重置的时刻（毫秒，系统时间）。改装点按来源一池（键是来源 ID），突破点按类型一池（键是类型键）。
+     * 冷却按池各记各的：没重置过的池没有冷却，所以改版后每一池的第一次重置都是免费的。
+     */
+    private final Map<String, Long> respecTimes = new HashMap<>();
 
     /** 学习点：这名玩家获得专精经验时的倍率，1.0 是默认值。 */
     private double studyMultiplier = 1.0D;
@@ -257,9 +285,15 @@ public class MasteryData {
      * @return 有返回 true
      */
     public boolean hasWeaponOverride(@Nullable String weaponKey) {
-        return weaponKey != null
-                && (this.specializations.containsKey(WeaponKeys.specSlotKey(weaponKey, 1))
-                || this.specializations.containsKey(WeaponKeys.specSlotKey(weaponKey, 2)));
+        if (weaponKey == null) {
+            return false;
+        }
+        for (int slot = 1; slot <= WeaponKeys.SPEC_SLOTS; slot++) {
+            if (this.specializations.containsKey(WeaponKeys.specSlotKey(weaponKey, slot))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -290,6 +324,192 @@ public class MasteryData {
             this.needFullSync = true;
         }
         return removed;
+    }
+
+    /**
+     * @param specKey 特化键
+     * @return 普通版等级，没升过是 0
+     */
+    public int getSpecLevel(String specKey) {
+        Integer level = this.specLevels.get(specKey);
+        return level == null ? 0 : level;
+    }
+
+    /**
+     * 设置普通版等级。不做点数校验，那是 {@code SpecializationManager} 的事。
+     *
+     * @param specKey 特化键
+     * @param level   等级，0 及以下表示清掉
+     */
+    public void setSpecLevel(String specKey, int level) {
+        if (level <= 0) {
+            this.specLevels.remove(specKey);
+        } else {
+            this.specLevels.put(specKey, level);
+        }
+        this.needFullSync = true;
+    }
+
+    /**
+     * @param typeKey 类型键
+     * @param specKey 特化键
+     * @return 这个类型里的突破等级，没突破过是 0
+     */
+    public int getBreakthrough(String typeKey, String specKey) {
+        Map<String, Integer> perType = this.breakthroughs.get(typeKey);
+        Integer star = perType == null ? null : perType.get(specKey);
+        return star == null ? 0 : star;
+    }
+
+    /**
+     * 设置某个类型里的突破等级。
+     *
+     * @param typeKey 类型键
+     * @param specKey 特化键
+     * @param star    突破等级，0 及以下表示清掉
+     */
+    public void setBreakthrough(String typeKey, String specKey, int star) {
+        if (star <= 0) {
+            Map<String, Integer> perType = this.breakthroughs.get(typeKey);
+            if (perType != null) {
+                perType.remove(specKey);
+                if (perType.isEmpty()) {
+                    this.breakthroughs.remove(typeKey);
+                }
+            }
+        } else {
+            this.breakthroughs.computeIfAbsent(typeKey, key -> new HashMap<>()).put(specKey, star);
+        }
+        this.needFullSync = true;
+    }
+
+    /**
+     * 清掉某个来源的全部普通版等级，连带这个来源所有类型里的突破（突破依赖普通版满级）。
+     *
+     * @param providerId 来源 ID
+     * @return 原来有没有东西被清掉
+     */
+    public boolean clearSourceProgress(String providerId) {
+        boolean changed = this.specLevels.keySet().removeIf(key -> {
+            Specialization spec = Specialization.byKey(key);
+            return spec == null || providerId.equals(spec.sourceId());
+        });
+        changed |= this.breakthroughs.keySet().removeIf(typeKey -> providerId.equals(WeaponKeys.providerOf(typeKey)));
+        if (changed) {
+            this.needFullSync = true;
+        }
+        return changed;
+    }
+
+    /**
+     * 清掉某个类型的全部突破。
+     *
+     * @param typeKey 类型键
+     * @return 原来有没有
+     */
+    public boolean clearTypeBreakthroughs(String typeKey) {
+        boolean changed = this.breakthroughs.remove(typeKey) != null;
+        if (changed) {
+            this.needFullSync = true;
+        }
+        return changed;
+    }
+
+    /**
+     * @return 只读的普通版等级表
+     */
+    public Map<String, Integer> getSpecLevelsView() {
+        return Collections.unmodifiableMap(this.specLevels);
+    }
+
+    /**
+     * @return 只读的突破表（内层表也别改）
+     */
+    public Map<String, Map<String, Integer>> getBreakthroughsView() {
+        return Collections.unmodifiableMap(this.breakthroughs);
+    }
+
+    /**
+     * 用同步下来的等级表、突破表和退点时刻整体替换本地数据，只在客户端使用。
+     *
+     * @param levels        普通版等级
+     * @param breakthroughs 突破
+     * @param respecTimes   各池上次重置的时刻（已经换算成本机时间）
+     */
+    public void replaceSpecProgress(Map<String, Integer> levels, Map<String, Map<String, Integer>> breakthroughs,
+                                    Map<String, Long> respecTimes) {
+        this.specLevels.clear();
+        this.specLevels.putAll(levels);
+        this.breakthroughs.clear();
+        breakthroughs.forEach((type, perType) -> this.breakthroughs.put(type, new HashMap<>(perType)));
+        this.respecTimes.clear();
+        this.respecTimes.putAll(respecTimes);
+        this.specDataVersion = SPEC_DATA_VERSION;
+    }
+
+    /** @return 这份存档的特化版本 */
+    public int getSpecDataVersion() {
+        return this.specDataVersion;
+    }
+
+    /** @param version 特化版本 */
+    public void setSpecDataVersion(int version) {
+        this.specDataVersion = version;
+    }
+
+    /**
+     * @param pool 点数池：来源 ID（改装点）或类型键（突破点）
+     * @return 这一池上次重置的时刻（毫秒），0 = 没重置过
+     */
+    public long getRespecAt(String pool) {
+        Long at = this.respecTimes.get(pool);
+        return at == null ? 0L : at;
+    }
+
+    /**
+     * @param pool   点数池
+     * @param millis 重置的时刻（毫秒）；0 及以下表示清掉
+     */
+    public void setRespecAt(String pool, long millis) {
+        if (millis <= 0L) {
+            this.respecTimes.remove(pool);
+        } else {
+            this.respecTimes.put(pool, millis);
+        }
+        this.needFullSync = true;
+    }
+
+    /**
+     * 清掉全部退点冷却（管理指令用）。
+     *
+     * @return 原来有没有
+     */
+    public boolean clearRespecTimes() {
+        boolean had = !this.respecTimes.isEmpty();
+        this.respecTimes.clear();
+        this.needFullSync = true;
+        return had;
+    }
+
+    /** @return 只读的退点时刻表 */
+    public Map<String, Long> getRespecTimesView() {
+        return Collections.unmodifiableMap(this.respecTimes);
+    }
+
+    /**
+     * @return 全部武器等级之和（段位就按它算）
+     */
+    public long getTotalWeaponLevels() {
+        return this.totalWeaponLevels;
+    }
+
+    /**
+     * @param typeKey 类型键
+     * @return 这个类型下满级武器的数量
+     */
+    public int getMaxedWeaponCount(String typeKey) {
+        Integer count = this.typeMaxedCount.get(typeKey);
+        return count == null ? 0 : count;
     }
 
     /**
@@ -359,26 +579,18 @@ public class MasteryData {
             return false;
         }
         WeaponRecord record = this.weapons.computeIfAbsent(weaponKey, key -> new WeaponRecord());
+        unindex(record);
         // 类型可能因为枪包更新而变化，每次发经验都以最新的为准
-        if (!typeKey.equals(record.typeKey)) {
-            if (record.typeKey != null) {
-                this.typeLevelSum.merge(record.typeKey, -record.level, Integer::sum);
-            }
-            record.typeKey = typeKey;
-            this.typeLevelSum.merge(typeKey, record.level, Integer::sum);
-        }
+        record.typeKey = typeKey;
 
         long max = curve.totalXpToReach(curve.getMaxLevel());
         int oldLevel = record.level;
         record.xp = addCapped(record.xp, amount, max);
         record.level = curve.levelFor(record.xp);
+        record.maxed = record.level >= curve.getMaxLevel();
+        index(record);
         this.dirtyWeapons.add(weaponKey);
-
-        if (record.level != oldLevel) {
-            this.typeLevelSum.merge(typeKey, record.level - oldLevel, Integer::sum);
-            return true;
-        }
-        return false;
+        return record.level != oldLevel;
     }
 
     /**
@@ -464,19 +676,54 @@ public class MasteryData {
         long clamped = Math.max(0L, Math.min(max, xp));
         WeaponRecord record = this.weapons.computeIfAbsent(weaponKey, key -> new WeaponRecord());
 
-        if (record.typeKey != null) {
-            this.typeLevelSum.merge(record.typeKey, -record.level, Integer::sum);
-        }
+        unindex(record);
         if (typeKey != null) {
             record.typeKey = typeKey;
         }
         record.xp = clamped;
         record.level = curve.levelFor(clamped);
-        if (record.typeKey != null) {
-            this.typeLevelSum.merge(record.typeKey, record.level, Integer::sum);
-        }
+        record.maxed = record.level >= curve.getMaxLevel();
+        index(record);
         if (markDirty) {
             this.dirtyWeapons.add(weaponKey);
+        }
+    }
+
+    /**
+     * 把一件武器从缓存里摘掉（改等级 / 改类型之前调）。
+     */
+    private void unindex(WeaponRecord record) {
+        this.totalWeaponLevels -= record.level;
+        if (record.typeKey != null) {
+            this.typeLevelSum.merge(record.typeKey, -record.level, Integer::sum);
+            if (record.maxed) {
+                this.typeMaxedCount.merge(record.typeKey, -1, Integer::sum);
+            }
+        }
+    }
+
+    /**
+     * 把一件武器记进缓存（改完等级 / 类型之后调）。
+     */
+    private void index(WeaponRecord record) {
+        this.totalWeaponLevels += record.level;
+        if (record.typeKey != null) {
+            this.typeLevelSum.merge(record.typeKey, record.level, Integer::sum);
+            if (record.maxed) {
+                this.typeMaxedCount.merge(record.typeKey, 1, Integer::sum);
+            }
+        }
+    }
+
+    /**
+     * 按武器表现有的等级重建全部缓存。
+     */
+    private void rebuildIndexes() {
+        this.typeLevelSum.clear();
+        this.typeMaxedCount.clear();
+        this.totalWeaponLevels = 0L;
+        for (WeaponRecord record : this.weapons.values()) {
+            index(record);
         }
     }
 
@@ -524,7 +771,14 @@ public class MasteryData {
         this.types.clear();
         this.overalls.clear();
         this.typeLevelSum.clear();
+        this.typeMaxedCount.clear();
+        this.totalWeaponLevels = 0L;
         this.specializations.clear();
+        this.specLevels.clear();
+        this.breakthroughs.clear();
+        // 清空后就是一份新版存档，不用再迁移；退点冷却跟着清
+        this.specDataVersion = SPEC_DATA_VERSION;
+        this.respecTimes.clear();
         this.studyMultiplier = 1.0D;
         // 清空后段位归零；记成 0 而不是 -1，重新练上去时播的是「晋升」而不是「评定」
         this.rankSeen = 0;
@@ -544,13 +798,11 @@ public class MasteryData {
      * @param overallCurve 总体的曲线
      */
     public void recomputeLevels(LevelCurve weaponCurve, LevelCurve typeCurve, LevelCurve overallCurve) {
-        this.typeLevelSum.clear();
         for (WeaponRecord record : this.weapons.values()) {
             record.level = weaponCurve.levelFor(record.xp);
-            if (record.typeKey != null) {
-                this.typeLevelSum.merge(record.typeKey, record.level, Integer::sum);
-            }
+            record.maxed = record.level >= weaponCurve.getMaxLevel();
         }
+        rebuildIndexes();
         for (Entry entry : this.types.values()) {
             entry.level = typeCurve.levelFor(entry.xp);
         }
@@ -577,13 +829,20 @@ public class MasteryData {
         for (Map.Entry<String, Entry> mapEntry : other.overalls.entrySet()) {
             this.overalls.put(mapEntry.getKey(), mapEntry.getValue().copy());
         }
-        this.typeLevelSum.clear();
-        this.typeLevelSum.putAll(other.typeLevelSum);
+        rebuildIndexes();
         // 特化与学习点也要跟着走。漏了这两行的后果是：玩家一死，
         // 辛苦练满才选上的特化会被打回「制式」，管理员发的学习点也归 1，
         // 而且完全没有任何报错，只有玩家自己发现「我的加成怎么没了」
         this.specializations.clear();
         this.specializations.putAll(other.specializations);
+        // 特化等级、突破、退点状态同样要跟着走，漏了的话死一次点数就全白花了
+        this.specLevels.clear();
+        this.specLevels.putAll(other.specLevels);
+        this.breakthroughs.clear();
+        other.breakthroughs.forEach((type, perType) -> this.breakthroughs.put(type, new HashMap<>(perType)));
+        this.specDataVersion = other.specDataVersion;
+        this.respecTimes.clear();
+        this.respecTimes.putAll(other.respecTimes);
         this.studyMultiplier = other.studyMultiplier;
         // 漏拷的话死一次就回到「从没评定过」，重生时会把段位评定动画再放一遍
         this.rankSeen = other.rankSeen;
@@ -700,6 +959,35 @@ public class MasteryData {
             specList.add(tag);
         }
         root.put("Specs", specList);
+
+        ListTag levelList = new ListTag();
+        for (Map.Entry<String, Integer> mapEntry : this.specLevels.entrySet()) {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("S", mapEntry.getKey());
+            tag.putInt("L", mapEntry.getValue());
+            levelList.add(tag);
+        }
+        root.put("SpecLv", levelList);
+        ListTag breakList = new ListTag();
+        for (Map.Entry<String, Map<String, Integer>> perType : this.breakthroughs.entrySet()) {
+            for (Map.Entry<String, Integer> mapEntry : perType.getValue().entrySet()) {
+                CompoundTag tag = new CompoundTag();
+                tag.putString("T", perType.getKey());
+                tag.putString("S", mapEntry.getKey());
+                tag.putInt("L", mapEntry.getValue());
+                breakList.add(tag);
+            }
+        }
+        root.put("SpecBt", breakList);
+        root.putInt("SpecVer", this.specDataVersion);
+        ListTag respecList = new ListTag();
+        for (Map.Entry<String, Long> mapEntry : this.respecTimes.entrySet()) {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("K", mapEntry.getKey());
+            tag.putLong("T", mapEntry.getValue());
+            respecList.add(tag);
+        }
+        root.put("Respec", respecList);
         // 默认值不写盘，省得给每个玩家的存档都塞一个 1.0
         if (this.studyMultiplier != 1.0D) {
             root.putDouble("Study", this.studyMultiplier);
@@ -721,7 +1009,23 @@ public class MasteryData {
         this.types.clear();
         this.overalls.clear();
         this.typeLevelSum.clear();
+        this.typeMaxedCount.clear();
+        this.totalWeaponLevels = 0L;
         this.specializations.clear();
+        this.specLevels.clear();
+        this.breakthroughs.clear();
+        // 改版前的存档没有 SpecVer：读成 0，登录时按老规则迁移一次
+        this.specDataVersion = root.contains("SpecVer") ? Math.max(0, root.getInt("SpecVer")) : 0;
+        this.respecTimes.clear();
+        ListTag respecList = root.getList("Respec", Tag.TAG_COMPOUND);
+        for (int i = 0; i < respecList.size(); i++) {
+            CompoundTag tag = respecList.getCompound(i);
+            String pool = tag.getString("K");
+            long at = tag.getLong("T");
+            if (at > 0L && (WeaponKeys.isValidTypeKey(pool) || WeaponKeys.isValidOverallKey(pool))) {
+                this.respecTimes.put(pool, at);
+            }
+        }
         // 老存档没有这个键，getDouble 返回 0，要显式回落到 1.0
         double study = root.contains("Study") ? root.getDouble("Study") : 1.0D;
         // NaN 过不了 min / max 的夹取，得单独挡：坏掉的存档里读出 NaN 会让每次只发 1 点经验
@@ -765,6 +1069,27 @@ public class MasteryData {
             if (spec != null && (WeaponKeys.isValidTypeKey(baseKey) || WeaponKeys.isValidWeaponKey(baseKey))
                     && spec.sourceId().equals(WeaponKeys.providerOf(baseKey))) {
                 this.specializations.put(typeKey, value);
+            }
+        }
+
+        ListTag levelList = root.getList("SpecLv", Tag.TAG_COMPOUND);
+        for (int i = 0; i < levelList.size(); i++) {
+            CompoundTag tag = levelList.getCompound(i);
+            Specialization spec = Specialization.byKey(tag.getString("S"));
+            int level = Math.min(SpecRules.MAX_LEVELS, tag.getInt("L"));
+            if (spec != null && !spec.isStandard() && level > 0) {
+                this.specLevels.put(spec.key(), level);
+            }
+        }
+        ListTag breakList = root.getList("SpecBt", Tag.TAG_COMPOUND);
+        for (int i = 0; i < breakList.size(); i++) {
+            CompoundTag tag = breakList.getCompound(i);
+            String typeKey = tag.getString("T");
+            Specialization spec = Specialization.byKey(tag.getString("S"));
+            int star = Math.min(SpecRules.MAX_LEVELS, tag.getInt("L"));
+            if (spec != null && !spec.isStandard() && star > 0 && WeaponKeys.isValidTypeKey(typeKey)
+                    && spec.sourceId().equals(WeaponKeys.providerOf(typeKey))) {
+                this.breakthroughs.computeIfAbsent(typeKey, key -> new HashMap<>()).put(spec.key(), star);
             }
         }
         this.needFullSync = true;
@@ -835,12 +1160,16 @@ public class MasteryData {
         /** 所属类型键，老存档可能为 null。 */
         public String typeKey;
 
+        /** 等级到没到上限（缓存，和 level 一起更新）。 */
+        public boolean maxed;
+
         @Override
         public WeaponRecord copy() {
             WeaponRecord copy = new WeaponRecord();
             copy.xp = this.xp;
             copy.level = this.level;
             copy.typeKey = this.typeKey;
+            copy.maxed = this.maxed;
             return copy;
         }
     }

@@ -5,6 +5,7 @@ import com.flameforge.albionmastery.client.rank.ClientRank;
 import com.flameforge.albionmastery.client.rank.RankEmblem;
 import com.flameforge.albionmastery.client.weapon.ClientWeaponRegistry;
 import com.flameforge.albionmastery.client.weapon.WeaponSource;
+import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.rank.MasteryRank;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -704,6 +705,16 @@ public class RankTrackScreen extends Screen {
         if (i == this.endRank) {
             lines.add(I18n.get("gui.albionmastery.rank_track.node.end_detail"));
             colors.add(MasteryPalette.TEXT_DIM);
+        }
+        // 段位给特化的两样好处：开槽门槛减几级、每个来源多几个改装点
+        MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
+        if (snapshot.enableSpecialization) {
+            int reduction = snapshot.specRules.rankReductionLevels(i, snapshot.maxLevel);
+            int points = snapshot.specRules.modPointsFromRank(i);
+            if (reduction > 0 || points > 0) {
+                lines.add(I18n.get("gui.albionmastery.rank_track.node.spec", reduction, points));
+                colors.add(MasteryPalette.PROGRESS);
+            }
         }
 
         int width = this.font.width(name) + 6 + this.font.width(rankLabel);

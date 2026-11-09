@@ -3,6 +3,8 @@ package com.flameforge.albionmastery.network;
 import com.flameforge.albionmastery.client.ClientMasteryCache;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.mastery.MasteryData;
+import com.flameforge.albionmastery.config.SpecRules;
+import com.flameforge.albionmastery.mastery.spec.SpecPoints;
 import com.flameforge.albionmastery.mastery.spec.Specialization;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import net.minecraft.network.FriendlyByteBuf;
@@ -48,6 +50,9 @@ public class S2CSyncMasteryPacket {
     /** 学习点倍率。 */
     private final double studyMultiplier;
 
+    /** 特化等级、突破、各点数池的退点冷却。 */
+    private final SpecProgress progress;
+
     /**
      * 构造网络包。
      *
@@ -63,7 +68,9 @@ public class S2CSyncMasteryPacket {
                                 Map<String, Long> types,
                                 Map<String, Long> overalls,
                                 Map<String, String> specializations,
-                                double studyMultiplier) {
+                                double studyMultiplier,
+                                SpecProgress progress) {
+        this.progress = progress;
         this.snapshot = snapshot;
         this.weapons = weapons;
         this.types = types;
@@ -88,9 +95,21 @@ public class S2CSyncMasteryPacket {
                         record.typeKey == null ? "" : record.typeKey));
             }
         }
+        // 退点冷却发「还剩多少毫秒」而不是服务端的时刻：两边系统时间不一定对得上
+        long now = System.currentTimeMillis();
+        Map<String, Long> respec = new HashMap<>();
+        for (String pool : data.getRespecTimesView().keySet()) {
+            long remaining = SpecPoints.respecRemainingMillis(data, pool, snapshot.specRules, now);
+            if (remaining > 0L) {
+                respec.put(pool, remaining);
+            }
+        }
+        Map<String, Map<String, Integer>> breakthroughs = new HashMap<>();
+        data.getBreakthroughsView().forEach((type, perType) -> breakthroughs.put(type, new HashMap<>(perType)));
         return new S2CSyncMasteryPacket(snapshot, weapons,
                 toXpMap(data.getTypesView()), toXpMap(data.getOverallsView()),
-                new HashMap<>(data.getSpecializationsView()), data.getStudyMultiplier());
+                new HashMap<>(data.getSpecializationsView()), data.getStudyMultiplier(),
+                new SpecProgress(new HashMap<>(data.getSpecLevelsView()), breakthroughs, respec));
     }
 
     private static Map<String, Long> toXpMap(Map<String, MasteryData.Entry> source) {
@@ -124,6 +143,7 @@ public class S2CSyncMasteryPacket {
             buf.writeUtf(entry.getValue(), 128);
         }
         buf.writeDouble(this.studyMultiplier);
+        this.progress.write(buf);
     }
 
     /**
@@ -170,7 +190,8 @@ public class S2CSyncMasteryPacket {
             study = 1.0D;
         }
         study = Math.max(0.0D, Math.min(100.0D, study));
-        return new S2CSyncMasteryPacket(snapshot, weapons, types, overalls, specializations, study);
+        SpecProgress progress = SpecProgress.read(buf);
+        return new S2CSyncMasteryPacket(snapshot, weapons, types, overalls, specializations, study, progress);
     }
 
     /**
@@ -183,7 +204,7 @@ public class S2CSyncMasteryPacket {
         ctx.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> () -> ClientMasteryCache.acceptFullSync(
                         this.snapshot, this.weapons, this.types, this.overalls,
-                        this.specializations, this.studyMultiplier)));
+                        this.specializations, this.studyMultiplier, this.progress)));
         ctx.setPacketHandled(true);
     }
 
@@ -224,5 +245,71 @@ public class S2CSyncMasteryPacket {
      * @param typeKey 所属类型键，空串表示未知
      */
     public record WeaponSync(long xp, String typeKey) {
+    }
+
+    /**
+     * 特化养成的同步载荷。
+     *
+     * @param levels          特化键 -&gt; 普通版等级
+     * @param breakthroughs   类型键 -&gt; （特化键 -&gt; 突破等级）
+     * @param respecRemaining 点数池 -&gt; 退点冷却还剩多少毫秒（没冷却的不在表里）
+     */
+    public record SpecProgress(Map<String, Integer> levels, Map<String, Map<String, Integer>> breakthroughs,
+                               Map<String, Long> respecRemaining) {
+
+        void write(FriendlyByteBuf buf) {
+            buf.writeVarInt(this.levels.size());
+            this.levels.forEach((key, level) -> {
+                buf.writeUtf(key, 128);
+                buf.writeVarInt(level);
+            });
+            int count = 0;
+            for (Map<String, Integer> perType : this.breakthroughs.values()) {
+                count += perType.size();
+            }
+            buf.writeVarInt(count);
+            this.breakthroughs.forEach((type, perType) -> perType.forEach((key, star) -> {
+                buf.writeUtf(type, 256);
+                buf.writeUtf(key, 128);
+                buf.writeVarInt(star);
+            }));
+            buf.writeVarInt(this.respecRemaining.size());
+            this.respecRemaining.forEach((pool, remaining) -> {
+                buf.writeUtf(pool, 256);
+                buf.writeVarLong(remaining);
+            });
+        }
+
+        static SpecProgress read(FriendlyByteBuf buf) {
+            int levelCount = readSize(buf);
+            Map<String, Integer> levels = new HashMap<>();
+            for (int i = 0; i < levelCount; i++) {
+                String key = buf.readUtf(128);
+                int level = Math.max(0, Math.min(SpecRules.MAX_LEVELS, buf.readVarInt()));
+                if (level > 0 && Specialization.byKey(key) != null) {
+                    levels.put(key, level);
+                }
+            }
+            int breakCount = readSize(buf);
+            Map<String, Map<String, Integer>> breakthroughs = new HashMap<>();
+            for (int i = 0; i < breakCount; i++) {
+                String type = buf.readUtf(256);
+                String key = buf.readUtf(128);
+                int star = Math.max(0, Math.min(SpecRules.MAX_LEVELS, buf.readVarInt()));
+                if (star > 0 && WeaponKeys.isValidTypeKey(type) && Specialization.byKey(key) != null) {
+                    breakthroughs.computeIfAbsent(type, t -> new HashMap<>()).put(key, star);
+                }
+            }
+            int respecCount = readSize(buf);
+            Map<String, Long> respec = new HashMap<>();
+            for (int i = 0; i < respecCount; i++) {
+                String pool = buf.readUtf(256);
+                long remaining = buf.readVarLong();
+                if (remaining > 0L) {
+                    respec.put(pool, remaining);
+                }
+            }
+            return new SpecProgress(levels, breakthroughs, respec);
+        }
     }
 }

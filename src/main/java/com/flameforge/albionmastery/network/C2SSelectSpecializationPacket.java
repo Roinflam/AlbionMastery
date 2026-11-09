@@ -34,7 +34,7 @@ public class C2SSelectSpecializationPacket {
     /** 特化的完整键。 */
     private final String specKey;
 
-    /** 槽位，1 或 2。 */
+    /** 槽位，1～4。 */
     private final int slot;
 
     /** 武器键：空串表示改类型的通用配置，否则改这件武器的独立配置。 */
@@ -187,7 +187,7 @@ public class C2SSelectSpecializationPacket {
         switch (result) {
             case OK -> player.playNotifySound(SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS,
                     0.6F, 1.4F);
-            case LOCKED, COOLDOWN, DISABLED, DUPLICATE, CONFLICT -> player.playNotifySound(SoundEvents.VILLAGER_NO,
+            case LOCKED, COOLDOWN, DISABLED, DUPLICATE, CONFLICT, NOT_LEVELED -> player.playNotifySound(SoundEvents.VILLAGER_NO,
                     SoundSource.PLAYERS, 0.7F, 1.0F);
             // 键非法或者没变，不出声
             default -> {
@@ -235,9 +235,18 @@ public class C2SSelectSpecializationPacket {
                             formatDuration(SpecializationManager.remainingSwitchCooldown(
                                     player, typeKey, weaponKey, slot, MasteryConfig.serverSnapshot())))
                     .withStyle(ChatFormatting.RED);
-            // 键非法或者压根没变，不用打扰玩家
-            case INVALID, UNCHANGED -> null;
+            case NOT_LEVELED -> Component.translatable(
+                            snapshotRules().isBreakthroughSlot(slot)
+                                    ? "msg.albionmastery.spec_not_broken" : "msg.albionmastery.spec_not_leveled",
+                            Component.translatable(spec.nameKey()), SpecTerms.slot(spec.sourceId(), slot))
+                    .withStyle(ChatFormatting.RED);
+            // 键非法或者压根没变，不用打扰玩家；剩下几种是升级 / 突破才有的结果
+            case INVALID, UNCHANGED, NO_POINTS, MAXED, NEED_NORMAL_MAX -> null;
         };
+    }
+
+    private static com.flameforge.albionmastery.config.SpecRules snapshotRules() {
+        return MasteryConfig.serverSnapshot().specRules;
     }
 
     /**
@@ -249,7 +258,7 @@ public class C2SSelectSpecializationPacket {
      * @param seconds 秒数
      * @return 组件
      */
-    private static Component formatDuration(long seconds) {
+    static Component formatDuration(long seconds) {
         long minutes = (seconds + 59L) / 60L;
         if (minutes < 60L) {
             return Component.translatable("msg.albionmastery.duration_minutes", minutes);

@@ -65,7 +65,9 @@ public final class MasteryHelper {
         // 不同武器体系的基础强度跨度非常大：原版剑和高阶模组枪 / 法术拿同一套专精百分比，
         // 要么原版完全没感觉，要么模组武器直接失控。先按来源取得专精倍率，再统一作用到三层
         // （总体 / 类型 / 单武器）以及同类型联动。这个倍率只属于“专精等级加成”，不碰特化。
-        double sourceMultiplier = snapshot.masteryDamageMultiplier(weapon.providerId());
+        // 单件武器还可以另配一个倍率（weaponDamageMultipliers），和来源倍率叠乘
+        double sourceMultiplier = snapshot.masteryDamageMultiplier(weapon.providerId())
+                * snapshot.weaponDamageMultiplier(weapon.weaponKey());
         double fromOverall = overallLevel * snapshot.overallDamagePerLevel * sourceMultiplier;
         double fromType = typeLevel * snapshot.typeDamagePerLevel * sourceMultiplier;
         double fromSelf = weaponLevel * snapshot.weaponDamagePerLevel * sourceMultiplier;
@@ -137,6 +139,15 @@ public final class MasteryHelper {
             double specGain = SpecializationEffects.forData(data, weapon, snapshot).xpGain();
             if (specGain != 1.0D) {
                 amount = Math.max(1L, roundRandomly(amount * specGain));
+            }
+            // 单件武器的经验倍率（weaponXpMultipliers）：这件武器太好刷 / 太难刷时由服主调，
+            // 武器、类型、来源三层拿到的是同一个数，所以三层一起涨
+            double weaponGain = snapshot.weaponXpMultiplier(weapon.weaponKey());
+            if (weaponGain != 1.0D) {
+                if (weaponGain <= 0.0D) {
+                    return false;
+                }
+                amount = Math.max(1L, roundRandomly(amount * weaponGain));
             }
             double multiplier = data.getStudyMultiplier();
             if (multiplier != 1.0D) {

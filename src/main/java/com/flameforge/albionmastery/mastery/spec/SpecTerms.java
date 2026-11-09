@@ -14,7 +14,8 @@ import javax.annotation.Nullable;
  * <ul>
  *     <li>{@code page}：这一整套叫什么（枪械改装、法术铭刻……），当标题和按钮用；</li>
  *     <li>{@code spec}：单独一项叫什么（改装、铭刻……）；</li>
- *     <li>{@code slot1} / {@code slot2}：两栏叫什么（主改装 / 副改装……）；</li>
+ *     <li>{@code slot1} ～ {@code slot4}：四个槽叫什么（改装槽 1 / 突破槽 1 / 改装槽 2 / 突破槽 2……）；</li>
+ *     <li>{@code point}：升级普通版用的点数叫什么（改装点、修习点……），突破点各来源都叫突破点；</li>
  *     <li>{@code group}：分组叫什么（部位、类别……），同一组里只能选一个。</li>
  * </ul>
  * 每个来源都在语言文件里写全了，不做回退，服务端发出去的提示也能直接用。来源不认识时用 {@code default} 那一套。
@@ -26,7 +27,7 @@ public final class SpecTerms {
 
     /**
      * @param sourceId 来源 ID，可为 null
-     * @param term     词：page / spec / slot1 / slot2 / group
+     * @param term     词：page / spec / slot1～slot4 / point / group
      * @return 语言键
      */
     public static String key(@Nullable String sourceId, String term) {
@@ -45,7 +46,7 @@ public final class SpecTerms {
 
     /**
      * @param sourceId 来源 ID，可为 null
-     * @param slot     第几栏，1 或 2
+     * @param slot     第几个槽，1～4
      * @return 这一栏的叫法
      */
     public static MutableComponent slot(@Nullable String sourceId, int slot) {

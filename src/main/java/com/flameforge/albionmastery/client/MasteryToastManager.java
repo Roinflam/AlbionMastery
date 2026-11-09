@@ -160,6 +160,30 @@ public final class MasteryToastManager {
     }
 
     /**
+     * 排一条特化相关的横幅（拿到新的改装点 / 突破点、开了新槽），样子和升级横幅一样，第二行是现成的文案。
+     * 优先级和类型升级一样。
+     *
+     * @param title  标题（来源名或类型名）
+     * @param detail 第二行
+     * @param icons  轮换图标
+     */
+    public static void pushNotice(Component title, Component detail, List<ItemStack> icons) {
+        List<ItemStack> usable = new ArrayList<>();
+        if (icons != null) {
+            for (ItemStack stack : icons) {
+                if (stack != null && !stack.isEmpty()) {
+                    usable.add(stack);
+                    if (usable.size() >= MAX_ICONS) {
+                        break;
+                    }
+                }
+            }
+        }
+        insertPending(new Pending(1, sequence++, title, Component.empty(), 0, 0, List.copyOf(usable),
+                false, 1.0D, detail, null, "", false));
+    }
+
+    /**
      * 有空位就从等待队列放一条上屏。
      *
      * @param now 当前时刻

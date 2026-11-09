@@ -171,8 +171,7 @@ public final class MasteryConfig {
                 COMMON.splitMeleeByPack.get(),
                 COMMON.enableSpecialization.get(),
                 COMMON.specSwitchCooldownSeconds.get(),
-                COMMON.specSlot1Percent.get(),
-                COMMON.specSlot2Percent.get(),
+                buildSpecRules(),
                 collectSpecValues(),
                 true,
                 List.copyOf(COMMON.extraWeapons.get()),
@@ -180,11 +179,101 @@ public final class MasteryConfig {
                 COMMON.spellMasteryManaShare.get(),
                 COMMON.spellMasteryCooldownShare.get(),
                 COMMON.spellMasteryReductionCap.get(),
-                COMMON.rankXpPerWeaponLevel.get()
+                COMMON.rankXpPerWeaponLevel.get(),
+                parseWeaponMultipliers(COMMON.weaponXpMultipliers.get()),
+                parseWeaponMultipliers(COMMON.weaponDamageMultipliers.get())
         );
         // 武器补录表两端各自按同一份配置刷新：服务端读自己的配置，客户端读同步过来的快照
         WeaponOverrides.applyFromConfig(serverSnapshot.extraWeapons, serverSnapshot.notWeapons);
         AlbionMastery.LOGGER.info("Mastery configuration refreshed: independent source multipliers");
+    }
+
+    /**
+     * 把配置里的特化养成规则读成一份不可变的 {@link SpecRules}。
+     *
+     * @return 规则
+     */
+    private static SpecRules buildSpecRules() {
+        return new SpecRules(
+                COMMON.specSlotCount.get(),
+                COMMON.specSlot1WeaponPercent.get(),
+                COMMON.specSlot2TypePercent.get(),
+                COMMON.specSlot3SourcePercent.get(),
+                COMMON.specSlot4TypePercent.get(),
+                COMMON.specTypeBypassPercent.get(),
+                SpecRules.parseScale(COMMON.specNormalLevelScale.get()),
+                SpecRules.parseScale(COMMON.specBreakthroughLevelScale.get()),
+                SpecRules.parseCost(COMMON.specNormalLevelCost.get()),
+                SpecRules.parseCost(COMMON.specBreakthroughLevelCost.get()),
+                COMMON.specModPointsAtMaxSource.get(),
+                COMMON.specBreakthroughPointsAtMaxType.get(),
+                COMMON.specRankModPointStart.get(),
+                COMMON.specRankModPointEvery.get(),
+                COMMON.specRankModPointMax.get(),
+                COMMON.specMaxedWeaponBreakthroughPoint.get(),
+                COMMON.specMaxedWeaponBreakthroughPointMax.get(),
+                COMMON.specRankReductionStart.get(),
+                COMMON.specRankReductionEvery.get(),
+                COMMON.specRankReductionPercentPerStep.get(),
+                COMMON.specRankReductionMaxPercent.get(),
+                COMMON.specRankReductionMaxedWeaponsInType.get(),
+                COMMON.specRespecCooldownSeconds.get());
+    }
+
+    /**
+     * 单件武器倍率表的一行写得对不对：「武器ID=倍率」，倍率是 0～100 的数。
+     *
+     * @param value 配置值
+     * @return 合法返回 true
+     */
+    public static boolean validWeaponMultiplier(Object value) {
+        return value instanceof String text && parseWeaponMultiplier(text) != null;
+    }
+
+    /**
+     * 解析一行「武器ID=倍率」。
+     *
+     * @param line 一行
+     * @return 键和倍率；写错时返回 null
+     */
+    @javax.annotation.Nullable
+    private static Map.Entry<String, Double> parseWeaponMultiplier(String line) {
+        int eq = line.lastIndexOf('=');
+        if (eq <= 0 || eq >= line.length() - 1) {
+            return null;
+        }
+        String key = line.substring(0, eq).trim();
+        if (key.isEmpty() || key.indexOf(':') < 0 || key.length() > 256) {
+            return null;
+        }
+        try {
+            double multiplier = Double.parseDouble(line.substring(eq + 1).trim());
+            if (Double.isNaN(multiplier) || multiplier < 0.0D || multiplier > 100.0D) {
+                return null;
+            }
+            return Map.entry(key, multiplier);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 把单件武器倍率表读成「键 → 倍率」，写错的行跳过。
+     *
+     * @param lines 配置里的行
+     * @return 键是武器 ID 或完整武器键
+     */
+    private static Map<String, Double> parseWeaponMultipliers(List<? extends String> lines) {
+        Map<String, Double> out = new LinkedHashMap<>();
+        for (String line : lines) {
+            Map.Entry<String, Double> entry = line == null ? null : parseWeaponMultiplier(line);
+            if (entry != null) {
+                out.put(entry.getKey(), entry.getValue());
+            } else if (line != null && !line.isBlank()) {
+                AlbionMastery.LOGGER.warn("[albionmastery] 单件武器倍率写错了，跳过：{}", line);
+            }
+        }
+        return out;
     }
 
     /**
@@ -360,8 +449,33 @@ public final class MasteryConfig {
 
         /** 明确不算武器的物品。 */
         public final ForgeConfigSpec.ConfigValue<List<? extends String>> notWeapons;
-        public final ForgeConfigSpec.IntValue specSlot1Percent;
-        public final ForgeConfigSpec.IntValue specSlot2Percent;
+        public final ForgeConfigSpec.IntValue specSlotCount;
+        public final ForgeConfigSpec.IntValue specSlot1WeaponPercent;
+        public final ForgeConfigSpec.IntValue specSlot2TypePercent;
+        public final ForgeConfigSpec.IntValue specSlot3SourcePercent;
+        public final ForgeConfigSpec.IntValue specSlot4TypePercent;
+        public final ForgeConfigSpec.IntValue specTypeBypassPercent;
+        public final ForgeConfigSpec.ConfigValue<String> specNormalLevelScale;
+        public final ForgeConfigSpec.ConfigValue<String> specBreakthroughLevelScale;
+        public final ForgeConfigSpec.ConfigValue<String> specNormalLevelCost;
+        public final ForgeConfigSpec.ConfigValue<String> specBreakthroughLevelCost;
+        public final ForgeConfigSpec.IntValue specModPointsAtMaxSource;
+        public final ForgeConfigSpec.IntValue specRankModPointStart;
+        public final ForgeConfigSpec.IntValue specRankModPointEvery;
+        public final ForgeConfigSpec.IntValue specRankModPointMax;
+        public final ForgeConfigSpec.IntValue specBreakthroughPointsAtMaxType;
+        public final ForgeConfigSpec.IntValue specMaxedWeaponBreakthroughPoint;
+        public final ForgeConfigSpec.IntValue specMaxedWeaponBreakthroughPointMax;
+        public final ForgeConfigSpec.IntValue specRankReductionStart;
+        public final ForgeConfigSpec.IntValue specRankReductionEvery;
+        public final ForgeConfigSpec.IntValue specRankReductionPercentPerStep;
+        public final ForgeConfigSpec.IntValue specRankReductionMaxPercent;
+        public final ForgeConfigSpec.IntValue specRankReductionMaxedWeaponsInType;
+        public final ForgeConfigSpec.IntValue specRespecCooldownSeconds;
+        /** 单件武器的专精经验倍率，「武器 ID=倍率」。 */
+        public final ForgeConfigSpec.ConfigValue<List<? extends String>> weaponXpMultipliers;
+        /** 单件武器的专精伤害加成倍率，「武器 ID=倍率」。 */
+        public final ForgeConfigSpec.ConfigValue<List<? extends String>> weaponDamageMultipliers;
         public final ForgeConfigSpec.BooleanValue autoUpdateSpecBalance;
         public final ForgeConfigSpec.IntValue specBalanceVersion;
         public final ForgeConfigSpec.BooleanValue leaderboardEnable;
@@ -423,6 +537,13 @@ public final class MasteryConfig {
             this.sourceMasteryMultipliers = Collections.unmodifiableMap(multipliers);
             builder.pop();
 
+            this.weaponDamageMultipliers = builder
+                    .comment("单件武器的专精伤害加成倍率，一行一条「武器ID=倍率」，乘在专精加成上，和上面的来源倍率叠乘。",
+                            "武器 ID：普通物品写物品 ID；TACZ 枪写枪的 ID（如 tacz:ak47）；铁魔法写法术 ID；拔刀剑写刀的 ID。",
+                            "同一个 ID 在两个来源里撞了，可以写完整武器键（如 tacz_gun/tacz:ak47）。",
+                            "手持武器打 /albionmastery info，第一行就是武器键，点一下能复制。例：\"tacz:m95=0.8\"")
+                    .defineListAllowEmpty("weaponDamageMultipliers", List.of(), MasteryConfig::validWeaponMultiplier);
+
             this.xpBase = builder
                     .comment("经验曲线基数：升到第 L 级所需经验 = round(xpBase * L ^ xpExponent)。",
                             "默认基数由 40 调整为 80，新配置的升级需求为原默认的两倍，",
@@ -476,6 +597,12 @@ public final class MasteryConfig {
             this.overallXpMultiplier = builder
                     .comment("总体（模组）专精的升级所需经验倍率，以单件武器为基准")
                     .defineInRange("overallXpMultiplier", 10.0D, 0.1D, 100.0D);
+
+            this.weaponXpMultipliers = builder
+                    .comment("单件武器的专精经验倍率，一行一条「武器ID=倍率」：用这件武器打怪拿到的经验乘这个数，",
+                            "类型和来源拿到的经验也按同样的数一起涨。武器 ID 的写法见 weaponDamageMultipliers。",
+                            "例：\"tacz:ak47=0.5\"、\"minecraft:netherite_sword=1.5\"、\"irons_spellbooks:fireball=2\"")
+                    .defineListAllowEmpty("weaponXpMultipliers", List.of(), MasteryConfig::validWeaponMultiplier);
 
             this.maxXpPerHit = builder
                     .comment("单次命中可获得的经验上限，防止被超高伤害配置刷经验")
@@ -573,7 +700,8 @@ public final class MasteryConfig {
                             "武器层与总体层的等级不受影响。")
                     .define("splitMeleeByPack", true);
 
-            builder.comment("专精特化：每个武器类型（中圈）有主、副两栏，练到门槛后各装一项，两项效果叠加。",
+            builder.comment("专精特化：每个武器类型（中圈）最多 4 个槽（普通、突破、普通、突破），武器练到门槛后生效，几个槽的效果叠加。",
+                            "特化用改装点升级（Lv1～Lv5），普通版满级后用突破点突破（★1～★5），下面每个特化小节里的数值是参考值。",
                             "不同武器叫法不同：枪和弓叫改装、刀叫改造、剑叫专长、拔刀剑叫修习、铁魔法叫铭刻、魔艺叫改良。",
                             "每一项都有得有失，每个来源的第一项（原厂配置 / 无专长 / 无修习等）是什么都不改的默认值。",
                             "倍率一律是「乘在原值上」，时间类小于 1 表示更快。")
@@ -585,14 +713,85 @@ public final class MasteryConfig {
                     .comment("切换特化的冷却时间（秒），默认 1 小时。",
                             "冷却只记在内存里，服务端重启后清零")
                     .defineInRange("switchCooldownSeconds", 3600, 0, 604800);
-            this.specSlot1Percent = builder
-                    .comment("第一特化槽在进度多少时解锁（百分比，按等级上限算）。",
-                            "选特化要求本类型（中圈）达到这个进度；某件武器要吃到特化效果，它自己（外圈）也得达到")
-                    .defineInRange("slot1UnlockPercent", 50, 1, 100);
-            this.specSlot2Percent = builder
-                    .comment("第二特化槽在进度多少时解锁，规则同上。两个槽的效果叠加：",
-                            "倍率相乘、概率和比例相加、层数和等级取大的")
-                    .defineInRange("slot2UnlockPercent", 100, 1, 100);
+            this.specSlotCount = builder
+                    .comment("每个武器类型开几个特化槽（1～4），按「普通、突破、普通、突破」的顺序取前几个。",
+                            "普通槽装普通版（Lv1～Lv5），突破槽装突破版（★1～★5）；同一套配置里不能装两个同系的特化。",
+                            "只开 1 个槽时没有突破槽，这个槽直接用特化当前最强的一版。几个槽的效果叠加：",
+                            "倍率相乘、概率和比例相加、层数取大的")
+                    .defineInRange("slotCount", 4, 1, 4);
+            this.specSlot1WeaponPercent = builder
+                    .comment("槽 1：一件武器要练到等级上限的百分之几，才吃得到这个类型的特化（段位可以减免，见下面的 rankReduction*）。",
+                            "这是每件武器各自的门槛，所有槽都要先过这一条；类型练到 typeMasteryBypassPercent 后整个类型免这条")
+                    .defineInRange("slot1WeaponPercent", 100, 1, 100);
+            this.specSlot2TypePercent = builder
+                    .comment("槽 2（突破槽）：类型要到等级上限的百分之几才开。0 = 不要求")
+                    .defineInRange("slot2TypePercent", 70, 0, 100);
+            this.specSlot3SourcePercent = builder
+                    .comment("槽 3（普通槽）：来源（内圈）要到等级上限的百分之几才开。0 = 不要求")
+                    .defineInRange("slot3SourcePercent", 40, 0, 100);
+            this.specSlot4TypePercent = builder
+                    .comment("槽 4（突破槽）：类型要到等级上限的百分之几才开。0 = 不要求")
+                    .defineInRange("slot4TypePercent", 100, 0, 100);
+            this.specTypeBypassPercent = builder
+                    .comment("类型练到等级上限的百分之几后，这个类型下所有武器都跳过槽 1 的武器门槛（这一类已经玩透了）。0 = 不豁免")
+                    .defineInRange("typeMasteryBypassPercent", 100, 0, 100);
+            this.specNormalLevelScale = builder
+                    .comment("普通版每一级的系数，几个数就分几级（最多 10 级），用逗号隔开。",
+                            "下面每个特化小节里写的数值是「参考值」：系数 0.2 = 从不变往参考值走两成，正面和负面按同一个系数一起涨。",
+                            "默认普通版满级是参考值的 0.8 倍")
+                    .define("normalLevelScale", "0.2, 0.35, 0.5, 0.65, 0.8", SpecRules::validList);
+            this.specBreakthroughLevelScale = builder
+                    .comment("突破版每一级的系数，规则同上。普通版满级后才能突破，默认突破满级是参考值的 1.2 倍")
+                    .define("breakthroughLevelScale", "0.88, 0.96, 1.04, 1.12, 1.2", SpecRules::validList);
+            this.specNormalLevelCost = builder
+                    .comment("普通版升每一级花几个改装点，逗号隔开；条数少于级数时最后一项往后沿用")
+                    .define("normalLevelCost", "1, 1, 1, 1, 1", SpecRules::validList);
+            this.specBreakthroughLevelCost = builder
+                    .comment("突破版升每一级花几个突破点，规则同上")
+                    .define("breakthroughLevelCost", "1, 1, 1, 1, 1", SpecRules::validList);
+            this.specModPointsAtMaxSource = builder
+                    .comment("改装点（各来源的叫法不同：改造点、专长点、修习点……）按来源等级给，每个来源一份：",
+                            "来源满级时给这么多，中间按等级线性给、向下取整。默认 20 = 每 5 级 1 点。",
+                            "普通版等级按来源共用：在步枪里升到 Lv3 的特化，到冲锋枪里也是 Lv3")
+                    .defineInRange("modPointsAtMaxSource", 20, 0, 1000);
+            this.specRankModPointStart = builder
+                    .comment("段位加改装点：从第几段开始，每个来源 +1")
+                    .defineInRange("rankModPointStart", 3, 1, 100000);
+            this.specRankModPointEvery = builder
+                    .comment("段位加改装点：之后每几段再 +1")
+                    .defineInRange("rankModPointEvery", 3, 1, 100000);
+            this.specRankModPointMax = builder
+                    .comment("段位加改装点：最多加几点。0 = 段位不加改装点")
+                    .defineInRange("rankModPointMax", 10, 0, 1000);
+            this.specBreakthroughPointsAtMaxType = builder
+                    .comment("突破点按类型等级给，每个类型一份：类型满级时给这么多，中间线性给、向下取整。",
+                            "突破按类型分开：步枪里突破过的特化，到冲锋枪里要用冲锋枪的突破点另外突破")
+                    .defineInRange("breakthroughPointsAtMaxType", 10, 0, 1000);
+            this.specMaxedWeaponBreakthroughPoint = builder
+                    .comment("类型里每有一把满级武器，额外给几个突破点。0 = 不给")
+                    .defineInRange("maxedWeaponBreakthroughPoint", 1, 0, 100);
+            this.specMaxedWeaponBreakthroughPointMax = builder
+                    .comment("满级武器给的突破点最多加到几点")
+                    .defineInRange("maxedWeaponBreakthroughPointMax", 5, 0, 1000);
+            this.specRankReductionStart = builder
+                    .comment("段位减免槽 1 的武器门槛：从第几段开始减")
+                    .defineInRange("rankReductionStart", 3, 1, 100000);
+            this.specRankReductionEvery = builder
+                    .comment("段位减免：之后每几段再减一档")
+                    .defineInRange("rankReductionEvery", 2, 1, 100000);
+            this.specRankReductionPercentPerStep = builder
+                    .comment("段位减免：每档减掉等级上限的百分之几（默认 5 = 100 级上限时每档减 5 级）。0 = 不减免")
+                    .defineInRange("rankReductionPercentPerStep", 5, 0, 100);
+            this.specRankReductionMaxPercent = builder
+                    .comment("段位减免：最多减掉等级上限的百分之几")
+                    .defineInRange("rankReductionMaxPercent", 50, 0, 100);
+            this.specRankReductionMaxedWeaponsInType = builder
+                    .comment("段位减免的前提：这件武器所在的类型里已经有几把满级武器。0 = 不要求")
+                    .defineInRange("rankReductionMaxedWeaponsInType", 1, 0, 1000);
+            this.specRespecCooldownSeconds = builder
+                    .comment("重置改装点 / 突破点的冷却（秒），默认 24 小时；记在玩家存档里，重启不清。",
+                            "改版后老存档迁移完的第一次重置不算冷却")
+                    .defineInRange("respecCooldownSeconds", 86400, 0, 2592000);
             this.autoUpdateSpecBalance = builder
                     .comment("模组更新重新平衡了特化数值时，是否自动把下面各特化的数值换成新版默认值。",
                             "Forge 配置只会补上缺的项，已经写在文件里的旧数值不会被新默认值覆盖，",
@@ -1646,6 +1845,7 @@ public final class MasteryConfig {
         public final ForgeConfigSpec.BooleanValue overrideDamageDisplay;
         public final ForgeConfigSpec.BooleanValue rankUpAnimation;
         public final ForgeConfigSpec.BooleanValue rankUpSound;
+        public final ForgeConfigSpec.EnumValue<SpecScreenLayout> specScreenLayout;
 
         Client(ForgeConfigSpec.Builder builder) {
             builder.comment("武器专精系统 - 客户端表现")
@@ -1695,6 +1895,12 @@ public final class MasteryConfig {
             this.rankUpSound = builder
                     .comment("晋升动画是否带音效")
                     .define("rankUpSound", true);
+
+            this.specScreenLayout = builder
+                    .comment("特化页的排布：A = 左栏列出槽位、卡片两列；B = 槽位横排在顶上、卡片三列；",
+                            "C = 列表 + 详情（右栏是选中特化的每级数值表）。特化页顶栏的按钮也能切换，切了会写回这里。",
+                            "窗口窄到放不下 C 的三栏时按 B 显示，这里存的值不变。")
+                    .defineEnum("specScreenLayout", SpecScreenLayout.B);
 
             builder.pop();
         }
@@ -1749,14 +1955,20 @@ public final class MasteryConfig {
         /** 切换特化的冷却秒数。 */
         public final int specSwitchCooldownSeconds;
 
-        /** 第一特化槽的解锁进度（百分比）。 */
-        public final int specSlot1Percent;
+        /** 特化的养成规则：槽数、门槛、每级系数和价格、点数、段位减免、退点冷却。 */
+        public final SpecRules specRules;
 
-        /** 第二特化槽的解锁进度（百分比）。 */
-        public final int specSlot2Percent;
+        /** 单件武器的专精经验倍率：武器 ID 或完整武器键 → 倍率。 */
+        public final Map<String, Double> weaponXpMultipliers;
+
+        /** 单件武器的专精伤害加成倍率：武器 ID 或完整武器键 → 倍率。 */
+        public final Map<String, Double> weaponDamageMultipliers;
 
         /** 特化键 -&gt; 数值。缺项按中性处理。 */
         private final Map<String, SpecializationValues> specValues;
+
+        /** 特化键 -&gt; 每一级缩放后的数值（普通版在前、突破版在后），用到才算。 */
+        private final Map<String, SpecializationValues[]> scaledCache = new ConcurrentHashMap<>();
 
         /** 单件武器的等级曲线。 */
         private final LevelCurve weaponCurve;
@@ -1805,12 +2017,13 @@ public final class MasteryConfig {
                         double netherXpMultiplier, double endXpMultiplier,
                         double moddedDimensionXpMultiplier, boolean splitMeleeByPack,
                         boolean enableSpecialization, int specSwitchCooldownSeconds,
-                        int specSlot1Percent, int specSlot2Percent,
+                        SpecRules specRules,
                         Map<String, SpecializationValues> specValues,
                         boolean preventMasterySpellRangeScaling,
                         List<String> extraWeapons, List<String> notWeapons,
                         double spellMasteryManaShare, double spellMasteryCooldownShare,
-                        double spellMasteryReductionCap, int rankXpPerWeaponLevel) {
+                        double spellMasteryReductionCap, int rankXpPerWeaponLevel,
+                        Map<String, Double> weaponXpMultipliers, Map<String, Double> weaponDamageMultipliers) {
             this.extraWeapons = extraWeapons == null ? List.of() : List.copyOf(extraWeapons);
             this.notWeapons = notWeapons == null ? List.of() : List.copyOf(notWeapons);
             this.maxLevel = Math.max(1, maxLevel);
@@ -1844,8 +2057,10 @@ public final class MasteryConfig {
             this.splitMeleeByPack = splitMeleeByPack;
             this.enableSpecialization = enableSpecialization;
             this.specSwitchCooldownSeconds = Math.max(0, specSwitchCooldownSeconds);
-            this.specSlot1Percent = Math.max(1, Math.min(100, specSlot1Percent));
-            this.specSlot2Percent = Math.max(1, Math.min(100, specSlot2Percent));
+            this.specRules = specRules == null ? SpecRules.createDefault() : specRules;
+            this.weaponXpMultipliers = weaponXpMultipliers == null ? Map.of() : Map.copyOf(weaponXpMultipliers);
+            this.weaponDamageMultipliers = weaponDamageMultipliers == null
+                    ? Map.of() : Map.copyOf(weaponDamageMultipliers);
             this.specValues = Map.copyOf(specValues);
             this.preventMasterySpellRangeScaling = preventMasterySpellRangeScaling;
             // 指数相同、只放大基数，等于把每一级的需求整体乘上倍率
@@ -1896,24 +2111,76 @@ public final class MasteryConfig {
         }
 
         /**
-         * 取一个特化的数值。
+         * 取一个特化的参考值（配置里写的数）。
          *
          * @param spec 特化
          * @return 数值；表里没有（比如制式、或者服务端版本更老不认识这个特化）时返回中性值
          */
-        /**
-         * 某个特化槽要求的等级（外圈和中圈都得到）。
-         *
-         * @param slot 槽位，1 或 2
-         * @return 等级门槛
-         */
-        public int specSlotLevel(int slot) {
-            int percent = slot >= 2 ? this.specSlot2Percent : this.specSlot1Percent;
-            return Math.max(1, (int) Math.ceil(this.maxLevel * percent / 100.0D));
-        }
-
         public SpecializationValues specValues(Specialization spec) {
             return this.specValues.getOrDefault(spec.key(), SpecializationValues.NEUTRAL);
+        }
+
+        /**
+         * 某个特化在某一级的实际数值。
+         *
+         * <p>开火、换弹、每 tick 的手感修正都会走到这里，按级缓存，同一份快照里每个特化每一级只算一次。
+         *
+         * @param spec         特化
+         * @param breakthrough true 取突破版（★），false 取普通版（Lv）
+         * @param level        等级，1 起；0 及以下返回中性值
+         * @return 数值
+         */
+        public SpecializationValues specValues(Specialization spec, boolean breakthrough, int level) {
+            int max = breakthrough ? this.specRules.breakthroughMax() : this.specRules.normalMax();
+            if (level <= 0 || spec.isStandard()) {
+                return SpecializationValues.NEUTRAL;
+            }
+            int clamped = Math.min(level, max);
+            SpecializationValues[] levels = this.scaledCache.computeIfAbsent(spec.key(), key -> {
+                SpecializationValues reference = specValues(spec);
+                int normal = this.specRules.normalMax();
+                SpecializationValues[] built = new SpecializationValues[normal + this.specRules.breakthroughMax()];
+                for (int i = 0; i < built.length; i++) {
+                    double scale = i < normal ? this.specRules.normalScale(i + 1)
+                            : this.specRules.breakthroughScale(i - normal + 1);
+                    built[i] = SpecializationValues.scaled(reference, scale);
+                }
+                return built;
+            });
+            return levels[(breakthrough ? this.specRules.normalMax() : 0) + clamped - 1];
+        }
+
+        /**
+         * 单件武器的专精经验倍率：先按完整武器键查，再按武器 ID 查，都没有是 1.0。
+         *
+         * @param weaponKey 武器键
+         * @return 倍率
+         */
+        public double weaponXpMultiplier(String weaponKey) {
+            return lookupWeapon(this.weaponXpMultipliers, weaponKey);
+        }
+
+        /**
+         * 单件武器的专精伤害加成倍率，查法同上。
+         *
+         * @param weaponKey 武器键
+         * @return 倍率
+         */
+        public double weaponDamageMultiplier(String weaponKey) {
+            return lookupWeapon(this.weaponDamageMultipliers, weaponKey);
+        }
+
+        private static double lookupWeapon(Map<String, Double> table, String weaponKey) {
+            if (table.isEmpty() || weaponKey == null) {
+                return 1.0D;
+            }
+            Double exact = table.get(weaponKey);
+            if (exact != null) {
+                return exact;
+            }
+            int slash = weaponKey.indexOf(WeaponKeys.WEAPON_SEPARATOR);
+            Double byId = slash >= 0 ? table.get(weaponKey.substring(slash + 1)) : null;
+            return byId == null ? 1.0D : byId;
         }
 
         /**
@@ -1946,8 +2213,8 @@ public final class MasteryConfig {
             return new Snapshot(100, 0.005D, 0.01D, 0.02D, 0.001D, 100.0D,
                     Map.of(),
                     80.0D, 1.0D, 3.0D, 10.0D, 1.5D, 2.0D, 2.0D,
-                    true, true, 3600, 50, 100, Map.of(), true, List.of(), List.of(),
-                    0.3D, 0.3D, 0.5D, 100);
+                    true, true, 3600, SpecRules.createDefault(), Map.of(), true, List.of(), List.of(),
+                    0.3D, 0.3D, 0.5D, 100, Map.of(), Map.of());
         }
 
         /**
@@ -1972,8 +2239,7 @@ public final class MasteryConfig {
             buf.writeBoolean(this.splitMeleeByPack);
             buf.writeBoolean(this.enableSpecialization);
             buf.writeVarInt(this.specSwitchCooldownSeconds);
-            buf.writeVarInt(this.specSlot1Percent);
-            buf.writeVarInt(this.specSlot2Percent);
+            this.specRules.write(buf);
             // 各来源的专精伤害倍率。客户端面板必须和服务端实际结算完全一致，所以整张表照发。
             // 写成「条数 + 键值对」而不是固定几个 double：以后加来源，包结构一个字都不用改
             buf.writeVarInt(this.sourceMasteryMultipliers.size());
@@ -1994,6 +2260,35 @@ public final class MasteryConfig {
             buf.writeDouble(this.spellMasteryCooldownShare);
             buf.writeDouble(this.spellMasteryReductionCap);
             buf.writeVarInt(this.rankXpPerWeaponLevel);
+            writeMultipliers(buf, this.weaponXpMultipliers);
+            writeMultipliers(buf, this.weaponDamageMultipliers);
+        }
+
+        private static void writeMultipliers(FriendlyByteBuf buf, Map<String, Double> table) {
+            List<Map.Entry<String, Double>> entries = new ArrayList<>();
+            for (Map.Entry<String, Double> entry : table.entrySet()) {
+                if (entry.getKey().length() <= 256 && entries.size() < MAX_STRING_ENTRIES) {
+                    entries.add(entry);
+                }
+            }
+            buf.writeVarInt(entries.size());
+            for (Map.Entry<String, Double> entry : entries) {
+                buf.writeUtf(entry.getKey(), 256);
+                buf.writeDouble(entry.getValue());
+            }
+        }
+
+        private static Map<String, Double> readMultipliers(FriendlyByteBuf buf) {
+            int count = buf.readVarInt();
+            if (count < 0 || count > MAX_STRING_ENTRIES) {
+                throw new IllegalArgumentException("AlbionMastery: 同步包里的武器倍率条数非法 " + count);
+            }
+            Map<String, Double> table = new LinkedHashMap<>();
+            for (int i = 0; i < count; i++) {
+                String key = buf.readUtf(256);
+                table.put(key, clamp(buf.readDouble(), 0.0D, 100.0D));
+            }
+            return table;
         }
 
         /**
@@ -2019,8 +2314,7 @@ public final class MasteryConfig {
             boolean splitMelee = buf.readBoolean();
             boolean enableSpec = buf.readBoolean();
             int specCooldown = Math.max(0, Math.min(604800, buf.readVarInt()));
-            int slot1 = Math.max(1, Math.min(100, buf.readVarInt()));
-            int slot2 = Math.max(1, Math.min(100, buf.readVarInt()));
+            SpecRules specRules = SpecRules.read(buf);
             // 同上，条数非法直接判包坏掉，别裁剪
             int sourceCount = buf.readVarInt();
             if (sourceCount < 0 || sourceCount > MAX_SOURCE_ENTRIES) {
@@ -2045,11 +2339,14 @@ public final class MasteryConfig {
             double cooldownShare = clamp(buf.readDouble(), 0.0D, 1.0D);
             double reductionCap = clamp(buf.readDouble(), 0.0D, 0.9D);
             int rankXpPerLevel = Math.max(1, Math.min(100000, buf.readVarInt()));
+            Map<String, Double> weaponXp = readMultipliers(buf);
+            Map<String, Double> weaponDamage = readMultipliers(buf);
             return new Snapshot(maxLevel, overallDmg, typeDmg, wpnDmg, crossDmg,
                     maxBonus, sourceMultipliers,
                     xpBase, xpExp, typeMul, overallMul, netherMul, endMul, moddedMul,
-                    splitMelee, enableSpec, specCooldown, slot1, slot2, specValues, preventRangeScaling,
-                    extraWeapons, notWeapons, manaShare, cooldownShare, reductionCap, rankXpPerLevel);
+                    splitMelee, enableSpec, specCooldown, specRules, specValues, preventRangeScaling,
+                    extraWeapons, notWeapons, manaShare, cooldownShare, reductionCap, rankXpPerLevel,
+                    weaponXp, weaponDamage);
         }
 
         /** 已经吼过「没有独立倍率配置」的来源，每个只吼一次。 */

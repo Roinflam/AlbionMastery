@@ -23,9 +23,11 @@ public final class NetworkHandler {
      * <p>版本 4 的配置快照增加法术范围保护开关，且升级经验曲线翻倍。
      * 版本 5 排行榜请求 / 回包加了搜索字段，新增罗盘管理操作包。
      * 版本 10 配置快照末尾加了每级段位经验，新增段位晋升包，排行榜排序多了段位。
+     * 版本 11 特化改成 4 槽 + 分级：配置快照换成新的养成规则并加单件武器倍率，全量同步加特化等级 / 突破 / 退点冷却，
+     * 新增升级 / 突破 / 重置请求，选特化的槽位放到 1～4。
      * 两端必须一起更新，避免旧客户端误读数据包或显示错误等级。
      */
-    private static final String PROTOCOL_VERSION = "10";
+    private static final String PROTOCOL_VERSION = "11";
 
     /** 主通道。 */
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
@@ -109,6 +111,13 @@ public final class NetworkHandler {
                 .encoder(S2CMasteryRankUpPacket::encode)
                 .decoder(S2CMasteryRankUpPacket::decode)
                 .consumerMainThread(S2CMasteryRankUpPacket::handle)
+                .add();
+
+        // 特化升级 / 突破 / 重置
+        CHANNEL.messageBuilder(C2SSpecProgressPacket.class, packetId++, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(C2SSpecProgressPacket::encode)
+                .decoder(C2SSpecProgressPacket::decode)
+                .consumerMainThread(C2SSpecProgressPacket::handle)
                 .add();
     }
 

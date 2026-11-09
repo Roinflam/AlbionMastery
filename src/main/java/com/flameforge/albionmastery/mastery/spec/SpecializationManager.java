@@ -2,30 +2,32 @@ package com.flameforge.albionmastery.mastery.spec;
 
 import com.flameforge.albionmastery.AlbionMastery;
 import com.flameforge.albionmastery.config.MasteryConfig;
+import com.flameforge.albionmastery.config.SpecRules;
+import com.flameforge.albionmastery.mastery.MasteryAdmin;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import net.minecraft.server.level.ServerPlayer;
 
+import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import com.flameforge.albionmastery.mastery.MasteryAdmin;
-import javax.annotation.Nullable;
 
 /**
- * 特化切换的服务端逻辑：解锁校验、冷却、写入。
+ * 特化的服务端逻辑：装卸、升级、突破、重置，以及各自的校验和冷却。
  *
- * <p><b>冷却只存在内存里</b>，服务端重启就清零，这是设计要求不是偷懒——
- * 存盘意味着要给每个玩家的每个来源写一个时间戳，还得处理跨版本迁移，
- * 而这个冷却的目的只是防止玩家在战斗中反复横跳，重启清掉没有任何危害。
+ * <p><b>换装冷却只存在内存里</b>，服务端重启就清零——它只是防止玩家在战斗中反复横跳，重启清掉没有危害。
+ * 玩家下线不清冷却：重连就能重置的话，冷却等于形同虚设。
  *
- * <p>玩家下线不清冷却：重连就能重置的话，冷却等于形同虚设。
- * 表的规模是「上过线且切过特化的玩家数 × 来源数」，几百个条目都算多，不值得做淘汰。
+ * <p><b>重置冷却记在存档里</b>（默认 24 小时，按点数池各记各的）：重置是换整套思路，冷却要长，
+ * 重启就清的话形同虚设。升级、突破只花点数，不触发任何冷却。
  */
 public final class SpecializationManager {
 
-    /** 玩家 UUID -> （类型键 -> 上次切换的时刻，毫秒）。 */
+    /** 玩家 UUID -> （类型键 / 武器键 + 槽位 -> 上次切换的时刻，毫秒）。 */
     private static final Map<UUID, Map<String, Long>> LAST_SWITCH = new HashMap<>();
 
     private SpecializationManager() {
@@ -34,8 +36,7 @@ public final class SpecializationManager {
     /**
      * 清空所有人的切换冷却。
      *
-     * <p>关服时调用。类注释说的「服务端重启就清零」在专用服务端上自然成立，
-     * 但单人 / 开局域网时集成服务端关了客户端进程还活着，静态表会跟着活到下一个存档，
+     * <p>关服时调用。单人 / 开局域网时集成服务端关了客户端进程还活着，静态表会跟着活到下一个存档，
      * 玩家 UUID 又是同一个——退出重进另一个存档，冷却还在。
      */
     public static void clearAll() {
@@ -43,48 +44,45 @@ public final class SpecializationManager {
     }
 
     /**
-     * 切换结果。
+     * 操作结果。
      */
     public enum Result {
-        /** 切换成功。 */
+        /** 成功。 */
         OK,
         /** 功能被配置关闭。 */
         DISABLED,
-        /** 这个槽还没解锁（本类型进度不够）。 */
+        /** 这个槽还没开。 */
         LOCKED,
         /** 还在冷却里。 */
         COOLDOWN,
         /** 特化不存在，或者和来源对不上。 */
         INVALID,
-        /** 已经就是这个特化了。 */
+        /** 已经就是这个特化了 / 没有可重置的。 */
         UNCHANGED,
         /** 另一个槽已经选了同一个特化。 */
         DUPLICATE,
         /** 另一个槽已经装了同系的特化（比如两种弹匣）。 */
-        CONFLICT
+        CONFLICT,
+        /** 特化还没升级（普通槽要 Lv1，突破槽要在这个类型里突破到 ★1）。 */
+        NOT_LEVELED,
+        /** 点数不够。 */
+        NO_POINTS,
+        /** 已经满级。 */
+        MAXED,
+        /** 普通版还没满级，不能突破。 */
+        NEED_NORMAL_MAX
     }
 
-    /**
-     * 尝试给玩家切换某个来源的特化。
-     *
-     * @param player 玩家
-     * @param typeKey 目标武器类型的键
-     * @param spec    目标特化
-     * @return 切换结果
-     */
-    public static Result select(ServerPlayer player, String typeKey, Specialization spec) {
-        return select(player, typeKey, 1, spec);
-    }
+    // ======================================================================
+    // 装卸
+    // ======================================================================
 
     /**
      * 给某个类型的某个槽位选特化。
      *
-     * <p>两个槽不能选同一个特化（叠两份同样的东西没意义，还会把倍率翻倍）。
-     * 选「制式」等于把这个槽清空。冷却按槽位各记各的。
-     *
      * @param player  玩家
      * @param typeKey 类型键
-     * @param slot    槽位，1 或 2
+     * @param slot    槽位
      * @param spec    特化
      * @return 结果
      */
@@ -96,23 +94,26 @@ public final class SpecializationManager {
      * 尝试切换特化：{@code weaponKey} 为 null 时切类型的通用配置（中圈），否则切这件武器的独立配置（外圈）。
      *
      * <p>武器第一次单独配置时，先把类型的通用配置整套复制过来作为起点，再改玩家点的那一栏——
-     * 不然另一栏会突然变空，玩家只想换一栏，结果两栏都变了。
-     * 解锁门槛两种配置一样，都看类型和来源的等级。
+     * 不然别的栏会突然变空，玩家只想换一栏，结果几栏都变了。
+     *
+     * <p>槽开没开两种配置一样看：类型里有武器过了槽 1 的门槛、这个槽自己的条件也到了。
+     * 独立配置可以提前给还没练到门槛的武器配好，练到了自然生效。
      *
      * @param player    玩家
      * @param typeKey   类型键
      * @param weaponKey 武器键，null 表示改通用配置
      * @param slot      槽位
-     * @param spec      目标特化
-     * @return 切换结果
+     * @param spec      目标特化，制式表示清空这个槽
+     * @return 结果
      */
     public static Result select(ServerPlayer player, String typeKey, @Nullable String weaponKey, int slot,
                                 Specialization spec) {
         MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
+        SpecRules rules = snapshot.specRules;
         if (!snapshot.enableSpecialization) {
             return Result.DISABLED;
         }
-        if (slot < 1 || slot > WeaponKeys.SPEC_SLOTS) {
+        if (slot < 1 || slot > rules.slotCount) {
             return Result.INVALID;
         }
         // 特化必须属于这个类型所在的来源：枪械的特化不能安到近战武器头上
@@ -127,7 +128,7 @@ public final class SpecializationManager {
         if (weaponKey != null && !weaponBelongsTo(player, data, weaponKey, typeKey)) {
             return Result.INVALID;
         }
-        if (!SpecializationEffects.isSlotUnlocked(data, typeKey, slot, snapshot)) {
+        if (!SpecializationEffects.isSlotUnlocked(data, typeKey, null, slot, snapshot)) {
             return Result.LOCKED;
         }
         // 比较、查冲突都按「这件武器此刻实际在用的那一份」：还没有独立配置时就是类型的通用配置
@@ -137,17 +138,22 @@ public final class SpecializationManager {
                 || (spec.isStandard() && isStandard(current))) {
             return Result.UNCHANGED;
         }
-        // 另一个槽已经选了同一个特化：不许重复；选了同系的：不许同时装
-        for (int other = 1; other <= WeaponKeys.SPEC_SLOTS; other++) {
-            if (other == slot || spec.isStandard()) {
-                continue;
+        if (!spec.isStandard()) {
+            if (SpecializationEffects.levelInSlot(data, typeKey, spec, slot, rules) <= 0) {
+                return Result.NOT_LEVELED;
             }
-            String otherKey = data.getSpecialization(effective, other);
-            if (spec.key().equals(otherKey)) {
-                return Result.DUPLICATE;
-            }
-            if (spec.conflictsWith(Specialization.byKey(otherKey))) {
-                return Result.CONFLICT;
+            // 别的槽已经选了同一个特化：不许重复（普通版和它的突破版也算同一个）；选了同系的：不许同时装
+            for (int other = 1; other <= rules.slotCount; other++) {
+                if (other == slot) {
+                    continue;
+                }
+                String otherKey = data.getSpecialization(effective, other);
+                if (spec.key().equals(otherKey)) {
+                    return Result.DUPLICATE;
+                }
+                if (spec.conflictsWith(Specialization.byKey(otherKey))) {
+                    return Result.CONFLICT;
+                }
             }
         }
         String target = weaponKey == null ? typeKey : weaponKey;
@@ -223,6 +229,189 @@ public final class SpecializationManager {
         return Result.OK;
     }
 
+    // ======================================================================
+    // 升级、突破
+    // ======================================================================
+
+    /**
+     * 花改装点把特化的普通版升一级。普通版按来源共用，改装点从这个来源那一份里扣。
+     *
+     * @param player 玩家
+     * @param spec   特化
+     * @return 结果
+     */
+    public static Result upgrade(ServerPlayer player, Specialization spec) {
+        MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
+        SpecRules rules = snapshot.specRules;
+        if (!snapshot.enableSpecialization) {
+            return Result.DISABLED;
+        }
+        MasteryData data = MasteryHelper.get(player);
+        if (data == null || spec.isStandard()) {
+            return Result.INVALID;
+        }
+        int level = data.getSpecLevel(spec.key());
+        if (level >= rules.normalMax()) {
+            return Result.MAXED;
+        }
+        if (SpecPoints.modPointsAvailable(data, spec.sourceId(), snapshot) < rules.normalCost(level + 1)) {
+            return Result.NO_POINTS;
+        }
+        data.setSpecLevel(spec.key(), level + 1);
+        SpecMoveSpeed.refresh(player);
+        return Result.OK;
+    }
+
+    /**
+     * 花这个类型的突破点把特化突破一级。普通版要先满级。
+     *
+     * @param player  玩家
+     * @param typeKey 类型键
+     * @param spec    特化
+     * @return 结果
+     */
+    public static Result breakthrough(ServerPlayer player, String typeKey, Specialization spec) {
+        MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
+        SpecRules rules = snapshot.specRules;
+        if (!snapshot.enableSpecialization) {
+            return Result.DISABLED;
+        }
+        MasteryData data = MasteryHelper.get(player);
+        if (data == null || spec.isStandard() || !WeaponKeys.isValidTypeKey(typeKey)
+                || !spec.sourceId().equals(WeaponKeys.providerOf(typeKey))) {
+            return Result.INVALID;
+        }
+        if (data.getSpecLevel(spec.key()) < rules.normalMax()) {
+            return Result.NEED_NORMAL_MAX;
+        }
+        int star = data.getBreakthrough(typeKey, spec.key());
+        if (star >= rules.breakthroughMax()) {
+            return Result.MAXED;
+        }
+        if (SpecPoints.breakthroughPointsAvailable(data, typeKey, snapshot) < rules.breakthroughCost(star + 1)) {
+            return Result.NO_POINTS;
+        }
+        data.setBreakthrough(typeKey, spec.key(), star + 1);
+        SpecMoveSpeed.refresh(player);
+        return Result.OK;
+    }
+
+    // ======================================================================
+    // 重置
+    // ======================================================================
+
+    /**
+     * 退掉一个来源的全部改装点：这个来源所有特化回到 0 级，所有类型里的突破一起退（突破依赖普通版满级）。
+     * 装着的特化跟着卸下。
+     *
+     * @param player     玩家
+     * @param providerId 来源 ID
+     * @return 结果
+     */
+    public static Result respecSource(ServerPlayer player, String providerId) {
+        MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
+        if (!snapshot.enableSpecialization) {
+            return Result.DISABLED;
+        }
+        MasteryData data = MasteryHelper.get(player);
+        if (data == null || !WeaponKeys.isValidOverallKey(providerId)) {
+            return Result.INVALID;
+        }
+        if (SpecPoints.respecRemainingMillis(data, providerId, snapshot.specRules, System.currentTimeMillis()) > 0L) {
+            return Result.COOLDOWN;
+        }
+        if (!data.clearSourceProgress(providerId)) {
+            return Result.UNCHANGED;
+        }
+        data.setRespecAt(providerId, System.currentTimeMillis());
+        pruneUnusable(data, snapshot.specRules, providerId, null);
+        SpecMoveSpeed.refresh(player);
+        return Result.OK;
+    }
+
+    /**
+     * 退掉一个类型的全部突破点。突破槽里装着的、突破没了的特化跟着卸下。
+     *
+     * @param player  玩家
+     * @param typeKey 类型键
+     * @return 结果
+     */
+    public static Result respecType(ServerPlayer player, String typeKey) {
+        MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
+        if (!snapshot.enableSpecialization) {
+            return Result.DISABLED;
+        }
+        MasteryData data = MasteryHelper.get(player);
+        if (data == null || !WeaponKeys.isValidTypeKey(typeKey)) {
+            return Result.INVALID;
+        }
+        if (SpecPoints.respecRemainingMillis(data, typeKey, snapshot.specRules, System.currentTimeMillis()) > 0L) {
+            return Result.COOLDOWN;
+        }
+        if (!data.clearTypeBreakthroughs(typeKey)) {
+            return Result.UNCHANGED;
+        }
+        data.setRespecAt(typeKey, System.currentTimeMillis());
+        pruneUnusable(data, snapshot.specRules, WeaponKeys.providerOf(typeKey), typeKey);
+        SpecMoveSpeed.refresh(player);
+        return Result.OK;
+    }
+
+    /**
+     * 卸下等级不够、在槽里已经用不了的特化。
+     *
+     * <p>类型的通用配置直接清掉那一栏；武器的独立配置写成制式（删掉的话独立配置可能整个认不出来了）。
+     *
+     * @param data       玩家数据
+     * @param rules      规则
+     * @param providerId 只处理这个来源；null 表示全部
+     * @param onlyType   只处理这个类型（以及它下面武器的独立配置）；null 表示不限
+     * @return 卸下了几个
+     */
+    public static int pruneUnusable(MasteryData data, SpecRules rules, @Nullable String providerId,
+                                    @Nullable String onlyType) {
+        List<String> remove = new ArrayList<>();
+        Map<String, String> replace = new HashMap<>();
+        for (Map.Entry<String, String> entry : data.getSpecializationsView().entrySet()) {
+            String slotKey = entry.getKey();
+            Specialization spec = Specialization.byKey(entry.getValue());
+            if (spec == null || spec.isStandard()) {
+                continue;
+            }
+            if (providerId != null && !providerId.equals(spec.sourceId())) {
+                continue;
+            }
+            String base = WeaponKeys.specBaseKey(slotKey);
+            boolean weapon = WeaponKeys.isValidWeaponKey(base);
+            String typeKey = weapon ? data.getWeaponTypeKey(base) : base;
+            if (typeKey == null || (onlyType != null && !onlyType.equals(typeKey))) {
+                continue;
+            }
+            int slot = WeaponKeys.specSlotOf(slotKey);
+            if (SpecializationEffects.levelInSlot(data, typeKey, spec, slot, rules) > 0) {
+                continue;
+            }
+            if (weapon) {
+                Specialization standard = Specialization.standardOf(spec.sourceId());
+                if (standard != null) {
+                    replace.put(slotKey, standard.key());
+                    continue;
+                }
+            }
+            remove.add(slotKey);
+        }
+        for (String slotKey : remove) {
+            data.setSpecialization(WeaponKeys.specBaseKey(slotKey), WeaponKeys.specSlotOf(slotKey), null);
+        }
+        replace.forEach((slotKey, standard) ->
+                data.setSpecialization(WeaponKeys.specBaseKey(slotKey), WeaponKeys.specSlotOf(slotKey), standard));
+        return remove.size() + replace.size();
+    }
+
+    // ======================================================================
+    // 校验和冷却
+    // ======================================================================
+
     /**
      * 客户端说的「这件武器属于这个类型」对不对：按服务端清单、再按玩家记录核一遍，
      * 不然可以借一个等级高的类型去解锁另一个类型里武器的特化。
@@ -242,7 +431,7 @@ public final class SpecializationManager {
     }
 
     /**
-     * 这件武器 / 这个类型的某个槽此刻还剩多少冷却：两个键取大。
+     * 这件武器 / 这个类型的某个槽此刻还剩多少换装冷却：两个键取大。
      *
      * <p>判定和报时必须走同一个方法：以前判定查两个键、报时只查一个，
      * 拒绝原因来自类型键那一侧时，提示里会写成「还需 0 分钟」。
@@ -264,7 +453,7 @@ public final class SpecializationManager {
     }
 
     /**
-     * 所有槽里最长的那个剩余冷却。
+     * 所有槽里最长的那个剩余换装冷却。
      *
      * @param player    玩家
      * @param typeKey   类型键
@@ -282,23 +471,10 @@ public final class SpecializationManager {
     }
 
     /**
-     * 查询某个来源的切换冷却还剩多少秒。
+     * 某个类型某个槽位的换装冷却还剩几秒。
      *
      * @param player   玩家
-     * @param typeKey  类型键
-     * @param snapshot 配置快照
-     * @return 剩余秒数，不在冷却中时返回 0
-     */
-    public static long remainingCooldownSeconds(ServerPlayer player, String typeKey,
-                                                MasteryConfig.Snapshot snapshot) {
-        return remainingCooldownSeconds(player, typeKey, 1, snapshot);
-    }
-
-    /**
-     * 某个类型某个槽位的切换冷却还剩几秒。
-     *
-     * @param player   玩家
-     * @param typeKey  类型键
+     * @param typeKey  类型键或武器键
      * @param slot     槽位
      * @param snapshot 配置快照
      * @return 剩余秒数，0 表示可以切
@@ -323,7 +499,7 @@ public final class SpecializationManager {
     }
 
     /**
-     * 清掉某名玩家全部类型、全部槽位的切换冷却（管理指令用）。
+     * 清掉某名玩家全部类型、全部槽位的换装冷却（管理指令用）。
      *
      * @param uuid 玩家 UUID
      * @return 原来有没有冷却记录

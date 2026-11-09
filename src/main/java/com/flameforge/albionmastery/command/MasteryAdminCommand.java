@@ -2,12 +2,15 @@ package com.flameforge.albionmastery.command;
 
 import com.electronwill.nightconfig.core.UnmodifiableConfig;
 import com.flameforge.albionmastery.config.MasteryConfig;
+import com.flameforge.albionmastery.config.SpecRules;
 import com.flameforge.albionmastery.event.CommonEventHandler;
 import com.flameforge.albionmastery.mastery.MasteryAdmin;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.mastery.spec.SpecMoveSpeed;
+import com.flameforge.albionmastery.mastery.spec.SpecPoints;
 import com.flameforge.albionmastery.mastery.spec.SpecTerms;
+import com.flameforge.albionmastery.mastery.spec.SpecializationEffects;
 import com.flameforge.albionmastery.mastery.spec.Specialization;
 import com.flameforge.albionmastery.mastery.spec.SpecializationManager;
 import com.flameforge.albionmastery.weapon.ResolvedWeapon;
@@ -353,7 +356,159 @@ public final class MasteryAdminCommand {
                         .executes(context -> specClear(context, null))
                         .then(sourceArg().then(typeArg()
                                 .executes(context -> specClear(context, typeKey(context)))))))
-                .then(Commands.literal("cooldown").then(targets().executes(MasteryAdminCommand::specCooldown)));
+                .then(Commands.literal("cooldown").then(targets().executes(MasteryAdminCommand::specCooldown)))
+                // 直接改等级 / 突破，不看点数（造测试号、补偿玩家用）
+                .then(Commands.literal("level").then(targets().then(sourceArg()
+                        .then(Commands.argument("spec", StringArgumentType.word())
+                                .suggests(MasteryAdminCommand::suggestSpecs)
+                                .then(Commands.argument("level", IntegerArgumentType.integer(0, SpecRules.MAX_LEVELS))
+                                        .executes(MasteryAdminCommand::specLevel))))))
+                .then(Commands.literal("breakthrough").then(targets().then(sourceArg().then(typeArg()
+                        .then(Commands.argument("spec", StringArgumentType.word())
+                                .suggests(MasteryAdminCommand::suggestSpecs)
+                                .then(Commands.argument("level", IntegerArgumentType.integer(0, SpecRules.MAX_LEVELS))
+                                        .executes(MasteryAdminCommand::specBreakthrough)))))))
+                // 替玩家重置：不看也不记冷却
+                .then(Commands.literal("respec").then(targets().then(sourceArg()
+                        .executes(context -> specRespec(context, null))
+                        .then(typeArg().executes(context -> specRespec(context, typeKey(context)))))))
+                .then(Commands.literal("points").then(targets().then(sourceArg()
+                        .executes(context -> specPoints(context, null))
+                        .then(typeArg().executes(context -> specPoints(context, typeKey(context)))))));
+    }
+
+    private static int specLevel(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        String source = source(context);
+        Specialization spec = findSpec(source, StringArgumentType.getString(context, "spec"));
+        if (spec == null || spec.isStandard()) {
+            context.getSource().sendFailure(Component.translatable("command.albionmastery.spec_unknown",
+                    source, StringArgumentType.getString(context, "spec")));
+            return 0;
+        }
+        int level = Math.min(IntegerArgumentType.getInteger(context, "level"),
+                MasteryConfig.serverSnapshot().specRules.normalMax());
+        return forEachTarget(context, (target, data) -> {
+            MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
+            int oldLevel = data.getSpecLevel(spec.key());
+            data.setSpecLevel(spec.key(), level);
+            // 设完点数为负的话，下次登录会被整份退掉（连玩家自己原来的分配一起），所以直接撤回
+            int short_ = -SpecPoints.modPointsAvailable(data, source, snapshot);
+            if (short_ > 0) {
+                data.setSpecLevel(spec.key(), oldLevel);
+                context.getSource().sendFailure(Component.translatable("command.albionmastery.spec_overspend",
+                        target.getDisplayName(), SpecTerms.of(source, "point"), short_));
+                return false;
+            }
+            if (level < snapshot.specRules.normalMax()) {
+                // 普通版没满级，突破就不成立了
+                for (String type : new ArrayList<>(data.getBreakthroughsView().keySet())) {
+                    data.setBreakthrough(type, spec.key(), 0);
+                }
+            }
+            SpecializationManager.pruneUnusable(data, MasteryConfig.serverSnapshot().specRules, source, null);
+            SpecMoveSpeed.refresh(target);
+            context.getSource().sendSuccess(() -> Component.translatable("command.albionmastery.spec_level_set",
+                    target.getDisplayName(), Component.translatable(spec.nameKey()), level)
+                    .withStyle(ChatFormatting.GOLD), true);
+            return true;
+        });
+    }
+
+    private static int specBreakthrough(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        String source = source(context);
+        String typeKey = typeKey(context);
+        Specialization spec = findSpec(source, StringArgumentType.getString(context, "spec"));
+        if (spec == null || spec.isStandard()) {
+            context.getSource().sendFailure(Component.translatable("command.albionmastery.spec_unknown",
+                    source, StringArgumentType.getString(context, "spec")));
+            return 0;
+        }
+        if (!checkSource(context, source) || !checkType(context, typeKey)) {
+            return 0;
+        }
+        SpecRules rules = MasteryConfig.serverSnapshot().specRules;
+        int star = Math.min(IntegerArgumentType.getInteger(context, "level"), rules.breakthroughMax());
+        return forEachTarget(context, (target, data) -> {
+            MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
+            int oldLevel = data.getSpecLevel(spec.key());
+            int oldStar = data.getBreakthrough(typeKey, spec.key());
+            if (star > 0 && oldLevel < rules.normalMax()) {
+                // 突破要普通版满级：一并补满，免得造出一个界面上解释不通的状态
+                data.setSpecLevel(spec.key(), rules.normalMax());
+            }
+            data.setBreakthrough(typeKey, spec.key(), star);
+            // 补满普通版吃改装点、突破吃突破点；哪一份设完为负，下次登录都会被整份退掉，直接撤回
+            int modShort = -SpecPoints.modPointsAvailable(data, source, snapshot);
+            int breakShort = -SpecPoints.breakthroughPointsAvailable(data, typeKey, snapshot);
+            if (modShort > 0 || breakShort > 0) {
+                data.setBreakthrough(typeKey, spec.key(), oldStar);
+                data.setSpecLevel(spec.key(), oldLevel);
+                context.getSource().sendFailure(Component.translatable("command.albionmastery.spec_overspend",
+                        target.getDisplayName(), modShort > 0 ? SpecTerms.of(source, "point")
+                                : Component.translatable("gui.albionmastery.spec_page.break_points"),
+                        modShort > 0 ? modShort : breakShort));
+                return false;
+            }
+            SpecializationManager.pruneUnusable(data, rules, source, typeKey);
+            SpecMoveSpeed.refresh(target);
+            context.getSource().sendSuccess(() -> Component.translatable(
+                    "command.albionmastery.spec_breakthrough_set", target.getDisplayName(), typeKey,
+                    Component.translatable(spec.nameKey()), star).withStyle(ChatFormatting.GOLD), true);
+            return true;
+        });
+    }
+
+    private static int specRespec(CommandContext<CommandSourceStack> context, @Nullable String typeKey)
+            throws CommandSyntaxException {
+        String source = source(context);
+        if (!checkSource(context, source) || (typeKey != null && !checkType(context, typeKey))) {
+            return 0;
+        }
+        SpecRules rules = MasteryConfig.serverSnapshot().specRules;
+        return forEachTarget(context, (target, data) -> {
+            if (typeKey == null) {
+                data.clearSourceProgress(source);
+                SpecializationManager.pruneUnusable(data, rules, source, null);
+            } else {
+                data.clearTypeBreakthroughs(typeKey);
+                SpecializationManager.pruneUnusable(data, rules, source, typeKey);
+            }
+            SpecMoveSpeed.refresh(target);
+            context.getSource().sendSuccess(() -> Component.translatable("command.albionmastery.spec_respec",
+                    target.getDisplayName(), typeKey == null ? source : typeKey)
+                    .withStyle(ChatFormatting.GOLD), true);
+            return true;
+        });
+    }
+
+    private static int specPoints(CommandContext<CommandSourceStack> context, @Nullable String typeKey)
+            throws CommandSyntaxException {
+        String source = source(context);
+        MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
+        int count = 0;
+        for (ServerPlayer target : EntityArgument.getPlayers(context, "targets")) {
+            MasteryData data = MasteryHelper.get(target);
+            if (data == null) {
+                continue;
+            }
+            count++;
+            int modTotal = SpecPoints.modPointsTotal(data, source, snapshot);
+            int modLeft = SpecPoints.modPointsAvailable(data, source, snapshot);
+            int rank = SpecializationEffects.rankOf(data, snapshot);
+            context.getSource().sendSuccess(() -> Component.translatable("command.albionmastery.spec_points",
+                    target.getDisplayName(), source, modLeft, modTotal, rank).withStyle(ChatFormatting.GRAY), false);
+            if (typeKey != null) {
+                int btTotal = SpecPoints.breakthroughPointsTotal(data, typeKey, snapshot);
+                int btLeft = SpecPoints.breakthroughPointsAvailable(data, typeKey, snapshot);
+                int gate = SpecializationEffects.weaponGate(data, typeKey, snapshot);
+                int reduction = SpecializationEffects.rankReduction(data, typeKey, snapshot);
+                int maxed = data.getMaxedWeaponCount(typeKey);
+                context.getSource().sendSuccess(() -> Component.translatable(
+                        "command.albionmastery.spec_points_type", typeKey, btLeft, btTotal, gate, reduction, maxed)
+                        .withStyle(ChatFormatting.GRAY), false);
+            }
+        }
+        return count;
     }
 
     @Nullable
@@ -383,19 +538,23 @@ public final class MasteryAdminCommand {
             return 0;
         }
         int slot = IntegerArgumentType.getInteger(context, "slot");
-        int other = slot == 1 ? 2 : 1;
         return forEachTarget(context, (target, data) -> {
-            Specialization otherSpec = Specialization.byKey(data.getSpecialization(typeKey, other));
-            if (!spec.isStandard() && otherSpec == spec) {
-                context.getSource().sendFailure(Component.translatable("msg.albionmastery.spec_duplicate",
-                        Component.translatable(spec.nameKey())));
-                return false;
-            }
-            if (spec.conflictsWith(otherSpec)) {
-                context.getSource().sendFailure(Component.translatable("msg.albionmastery.spec_conflict",
-                        Component.translatable(spec.nameKey()), SpecTerms.of(source, "group"),
-                        Component.translatable(spec.familyKey())));
-                return false;
+            for (int other = 1; other <= WeaponKeys.SPEC_SLOTS; other++) {
+                if (other == slot) {
+                    continue;
+                }
+                Specialization otherSpec = Specialization.byKey(data.getSpecialization(typeKey, other));
+                if (!spec.isStandard() && otherSpec == spec) {
+                    context.getSource().sendFailure(Component.translatable("msg.albionmastery.spec_duplicate",
+                            Component.translatable(spec.nameKey())));
+                    return false;
+                }
+                if (spec.conflictsWith(otherSpec)) {
+                    context.getSource().sendFailure(Component.translatable("msg.albionmastery.spec_conflict",
+                            Component.translatable(spec.nameKey()), SpecTerms.of(source, "group"),
+                            Component.translatable(spec.familyKey())));
+                    return false;
+                }
             }
             data.setSpecialization(typeKey, slot, spec.isStandard() ? null : spec.key());
             SpecMoveSpeed.refresh(target);
@@ -420,7 +579,7 @@ public final class MasteryAdminCommand {
                                 context.getSource().getServer(), data, baseType, null))) {
                     continue;
                 }
-                int slot = slotKey.endsWith(WeaponKeys.SPEC_SLOT2_SUFFIX) ? 2 : 1;
+                int slot = WeaponKeys.specSlotOf(slotKey);
                 data.setSpecialization(baseType, slot, null);
                 cleared++;
             }
@@ -436,6 +595,11 @@ public final class MasteryAdminCommand {
         int count = 0;
         for (ServerPlayer target : EntityArgument.getPlayers(context, "targets")) {
             SpecializationManager.clearCooldowns(target.getUUID());
+            // 重置冷却记在存档里，一并清掉
+            MasteryData data = MasteryHelper.get(target);
+            if (data != null && data.clearRespecTimes()) {
+                CommonEventHandler.syncFull(target);
+            }
             count++;
             context.getSource().sendSuccess(() -> Component.translatable("command.albionmastery.cooldown_cleared",
                     target.getDisplayName()).withStyle(ChatFormatting.GOLD), true);

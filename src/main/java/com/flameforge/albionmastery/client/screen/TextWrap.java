@@ -80,6 +80,7 @@ public final class TextWrap {
             int end = start + Math.max(1, fit.length());
             end = avoidWordBreak(paragraph, start, end);
             end = avoidBadBreak(paragraph, start, end);
+            end = avoidOrphan(paragraph, start, end);
 
             out.add(stripTrailingSpaces(paragraph.substring(start, end)));
             start = end;
@@ -130,6 +131,28 @@ public final class TextWrap {
             shift++;
         }
         return end;
+    }
+
+    /**
+     * 中文段落的最后一行别只剩一两个字（「……单独配置这<br>件。」）：剩下的太短时从本行再匀一个字过去。
+     * 只看中文断点，英文按单词断，本来就不会出现半个字的末行。
+     *
+     * @param text  原文
+     * @param start 本行起点
+     * @param end   本行终点（不含）
+     * @return 调整后的终点
+     */
+    private static int avoidOrphan(String text, int start, int end) {
+        int rest = text.length() - end;
+        if (rest <= 0 || rest > 2 || end - start <= 4 || isWordChar(text.charAt(end - 1))) {
+            return end;
+        }
+        int moved = end - 1;
+        // 匀过去的字本身是收尾标点就再多带一个，免得标点落到行首
+        while (moved > start + 1 && NO_LINE_START.indexOf(text.charAt(moved)) >= 0) {
+            moved--;
+        }
+        return moved;
     }
 
     /**

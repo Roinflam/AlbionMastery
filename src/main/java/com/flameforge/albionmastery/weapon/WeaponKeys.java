@@ -146,32 +146,55 @@ public final class WeaponKeys {
         return providerId != null && MELEE_PROVIDERS.contains(providerId);
     }
 
-    /** 第二特化槽在选择表里的键后缀：类型键 + 这个后缀。存盘和网络包结构因此都不用改。 */
+    /**
+     * 第二槽起在选择表里的键后缀前缀：类型键 + {@code @} + 槽号（{@code @2}、{@code @3}、{@code @4}），
+     * 第一槽就是类型键本身。1.0.0 只有 {@code @2}，老存档原样能读。
+     */
+    public static final char SPEC_SLOT_MARK = '@';
+
+    /** 第二槽的键后缀，老代码和老存档里认的就是它。 */
     public static final String SPEC_SLOT2_SUFFIX = "@2";
 
-    /** 特化槽数。 */
-    public static final int SPEC_SLOTS = 2;
+    /** 特化槽数的硬上限。实际开几个看配置 {@code slotCount}（1～4）。 */
+    public static final int SPEC_SLOTS = 4;
 
     /**
      * 某个类型的某个特化槽在选择表里的键。
      *
      * @param typeKey 类型键
-     * @param slot    槽位，1 或 2
+     * @param slot    槽位，1～4
      * @return 选择表的键
      */
     public static String specSlotKey(String typeKey, int slot) {
-        return slot >= 2 ? typeKey + SPEC_SLOT2_SUFFIX : typeKey;
+        int clamped = Math.max(1, Math.min(SPEC_SLOTS, slot));
+        return clamped == 1 ? typeKey : typeKey + SPEC_SLOT_MARK + clamped;
     }
 
     /**
-     * 从选择表的键还原出类型键（去掉槽位后缀）。
+     * 选择表的键是第几槽。
      *
      * @param slotKey 选择表的键
-     * @return 类型键
+     * @return 槽位，1～4；没有后缀的是 1
+     */
+    public static int specSlotOf(String slotKey) {
+        int length = slotKey.length();
+        if (length >= 2 && slotKey.charAt(length - 2) == SPEC_SLOT_MARK) {
+            int digit = slotKey.charAt(length - 1) - '0';
+            if (digit >= 2 && digit <= SPEC_SLOTS) {
+                return digit;
+            }
+        }
+        return 1;
+    }
+
+    /**
+     * 从选择表的键还原出类型键 / 武器键（去掉槽位后缀）。
+     *
+     * @param slotKey 选择表的键
+     * @return 类型键或武器键
      */
     public static String specBaseKey(String slotKey) {
-        return slotKey.endsWith(SPEC_SLOT2_SUFFIX)
-                ? slotKey.substring(0, slotKey.length() - SPEC_SLOT2_SUFFIX.length()) : slotKey;
+        return specSlotOf(slotKey) == 1 ? slotKey : slotKey.substring(0, slotKey.length() - 2);
     }
 
     /** 类型未知时的兜底值。 */

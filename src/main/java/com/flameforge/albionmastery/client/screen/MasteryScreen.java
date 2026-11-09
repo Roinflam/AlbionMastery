@@ -9,6 +9,8 @@ import com.flameforge.albionmastery.client.weapon.WeaponEntry;
 import com.flameforge.albionmastery.client.weapon.WeaponSource;
 import com.flameforge.albionmastery.client.weapon.WeaponTypeGroup;
 import com.flameforge.albionmastery.config.MasteryConfig;
+import com.flameforge.albionmastery.config.SpecRules;
+import com.flameforge.albionmastery.mastery.spec.SpecPoints;
 import com.flameforge.albionmastery.mastery.LevelCurve;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
@@ -2808,7 +2810,7 @@ public class MasteryScreen extends Screen {
         for (int i = 1; i <= 6; i++) {
             Component body = i == 6
                     ? Component.translatable("gui.albionmastery.panel.play_6_d",
-                            snapshot.specSlot1Percent, snapshot.specSlot2Percent)
+                            snapshot.specRules.slot1WeaponPercent, snapshot.specRules.slot2TypePercent)
                     : Component.translatable("gui.albionmastery.panel.play_" + i + "_d");
             cursor = drawHowtoItem(guiGraphics, i,
                     Component.translatable("gui.albionmastery.panel.play_" + i), body, x, cursor, width);
@@ -2962,21 +2964,38 @@ public class MasteryScreen extends Screen {
         int cursor = drawSection(guiGraphics, Component.translatable("gui.albionmastery.panel.spec_section_type",
                 SpecTerms.of(provider, "page")), x, y, width);
 
-        // 两栏各自一行状态：解锁了显示当前选的，没解锁显示门槛
-        int typeLevel = data.getTypeLevel(typeKey);
-        int overallLevel = provider == null ? 0 : data.getOverallLevel(WeaponKeys.overallKey(provider));
-        boolean anyUnlocked = false;
-        for (int slot = 1; slot <= WeaponKeys.SPEC_SLOTS; slot++) {
-            int need = snapshot.specSlotLevel(slot);
-            boolean unlocked = typeLevel >= need && overallLevel >= need;
-            anyUnlocked |= unlocked;
+        // 一行摘要：开了几个槽、各剩多少点；下面每个槽一行，开了的写装着什么和等级，没开的写差什么
+        SpecRules rules = snapshot.specRules;
+        int opened = 0;
+        for (int slot = 1; slot <= rules.slotCount; slot++) {
+            if (SpecializationEffects.isSlotUnlocked(data, typeKey, slot, snapshot)) {
+                opened++;
+            }
+        }
+        boolean anyUnlocked = opened > 0;
+        if (provider != null) {
+            cursor = drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.panel.spec_summary",
+                    opened, rules.slotCount, SpecTerms.of(provider, "point"),
+                    SpecPoints.modPointsAvailable(data, provider, snapshot),
+                    SpecPoints.breakthroughPointsAvailable(data, typeKey, snapshot)),
+                    x, cursor, width, MasteryPalette.TEXT_DIM) + 2;
+        }
+        for (int slot = 1; slot <= rules.slotCount; slot++) {
+            boolean unlocked = SpecializationEffects.isSlotUnlocked(data, typeKey, slot, snapshot);
             Specialization chosenSpec = Specialization.byKey(data.getSpecialization(typeKey, slot));
-            Component value = !unlocked
-                    ? Component.translatable("gui.albionmastery.panel.spec_slot_locked", need)
-                            .withStyle(ChatFormatting.GRAY)
-                    : Component.translatable(chosenSpec == null || chosenSpec.isStandard()
-                            ? "spec.albionmastery." + provider + ".standard"
-                            : chosenSpec.nameKey()).withStyle(ChatFormatting.GOLD);
+            Component value;
+            if (!unlocked) {
+                value = Component.translatable("gui.albionmastery.panel.spec_slot_locked")
+                        .withStyle(ChatFormatting.GRAY);
+            } else if (chosenSpec == null || chosenSpec.isStandard()) {
+                value = Component.translatable("gui.albionmastery.spec_page.slot_empty")
+                        .withStyle(ChatFormatting.GRAY);
+            } else {
+                int level = SpecializationEffects.levelInSlot(data, typeKey, chosenSpec, slot, rules);
+                boolean star = SpecializationEffects.usesBreakthrough(data, typeKey, chosenSpec, slot, rules);
+                value = Component.translatable(chosenSpec.nameKey()).append(" " + (star ? "★" : "Lv") + level)
+                        .withStyle(level > 0 ? ChatFormatting.GOLD : ChatFormatting.GRAY);
+            }
             cursor = drawRow(guiGraphics, SpecTerms.slot(provider, slot), value, x, cursor, width);
         }
         if (!anyUnlocked) {
@@ -3201,20 +3220,26 @@ public class MasteryScreen extends Screen {
      */
     private int drawSpecLocked(GuiGraphics guiGraphics, MasteryData data, String typeKey,
                                MasteryConfig.Snapshot snapshot, int x, int y, int width) {
-        int need = snapshot.specSlotLevel(1);
         String providerId = WeaponKeys.providerOf(typeKey);
-        int overallLevel = providerId == null ? 0
-                : data.getOverallLevel(WeaponKeys.overallKey(providerId));
-        int typeLevel = data.getTypeLevel(typeKey);
-
+        int gate = SpecializationEffects.weaponGate(data, typeKey, snapshot);
+        int best = 0;
+        for (MasteryData.WeaponRecord record : data.getWeaponsView().values()) {
+            if (typeKey.equals(record.typeKey)) {
+                best = Math.max(best, record.level);
+            }
+        }
         int cursor = drawWrapped(guiGraphics,
                 Component.translatable("gui.albionmastery.panel.spec_locked", SpecTerms.slot(providerId, 1)),
                 x, y, width, MasteryPalette.TEXT_DIM) + 2;
-        // 内圈和中圈都得到门槛：分别画一根条，缺哪条一眼就看出来
-        cursor = drawSpecRequirement(guiGraphics, "gui.albionmastery.panel.spec_need_overall",
-                overallLevel, need, x, cursor, width);
-        return drawSpecRequirement(guiGraphics, "gui.albionmastery.panel.spec_need_type",
-                typeLevel, need, x, cursor, width);
+        // 槽 1 只看武器门槛：这个类型里练得最高的那把到没到；类型练满也行，另画一根条
+        cursor = drawSpecRequirement(guiGraphics, "gui.albionmastery.panel.spec_need_weapon",
+                best, gate, x, cursor, width);
+        int bypass = SpecRules.levelOf(snapshot.specRules.typeBypassPercent, snapshot.maxLevel);
+        if (bypass <= 0) {
+            return cursor;
+        }
+        return drawSpecRequirement(guiGraphics, "gui.albionmastery.panel.spec_need_type_bypass",
+                data.getTypeLevel(typeKey), bypass, x, cursor, width);
     }
 
     /**
@@ -3434,15 +3459,28 @@ public class MasteryScreen extends Screen {
                         ? "gui.albionmastery.panel.spec_mode_own" : "gui.albionmastery.panel.spec_mode_follow",
                 ClientWeaponRegistry.typeName(typeKey)), x, cursor, width,
                 own ? MasteryPalette.GOLD : MasteryPalette.TEXT_DIM) + 2;
-        // 两个槽都生效时两个名字都列出来，否则玩家看不出叠加的第二个特化在不在起作用
+        // 这把武器没到槽 1 的门槛时一个槽都不生效，说清楚差几级
+        if (weaponKey != null && !SpecializationEffects.weaponPassesGate(data, typeKey, weaponKey, snapshot)) {
+            return drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.panel.spec_weapon_gate",
+                    data.getWeaponLevel(weaponKey), SpecializationEffects.weaponGate(data, typeKey, snapshot)),
+                    x, cursor, width, MasteryPalette.WARN);
+        }
+        // 几个槽都生效时名字都列出来，否则玩家看不出叠加的特化在不在起作用
         List<Specialization> active = new ArrayList<>(WeaponKeys.SPEC_SLOTS);
-        Specialization applied = null;
-        for (int slot = 1; slot <= WeaponKeys.SPEC_SLOTS; slot++) {
+        List<Integer> activeSlots = new ArrayList<>(WeaponKeys.SPEC_SLOTS);
+        for (int slot = 1; slot <= snapshot.specRules.slotCount; slot++) {
             Specialization spec = SpecializationEffects.activeSpec(data, typeKey, weaponKey, slot, snapshot);
-            // 和前一槽同系的不生效（规则见 SpecializationEffects.forData），这里也不列
-            if (spec != null && !spec.conflictsWith(applied)) {
+            // 和前面任一槽同系（或同一个）的不生效（规则见 SpecializationEffects.forData），这里也不列
+            boolean clash = false;
+            for (Specialization other : active) {
+                if (other == spec || (spec != null && spec.conflictsWith(other))) {
+                    clash = true;
+                    break;
+                }
+            }
+            if (spec != null && !clash) {
                 active.add(spec);
-                applied = spec;
+                activeSlots.add(slot);
             }
         }
         if (active.isEmpty()) {
@@ -3450,13 +3488,16 @@ public class MasteryScreen extends Screen {
         }
         SpecializationValues values = SpecializationEffects.forData(data, typeKey, weaponKey, snapshot);
 
-        for (Specialization spec : active) {
+        for (int i = 0; i < active.size(); i++) {
+            Specialization spec = active.get(i);
+            int slot = activeSlots.get(i);
+            boolean star = SpecializationEffects.usesBreakthrough(data, typeKey, spec, slot, snapshot.specRules);
+            int level = SpecializationEffects.levelInSlot(data, typeKey, spec, slot, snapshot.specRules);
             cursor = drawRow(guiGraphics, Component.translatable(spec.nameKey()),
-                    Component.translatable("gui.albionmastery.panel.spec_active")
-                            .withStyle(ChatFormatting.GOLD), x, cursor, width);
+                    Component.literal((star ? "★" : "Lv") + level).withStyle(ChatFormatting.GOLD), x, cursor, width);
         }
 
-        // 两槽叠加之后的实际数值，逐条列出（只列变了的）
+        // 各槽叠加之后的实际数值，逐条列出（只列变了的）
         SpecDescriber.Lines described = SpecDescriber.describe(values, provider);
         for (Component gain : described.gains()) {
             cursor = drawSpecLine(guiGraphics, "+", gain, MasteryPalette.PROGRESS, x, cursor, width);

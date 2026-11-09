@@ -9,6 +9,7 @@ import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.MasteryExperienceHook;
 import com.flameforge.albionmastery.mastery.rank.MasteryRankTracker;
 import com.flameforge.albionmastery.mastery.spec.SpecMoveSpeed;
+import com.flameforge.albionmastery.mastery.spec.SpecMigration;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.network.NetworkHandler;
 import com.flameforge.albionmastery.network.S2CSyncMasteryPacket;
@@ -213,6 +214,8 @@ public final class CommonEventHandler {
     @SubscribeEvent
     public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
+            // 改版前的特化存档迁移到分级特化、花超的点数退掉，都要赶在第一次全量同步之前
+            SpecMigration.onLogin(player);
             syncFull(player);
             // 移速修饰符不存盘，登录后按当前主手重挂一次
             SpecMoveSpeed.refresh(player);

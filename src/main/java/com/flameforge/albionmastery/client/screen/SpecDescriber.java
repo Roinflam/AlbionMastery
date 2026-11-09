@@ -37,6 +37,9 @@ public final class SpecDescriber {
     /** 语言键前缀：合成句。 */
     private static final String DESC = "gui.albionmastery.spec_desc.";
 
+    /** 语言键前缀：合成句拆开后每一项的短名字。 */
+    private static final String SHORT = "gui.albionmastery.spec_short.";
+
     /** 越小越好的倍率项。 */
     private static final Set<String> LOWER_IS_BETTER = Set.of(
             "reloadTime", "attackInterval", "durability", "manaCost", "spellCooldown", "castTime",
@@ -148,6 +151,119 @@ public final class SpecDescriber {
     }
 
     /**
+     * 拆成「名字 + 数值」一项一行，给卡片和合计效果的表格排法用（名字靠左、数值右对齐成一列）。
+     *
+     * <p>纯倍率项直接是「伤害 / +25%」；合成句拆成几项短名字，比如暴击拆成「暴击率 / 35%」「暴击伤害 / ×2」，
+     * 斩杀只留「斩杀伤害 / +40%」，血线这类机制参数放进 {@link Entry#full()} 的整句里，悬停时再看。
+     * 项的顺序和 {@link #describe} 一致。
+     *
+     * @param values   特化数值
+     * @param sourceId 来源 ID
+     * @return 得失两组
+     */
+    public static Entries entries(SpecializationValues values, String sourceId) {
+        List<Entry> gains = new ArrayList<>();
+        List<Entry> costs = new ArrayList<>();
+        for (String key : MULTIPLIERS) {
+            double value = values.value(key);
+            if (isNeutral(value, 1.0D)) {
+                continue;
+            }
+            boolean better = LOWER_IS_BETTER.contains(key) ? value < 1.0D : value > 1.0D;
+            (better ? gains : costs).add(new Entry(I18n.get(localized(STAT, sourceId, key)),
+                    formatMultiplier(value), null));
+        }
+        if (values.critChance() > EPSILON && values.critDamage() > 1.0D + EPSILON) {
+            Component full = Component.translatable(localized(DESC, sourceId, "crit"),
+                    formatPercent(values.critChance()), "×" + formatNumber(values.critDamage()));
+            gains.add(new Entry(shortName(sourceId, "crit_chance"), formatPercent(values.critChance()), full));
+            gains.add(new Entry(shortName(sourceId, "crit_damage"), "×" + formatNumber(values.critDamage()), full));
+        }
+        addConditionalEntry(gains, costs, sourceId, "near", values.nearDamage());
+        addConditionalEntry(gains, costs, sourceId, "far", values.farDamage());
+        addConditionalEntry(gains, costs, sourceId, "last_round", values.lastRoundDamage());
+        if (!isNeutral(values.executeDamage(), 1.0D)) {
+            (values.executeDamage() > 1.0D ? gains : costs).add(new Entry(shortName(sourceId, "execute"),
+                    formatMultiplier(values.executeDamage()), Component.translatable(DESC + "execute",
+                    formatPercent(values.executeThreshold()), formatMultiplier(values.executeDamage()))));
+        }
+        if (!isNeutral(values.backstabDamage(), 1.0D)) {
+            (values.backstabDamage() > 1.0D ? gains : costs).add(new Entry(shortName(sourceId, "backstab"),
+                    formatMultiplier(values.backstabDamage()), Component.translatable(DESC + "backstab",
+                    formatMultiplier(values.backstabDamage()))));
+        }
+        if (!isNeutral(values.freshDamage(), 1.0D)) {
+            (values.freshDamage() > 1.0D ? gains : costs).add(new Entry(shortName(sourceId, "fresh"),
+                    formatMultiplier(values.freshDamage()), Component.translatable(DESC + "fresh",
+                    formatMultiplier(values.freshDamage()))));
+        }
+        if (!isNeutral(values.desperationDamage(), 1.0D)) {
+            double floor = Math.min(values.desperationFloor(), values.desperationThreshold());
+            (values.desperationDamage() > 1.0D ? gains : costs).add(new Entry(shortName(sourceId, "desperation"),
+                    formatMultiplier(values.desperationDamage()), Component.translatable(DESC + "desperation",
+                    formatPercent(values.desperationThreshold()), formatPercent(floor),
+                    formatMultiplier(values.desperationDamage()))));
+        }
+        if (values.hasCombo()) {
+            Component full = Component.translatable(DESC + "combo",
+                    formatPercent(values.comboStep()), (int) Math.round(values.comboMax()));
+            gains.add(new Entry(shortName(sourceId, "combo_step"), "+" + formatPercent(values.comboStep()), full));
+            gains.add(new Entry(shortName(sourceId, "combo_max"), stacks(values.comboMax()), full));
+        }
+        if (values.hasFrenzy()) {
+            Component full = Component.translatable(DESC + "frenzy",
+                    formatPercent(values.frenzyStep()), (int) Math.round(values.frenzyMax()));
+            gains.add(new Entry(shortName(sourceId, "frenzy_step"), "+" + formatPercent(values.frenzyStep()), full));
+            gains.add(new Entry(shortName(sourceId, "frenzy_max"), stacks(values.frenzyMax()), full));
+        }
+        addRatioEntry(gains, sourceId, "kill_heal", values.killHeal());
+        addRatioEntry(gains, sourceId, "ignite", values.igniteChance());
+        addRatioEntry(gains, sourceId, "slow", values.slowChance());
+        addRatioEntry(gains, sourceId, "weaken", values.weakenChance());
+        addRatioEntry(gains, sourceId, "life_steal", values.lifeSteal());
+        addRatioEntry(gains, sourceId, "kill_refill", values.killRefill());
+        addRatioEntry(gains, sourceId, "ammo_save", values.ammoSave());
+        int pierce = (int) Math.round(values.pierce());
+        if (pierce > 0) {
+            gains.add(new Entry(shortName(sourceId, "pierce"), "+" + pierce,
+                    Component.translatable(localized(DESC, sourceId, "pierce"), pierce)));
+        }
+        int spellLevel = (int) Math.round(values.spellLevel());
+        if (spellLevel > 0) {
+            gains.add(new Entry(shortName(sourceId, "spell_level"), "+" + spellLevel, null));
+        }
+        addRatioEntry(gains, sourceId, "double_cast", values.doubleCast());
+        return new Entries(gains, costs);
+    }
+
+    private static void addConditionalEntry(List<Entry> gains, List<Entry> costs, String sourceId, String key,
+                                            double multiplier) {
+        if (isNeutral(multiplier, 1.0D)) {
+            return;
+        }
+        (multiplier > 1.0D ? gains : costs).add(new Entry(shortName(sourceId, key), formatMultiplier(multiplier),
+                Component.translatable(localized(DESC, sourceId, key), formatMultiplier(multiplier))));
+    }
+
+    /**
+     * 概率 / 比例类：给了才写，整句也放进去（点燃几秒、补弹打不打折这些只在整句里有）。
+     */
+    private static void addRatioEntry(List<Entry> gains, String sourceId, String key, double ratio) {
+        if (ratio > EPSILON) {
+            gains.add(new Entry(shortName(sourceId, key), formatPercent(ratio),
+                    Component.translatable(localized(DESC, sourceId, key), formatPercent(ratio))));
+        }
+    }
+
+    private static String shortName(String sourceId, String key) {
+        return I18n.get(localized(SHORT, sourceId, key));
+    }
+
+    private static String stacks(double count) {
+        return I18n.get(SHORT + "stacks", (int) Math.round(count));
+    }
+
+    /**
      * 有条件的倍率（近距离、远距离、弹匣最后几发）：变好进「得」，变差进「失」。
      */
     private static void addConditional(List<Component> gains, List<Component> costs, String sourceId,
@@ -221,6 +337,36 @@ public final class SpecDescriber {
 
     private static boolean isNeutral(double value, double neutral) {
         return Math.abs(value - neutral) <= EPSILON;
+    }
+
+    /**
+     * 一项效果：名字、数值，合成句拆出来的项另带整句。
+     *
+     * @param label 名字（已经翻译好）
+     * @param value 数值文字，如「+25%」「×2」「5 层」
+     * @param full  合成句整句，纯倍率项为 null
+     */
+    public record Entry(String label, String value, @javax.annotation.Nullable Component full) {
+    }
+
+    /**
+     * 按项拆好的得失。
+     *
+     * @param gains 得到的
+     * @param costs 付出的
+     */
+    public record Entries(List<Entry> gains, List<Entry> costs) {
+
+        /** 什么效果都没有。 */
+        public static final Entries EMPTY = new Entries(List.of(), List.of());
+
+        public boolean isEmpty() {
+            return this.gains.isEmpty() && this.costs.isEmpty();
+        }
+
+        public int size() {
+            return this.gains.size() + this.costs.size();
+        }
     }
 
     /**

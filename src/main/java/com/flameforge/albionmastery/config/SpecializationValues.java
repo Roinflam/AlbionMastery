@@ -493,6 +493,42 @@ public record SpecializationValues(double magazine,
     }
 
     /**
+     * 按特化等级的系数缩放：配置里写的是参考值，每一级从「不变」往参考值走同样的比例，正面负面一起缩。
+     *
+     * <ul>
+     *     <li>倍率类（伤害、换弹、移速……）：{@code 1 + (参考值 - 1) × 系数}；</li>
+     *     <li>从 0 起算的概率 / 比例 / 每层加成（暴击率、吸血、嗜战每层……）：{@code 参考值 × 系数}；</li>
+     *     <li>穿透是整数，四舍五入；参考值至少 1 时最低给 1，特化的招牌效果不会在低级时整个没了；</li>
+     *     <li>不缩放：层数上限、暴击倍率、斩杀和背水的血线——缩这些等于改机制本身，缩概率和每层加成就够了。</li>
+     * </ul>
+     * 算完按每项的上下限夹一遍。
+     *
+     * @param reference 参考值（配置里的数）
+     * @param scale     系数，1.0 = 参考值本身
+     * @return 缩放后的数值
+     */
+    public static SpecializationValues scaled(SpecializationValues reference, double scale) {
+        if (scale == 1.0D) {
+            return reference;
+        }
+        return of(key -> {
+            double ref = reference.value(key);
+            return switch (key) {
+                case "comboMax", "frenzyMax", "critDamage",
+                        "executeThreshold", "desperationThreshold", "desperationFloor" -> ref;
+                case "pierce" -> {
+                    double value = Math.round(ref * scale);
+                    yield clampOf(key, ref >= 1.0D && scale > 0.0D ? Math.max(1.0D, value) : value);
+                }
+                case "critChance", "lifeSteal", "killRefill", "comboStep", "spellLevel", "doubleCast",
+                        "ammoSave", "killHeal", "frenzyStep",
+                        "igniteChance", "slowChance", "weakenChance" -> clampOf(key, ref * scale);
+                default -> clampOf(key, 1.0D + (ref - 1.0D) * scale);
+            };
+        });
+    }
+
+    /**
      * @return 这个特化有没有嗜战（层数上限和每层加成都大于 0 才算）
      */
     public boolean hasFrenzy() {

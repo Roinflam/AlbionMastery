@@ -419,8 +419,13 @@ public final class MasteryCommand {
         MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
         MasteryHelper.Bonus bonus = MasteryHelper.computeBonus(data, weapon, snapshot);
 
-        context.getSource().sendSuccess(() ->
-                Component.literal(weapon.weaponKey()).withStyle(ChatFormatting.AQUA), false);
+        // 武器键点一下就复制：单件武器倍率表（weaponXpMultipliers / weaponDamageMultipliers）要填的就是它
+        context.getSource().sendSuccess(() -> Component.literal(weapon.weaponKey())
+                .withStyle(style -> style.withColor(ChatFormatting.AQUA).withUnderlined(true)
+                        .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, weapon.weaponKey()))
+                        .withHoverEvent(new net.minecraft.network.chat.HoverEvent(
+                                net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT,
+                                Component.translatable("command.albionmastery.info_copy")))), false);
         context.getSource().sendSuccess(() -> Component.translatable(
                 "command.albionmastery.info_levels",
                 weapon.overallKey(), bonus.overallLevel(),

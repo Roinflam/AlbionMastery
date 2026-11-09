@@ -1,9 +1,11 @@
 package com.flameforge.albionmastery.mastery.spec;
 
 import com.flameforge.albionmastery.config.MasteryConfig;
+import com.flameforge.albionmastery.config.SpecRules;
 import com.flameforge.albionmastery.config.SpecializationValues;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
+import com.flameforge.albionmastery.mastery.rank.MasteryRank;
 import com.flameforge.albionmastery.weapon.ResolvedWeapon;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
@@ -214,7 +216,7 @@ public final class SpecializationEffects {
      * @param data     玩家数据
      * @param weapon   武器
      * @param snapshot 配置快照
-     * @return 两个槽叠加后的数值
+     * @return 各槽叠加后的数值
      */
     public static SpecializationValues forData(@Nullable MasteryData data, ResolvedWeapon weapon,
                                                MasteryConfig.Snapshot snapshot) {
@@ -222,9 +224,11 @@ public final class SpecializationEffects {
     }
 
     /**
-     * 两个槽位各自看门槛，过了的叠在一起。
+     * 各槽各看门槛，过了的叠在一起。
      *
-     * <p>门槛只看中圈（类型）和内圈（来源），{@code weaponKey} 目前不参与判断，留着是为了以后要按武器限制时不用改调用点。
+     * <p>先看这件武器自己过没过槽 1 的武器门槛（武器练到门槛、或者类型已经练透），没过就一个槽都不生效；
+     * {@code weaponKey} 为 null 时（只问类型）按「类型里有没有哪件武器过了门槛」算。
+     * 过了之后每个槽再看自己的条件，槽里装的特化按它在这个槽里的等级取值（普通槽用 Lv、突破槽用 ★）。
      *
      * @param data      玩家数据
      * @param typeKey   类型键
@@ -238,27 +242,93 @@ public final class SpecializationEffects {
         if (data == null || !snapshot.enableSpecialization) {
             return SpecializationValues.NEUTRAL;
         }
+        if (weaponKey != null ? !weaponPassesGate(data, typeKey, weaponKey, snapshot)
+                : !anyWeaponPassesGate(data, typeKey, snapshot)) {
+            return SpecializationValues.NEUTRAL;
+        }
+        SpecRules rules = snapshot.specRules;
+        String configKey = data.specConfigKey(typeKey, weaponKey);
+        String providerId = WeaponKeys.providerOf(typeKey);
         SpecializationValues result = null;
-        Specialization applied = null;
-        for (int slot = 1; slot <= WeaponKeys.SPEC_SLOTS; slot++) {
-            Specialization spec = activeSpec(data, typeKey, weaponKey, slot, snapshot);
-            if (spec == null) {
+        Specialization[] applied = new Specialization[rules.slotCount];
+        int appliedCount = 0;
+        for (int slot = 1; slot <= rules.slotCount; slot++) {
+            if (!slotConditionMet(data, typeKey, slot, snapshot)) {
                 continue;
             }
-            // 同系的两个特化只吃前一个：新规则之前存下来的「扩容弹匣 + 弹鼓」这类组合，
-            // 第二槽照样留在存档里，但不生效，界面上会标出来
-            if (spec.conflictsWith(applied)) {
+            Specialization spec = configuredSpec(data, configKey, providerId, slot);
+            if (spec == null || clashes(spec, applied, appliedCount)) {
+                // 同系的只吃前面那个槽：新规则之前存下来的「扩容弹匣 + 弹鼓」这类组合，
+                // 后面的槽照样留在存档里，但不生效，界面上会标出来
                 continue;
             }
-            SpecializationValues values = snapshot.specValues(spec);
+            boolean breakthrough = usesBreakthrough(data, typeKey, spec, slot, rules);
+            int level = breakthrough ? data.getBreakthrough(typeKey, spec.key()) : data.getSpecLevel(spec.key());
+            if (level <= 0) {
+                continue;
+            }
+            SpecializationValues values = snapshot.specValues(spec, breakthrough, level);
             result = result == null ? values : SpecializationValues.combine(result, values);
-            applied = spec;
+            applied[appliedCount++] = spec;
         }
         return result == null ? SpecializationValues.NEUTRAL : result;
     }
 
     /**
-     * 某个槽上此刻真正生效的特化：槽解锁了、选的不是制式、特化属于这个来源。
+     * 这个特化在这个槽里按哪一版取值：突破槽用突破版；只开一个槽时，突破过就用突破版，没突破用普通版。
+     *
+     * @param data    玩家数据
+     * @param typeKey 类型键
+     * @param spec    特化
+     * @param slot    槽位
+     * @param rules   规则
+     * @return 用突破版返回 true
+     */
+    public static boolean usesBreakthrough(MasteryData data, String typeKey, Specialization spec, int slot,
+                                           SpecRules rules) {
+        if (rules.singleSlot()) {
+            return data.getBreakthrough(typeKey, spec.key()) > 0;
+        }
+        return rules.isBreakthroughSlot(slot);
+    }
+
+    /**
+     * 这个特化在这个槽里的等级（按 {@link #usesBreakthrough} 取 Lv 或 ★）。
+     *
+     * @return 等级，0 = 这个槽里用不了
+     */
+    public static int levelInSlot(MasteryData data, String typeKey, Specialization spec, int slot,
+                                  SpecRules rules) {
+        return usesBreakthrough(data, typeKey, spec, slot, rules)
+                ? data.getBreakthrough(typeKey, spec.key()) : data.getSpecLevel(spec.key());
+    }
+
+    private static boolean clashes(Specialization spec, Specialization[] applied, int count) {
+        for (int i = 0; i < count; i++) {
+            if (applied[i] == spec || spec.conflictsWith(applied[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 某份配置的某个槽里装着的特化（只认属于这个来源、不是制式的）。
+     */
+    @Nullable
+    private static Specialization configuredSpec(MasteryData data, String configKey, @Nullable String providerId,
+                                                 int slot) {
+        Specialization spec = Specialization.byKey(data.getSpecialization(configKey, slot));
+        // 特化归属的来源必须和这个类型键的来源对得上，
+        // 否则就是存档里留下的脏数据（比如类型被重新分过组）
+        if (spec == null || spec.isStandard() || !spec.sourceId().equals(providerId)) {
+            return null;
+        }
+        return spec;
+    }
+
+    /**
+     * 某个槽上此刻真正生效的特化：武器过了门槛、槽开了、选的不是制式、属于这个来源、等级至少 1。
      *
      * <p>不管同系冲突，冲突在 {@link #forData(MasteryData, String, String, MasteryConfig.Snapshot)} 里按槽位顺序处理。
      *
@@ -276,55 +346,230 @@ public final class SpecializationEffects {
             return null;
         }
         // 外圈的独立配置优先，没有才用中圈的通用配置
-        Specialization spec = Specialization.byKey(
-                data.getSpecialization(data.specConfigKey(typeKey, weaponKey), slot));
-        // 特化归属的来源必须和这个类型键的来源对得上，
-        // 否则就是存档里留下的脏数据（比如类型被重新分过组）
-        if (spec == null || spec.isStandard()
-                || !spec.sourceId().equals(WeaponKeys.providerOf(typeKey))) {
+        Specialization spec = configuredSpec(data, data.specConfigKey(typeKey, weaponKey),
+                WeaponKeys.providerOf(typeKey), slot);
+        if (spec == null || levelInSlot(data, typeKey, spec, slot, snapshot.specRules) <= 0) {
             return null;
         }
         return spec;
     }
 
     /**
-     * 某个槽位对某件武器此刻能不能生效：武器所属的类型（中圈）和来源（内圈）都达到这个槽的等级门槛。
+     * 某个槽位对某件武器此刻能不能生效：武器过了槽 1 的门槛，并且这个槽自己的条件达到了。
      *
      * @param data      玩家数据
      * @param typeKey   类型键
-     * @param weaponKey 武器键，可为 null（只看类型）
+     * @param weaponKey 武器键，可为 null（只看类型：类型里有哪件武器过了门槛就算）
      * @param slot      槽位
      * @param snapshot  配置快照
      * @return 能生效返回 true
      */
     public static boolean isSlotActive(MasteryData data, String typeKey, @Nullable String weaponKey,
                                        int slot, MasteryConfig.Snapshot snapshot) {
-        // 只看中圈（类型）和内圈（来源），外圈（单件武器）不设门槛：
-        // 类型和来源练到了，这一类下面的每件武器都吃到特化
-        return isSlotUnlocked(data, typeKey, slot, snapshot);
+        return isSlotUnlocked(data, typeKey, weaponKey, slot, snapshot);
     }
 
     /**
-     * 某个槽位能不能选了：本类型（中圈）和所属来源（内圈）都达到门槛。
+     * 某个槽位开没开（能不能往里装）：只看类型的通用配置时，类型里有哪件武器过了门槛就算开了。
      *
      * @param data     玩家数据
      * @param typeKey  类型键
      * @param slot     槽位
      * @param snapshot 配置快照
-     * @return 可以选返回 true
+     * @return 开了返回 true
      */
     public static boolean isSlotUnlocked(@Nullable MasteryData data, String typeKey, int slot,
                                          MasteryConfig.Snapshot snapshot) {
-        if (data == null || !snapshot.enableSpecialization) {
+        return isSlotUnlocked(data, typeKey, null, slot, snapshot);
+    }
+
+    /**
+     * 某个槽位对这份配置开没开：武器门槛 + 槽自己的条件。
+     *
+     * @param data      玩家数据
+     * @param typeKey   类型键
+     * @param weaponKey 武器键；null 表示类型的通用配置
+     * @param slot      槽位
+     * @param snapshot  配置快照
+     * @return 开了返回 true
+     */
+    public static boolean isSlotUnlocked(@Nullable MasteryData data, String typeKey, @Nullable String weaponKey,
+                                         int slot, MasteryConfig.Snapshot snapshot) {
+        if (data == null || !snapshot.enableSpecialization || WeaponKeys.providerOf(typeKey) == null) {
             return false;
         }
-        String providerId = WeaponKeys.providerOf(typeKey);
-        if (providerId == null) {
+        if (!slotConditionMet(data, typeKey, slot, snapshot)) {
             return false;
         }
-        int need = snapshot.specSlotLevel(slot);
-        return data.getTypeLevel(typeKey) >= need
-                && data.getOverallLevel(WeaponKeys.overallKey(providerId)) >= need;
+        return weaponKey != null ? weaponPassesGate(data, typeKey, weaponKey, snapshot)
+                : anyWeaponPassesGate(data, typeKey, snapshot);
+    }
+
+    /** 槽自己的条件看哪一圈。 */
+    public enum SlotNeed {
+        /** 没有额外条件（槽 1，只看武器门槛）。 */
+        NONE,
+        /** 看类型（中圈）等级。 */
+        TYPE,
+        /** 看来源（内圈）等级。 */
+        SOURCE
+    }
+
+    /**
+     * @param slot  槽位
+     * @return 这个槽自己的条件看哪一圈
+     */
+    public static SlotNeed slotNeed(int slot) {
+        return switch (slot) {
+            case 2, 4 -> SlotNeed.TYPE;
+            case 3 -> SlotNeed.SOURCE;
+            default -> SlotNeed.NONE;
+        };
+    }
+
+    /**
+     * @param slot     槽位
+     * @param snapshot 配置快照
+     * @return 这个槽自己的条件要几级；0 = 不要求
+     */
+    public static int slotNeedLevel(int slot, MasteryConfig.Snapshot snapshot) {
+        SpecRules rules = snapshot.specRules;
+        int percent = switch (slot) {
+            case 2 -> rules.slot2TypePercent;
+            case 3 -> rules.slot3SourcePercent;
+            case 4 -> rules.slot4TypePercent;
+            default -> 0;
+        };
+        return SpecRules.levelOf(percent, snapshot.maxLevel);
+    }
+
+    /**
+     * 槽自己的条件（不含武器门槛）：槽 2、4 看类型等级，槽 3 看来源等级，槽 1 没有。超出槽数的一律不开。
+     *
+     * @param data     玩家数据
+     * @param typeKey  类型键
+     * @param slot     槽位
+     * @param snapshot 配置快照
+     * @return 达到了返回 true
+     */
+    public static boolean slotConditionMet(MasteryData data, String typeKey, int slot,
+                                           MasteryConfig.Snapshot snapshot) {
+        if (slot < 1 || slot > snapshot.specRules.slotCount) {
+            return false;
+        }
+        int need = slotNeedLevel(slot, snapshot);
+        return switch (slotNeed(slot)) {
+            case TYPE -> data.getTypeLevel(typeKey) >= need;
+            case SOURCE -> {
+                String providerId = WeaponKeys.providerOf(typeKey);
+                yield providerId != null && data.getOverallLevel(WeaponKeys.overallKey(providerId)) >= need;
+            }
+            case NONE -> true;
+        };
+    }
+
+    /**
+     * 这个类型是不是已经练透了：类型下所有武器跳过槽 1 的武器门槛。
+     *
+     * @param data     玩家数据
+     * @param typeKey  类型键
+     * @param snapshot 配置快照
+     * @return 豁免返回 true
+     */
+    public static boolean typeBypassesGate(MasteryData data, String typeKey, MasteryConfig.Snapshot snapshot) {
+        int percent = snapshot.specRules.typeBypassPercent;
+        return percent > 0 && data.getTypeLevel(typeKey) >= SpecRules.levelOf(percent, snapshot.maxLevel);
+    }
+
+    /**
+     * 玩家现在的段位，按缓存的武器等级之和算（不遍历武器表）。
+     *
+     * @param data     玩家数据
+     * @param snapshot 配置快照
+     * @return 段位
+     */
+    public static int rankOf(MasteryData data, MasteryConfig.Snapshot snapshot) {
+        return MasteryRank.rankFor(MasteryRank.rankXpForLevelSum(data.getTotalWeaponLevels(),
+                snapshot.rankXpPerWeaponLevel));
+    }
+
+    /**
+     * 段位实际给这个类型的武器减掉几级门槛：段位够了、并且这个类型里已经有足够的满级武器。
+     *
+     * @param data     玩家数据
+     * @param typeKey  类型键
+     * @param snapshot 配置快照
+     * @return 减几级
+     */
+    public static int rankReduction(MasteryData data, String typeKey, MasteryConfig.Snapshot snapshot) {
+        SpecRules rules = snapshot.specRules;
+        if (rules.rankReductionPercentPerStep <= 0
+                || data.getMaxedWeaponCount(typeKey) < rules.rankReductionMaxedWeaponsInType) {
+            return 0;
+        }
+        return rules.rankReductionLevels(rankOf(data, snapshot), snapshot.maxLevel);
+    }
+
+    /**
+     * 不算段位减免的槽 1 武器门槛。
+     *
+     * @param snapshot 配置快照
+     * @return 等级
+     */
+    public static int baseWeaponGate(MasteryConfig.Snapshot snapshot) {
+        return SpecRules.levelOf(snapshot.specRules.slot1WeaponPercent, snapshot.maxLevel);
+    }
+
+    /**
+     * 这个类型里的武器要练到几级才吃特化（已经减掉段位减免）。
+     *
+     * @param data     玩家数据
+     * @param typeKey  类型键
+     * @param snapshot 配置快照
+     * @return 等级，至少 1
+     */
+    public static int weaponGate(MasteryData data, String typeKey, MasteryConfig.Snapshot snapshot) {
+        return Math.max(1, baseWeaponGate(snapshot) - rankReduction(data, typeKey, snapshot));
+    }
+
+    /**
+     * 这件武器过没过槽 1 的门槛。开火、命中每次都会走到，先查便宜的条件，段位最后才算。
+     *
+     * @param data      玩家数据
+     * @param typeKey   类型键
+     * @param weaponKey 武器键
+     * @param snapshot  配置快照
+     * @return 过了返回 true
+     */
+    public static boolean weaponPassesGate(MasteryData data, String typeKey, String weaponKey,
+                                           MasteryConfig.Snapshot snapshot) {
+        int level = data.getWeaponLevel(weaponKey);
+        if (level >= baseWeaponGate(snapshot) || typeBypassesGate(data, typeKey, snapshot)) {
+            return true;
+        }
+        return level > 0 && level >= weaponGate(data, typeKey, snapshot);
+    }
+
+    /**
+     * 这个类型里有没有哪件武器过了槽 1 的门槛（类型的通用配置能不能装、界面上槽开没开）。
+     * 要遍历武器表，不要放到热路径上。
+     *
+     * @param data     玩家数据
+     * @param typeKey  类型键
+     * @param snapshot 配置快照
+     * @return 有返回 true
+     */
+    public static boolean anyWeaponPassesGate(MasteryData data, String typeKey, MasteryConfig.Snapshot snapshot) {
+        if (typeBypassesGate(data, typeKey, snapshot) || data.getMaxedWeaponCount(typeKey) > 0) {
+            return true;
+        }
+        int gate = weaponGate(data, typeKey, snapshot);
+        for (MasteryData.WeaponRecord record : data.getWeaponsView().values()) {
+            if (typeKey.equals(record.typeKey) && record.level >= gate) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -498,13 +743,7 @@ public final class SpecializationEffects {
     }
 
     /**
-     * 判断某个武器类型的特化是否已经解锁。
-     *
-     * <p>两个条件都要满足：该来源的<b>总体专精</b>满级，<b>并且</b>这个类型自己也满级。
-     * 前者代表「你把这个模组玩透了」，后者代表「你把这一类武器玩透了」，
-     * 缺一个都不该拿到只属于这一类的特化。
-     *
-     * <p>上限取配置里的 maxLevel，调低了解锁也跟着变早，不是写死的 100 级。
+     * 判断某个武器类型的特化是否已经解锁：第一个槽开了（类型里有武器过了槽 1 的门槛）。
      *
      * @param data     专精数据，可为 null
      * @param typeKey  类型键
