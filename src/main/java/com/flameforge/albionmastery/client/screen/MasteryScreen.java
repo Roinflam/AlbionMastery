@@ -268,6 +268,9 @@ public class MasteryScreen extends Screen {
     /** 选中节点外围绕圈的小光点数量。 */
     private static final int ORBIT_DOTS = 6;
 
+    /** 左下角的界面大小按钮；是界面的字段、不随 init 重建，改了档重新 init 后卡片还开着。 */
+    private final ScaleKnob scaleKnob = new ScaleKnob(() -> init(Minecraft.getInstance(), this.width, this.height));
+
     /** 顶栏高度。 */
     private static final int HEADER_HEIGHT = 20;
 
@@ -520,6 +523,10 @@ public class MasteryScreen extends Screen {
 
     @Override
     protected void init() {
+        // 专精界面共用自己的界面缩放：先换档，宽高按换完的那一档重算（窗口改大小、改档也走这里）
+        int[] scaled = ScreenScale.apply(this.minecraft);
+        this.width = scaled[0];
+        this.height = scaled[1];
         if (!this.initialized) {
             // 清单只在标记过期时才重建（换存档、收到全量同步、标签重载），
             // 不然一两万件物品要重扫一遍，开界面就是一下明显的卡顿
@@ -714,6 +721,8 @@ public class MasteryScreen extends Screen {
     @Override
     public void removed() {
         super.removed();
+        // 换回原版那一档；接着打开的要是别的专精界面，它的 init 会再换过来，中间不出帧
+        ScreenScale.restore(Minecraft.getInstance());
         // 看别人的视角不记：记下来的话回到自己的界面会对着别人那张图的坐标
         if (this.viewOnly) {
             return;
@@ -863,6 +872,13 @@ public class MasteryScreen extends Screen {
      */
     private int buttonY() {
         return this.height - BUTTON_HEIGHT - 12;
+    }
+
+    /**
+     * @return 界面大小按钮的左边界：左下按钮那一排末尾，间距同按钮之间
+     */
+    private int scaleKnobX() {
+        return (hasSecondButton() ? secondButtonX() : buttonX()) + BUTTON_WIDTH + BUTTON_GAP;
     }
 
     /**
@@ -1563,6 +1579,14 @@ public class MasteryScreen extends Screen {
 
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        // 界面大小按钮排在左下按钮那一排末尾，和它们一样高；鼠标在按钮或它的卡片上时，底下的东西都不算悬停
+        this.scaleKnob.place(scaleKnobX(), buttonY(), BUTTON_HEIGHT);
+        int realMouseX = mouseX;
+        int realMouseY = mouseY;
+        if (this.scaleKnob.contains(mouseX, mouseY)) {
+            mouseX = -10000;
+            mouseY = -10000;
+        }
         this.mouseXNow = mouseX;
         this.mouseYNow = mouseY;
         this.frameStamp++;
@@ -1643,6 +1667,12 @@ public class MasteryScreen extends Screen {
         guiGraphics.pose().popPose();
 
         super.render(guiGraphics, mouseX, mouseY, partialTick);
+
+        // 卡片可能盖到详情面板和节点图标上，抬得比它们都高
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(0.0F, 0.0F, 800.0F);
+        this.scaleKnob.render(guiGraphics, realMouseX, realMouseY);
+        guiGraphics.pose().popPose();
 
         if (this.hovered != null && this.hovered != this.selected) {
             drawHoverTooltip(guiGraphics, this.hovered, mouseX, mouseY);
@@ -3718,6 +3748,9 @@ public class MasteryScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (this.scaleKnob.mouseClicked(mouseX, mouseY, button)) {
+            return true;
+        }
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
@@ -3784,6 +3817,9 @@ public class MasteryScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (this.scaleKnob.mouseReleased(mouseX, mouseY, button)) {
+            return true;
+        }
         if (button == 0) {
             this.dragging = false;
         }
@@ -3807,6 +3843,9 @@ public class MasteryScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (this.scaleKnob.contains(mouseX, mouseY)) {
+            return true;
+        }
         // 鼠标停在面板上且内容超出时，滚轮归面板用，不去缩放地图
         if (isInPanel(mouseX, mouseY) && this.panelScrollable) {
             this.panelScroll = Math.max(0.0D, this.panelScroll - delta * PANEL_SCROLL_STEP);
@@ -3843,6 +3882,9 @@ public class MasteryScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (this.scaleKnob.keyPressed(keyCode)) {
+            return true;
+        }
         // 搜索框有焦点时，除了 ESC 之外的按键一律先给它——
         // 不然打字打到「b」就把界面关了
         if (this.searchBox != null && this.searchBox.isFocused()
@@ -3950,7 +3992,7 @@ public class MasteryScreen extends Screen {
         // 面板、顶栏、左下两个按钮、右上段位徽章底下的节点不算：不然鼠标停在按钮上，底下节点的悬停提示会盖住按钮
         if (isInPanel(mouseX, mouseY) || mouseY < HEADER_HEIGHT
                 || isOnButton(mouseX, mouseY) || isOnSecondButton(mouseX, mouseY)
-                || isOnRankBadge(mouseX, mouseY)) {
+                || isOnRankBadge(mouseX, mouseY) || this.scaleKnob.contains(mouseX, mouseY)) {
             return null;
         }
         for (int i = this.nodes.size() - 1; i >= 0; i--) {

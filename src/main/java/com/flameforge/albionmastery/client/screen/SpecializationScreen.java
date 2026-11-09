@@ -79,6 +79,8 @@ import java.util.Set;
 public class SpecializationScreen extends Screen {
 
     private static final int HEADER_HEIGHT = 20;
+    /** 左栏底部的界面大小按钮；是界面的字段、不随 init 重建，改了档重新 init 后卡片还开着。 */
+    private final ScaleKnob scaleKnob = new ScaleKnob(() -> init(Minecraft.getInstance(), this.width, this.height));
     private static final int MARGIN = 8;
     private static final int LINE = 10;
     private static final int PAD = 5;
@@ -292,6 +294,10 @@ public class SpecializationScreen extends Screen {
 
     @Override
     protected void init() {
+        // 专精界面共用自己的界面缩放：先换档，宽高按换完的那一档重算（窗口改大小、改档也走这里）
+        int[] scaled = ScreenScale.apply(this.minecraft);
+        this.width = scaled[0];
+        this.height = scaled[1];
         // 换语言、缩放窗口都会走 init，缓存的文字得重来
         this.entryCache.clear();
         if (this.selectedSlot == 0) {
@@ -432,10 +438,16 @@ public class SpecializationScreen extends Screen {
             this.selectedSlot = 1;
         }
         Regions r = this.regions;
-        // 走遮罩时底下的页面不响应鼠标：悬停、预览、悬停面板都不出
+        // 界面大小按钮在左栏底部最左（位置和 drawSide 里给它让出的那格一致）
+        this.scaleKnob.place(r.sideLeft(), r.sideBottom() - SIDE_BUTTON_HEIGHT, SIDE_BUTTON_HEIGHT);
+        // 走遮罩时底下的页面不响应鼠标：悬停、预览、悬停面板都不出；鼠标在界面大小按钮或它的卡片上时也一样
         boolean touring = this.tourStep >= 0;
-        int mx = touring ? -10000 : mouseX;
-        int my = touring ? -10000 : mouseY;
+        if (touring) {
+            this.scaleKnob.close();
+        }
+        boolean blocked = touring || this.scaleKnob.contains(mouseX, mouseY);
+        int mx = blocked ? -10000 : mouseX;
+        int my = blocked ? -10000 : mouseY;
         this.guide = r.barTop() > 0 || touring ? computeGuide(snapshot) : null;
 
         // 主区先画（要知道鼠标停在哪张卡上），左栏的预览再按它画
@@ -474,6 +486,11 @@ public class SpecializationScreen extends Screen {
             this.pendingTooltip.run();
             guiGraphics.pose().popPose();
         }
+        // 卡片会盖到主区的卡片和悬停面板上，抬得比它们高；遮罩期间压在遮罩底下
+        guiGraphics.pose().pushPose();
+        guiGraphics.pose().translate(0.0F, 0.0F, 420.0F);
+        this.scaleKnob.render(guiGraphics, touring ? -10000 : mouseX, touring ? -10000 : mouseY);
+        guiGraphics.pose().popPose();
         if (touring) {
             // 遮罩期间只认说明框上的按钮
             this.hits.clear();
@@ -912,7 +929,8 @@ public class SpecializationScreen extends Screen {
     // ---------------------------------------------------------------- 左栏
 
     /**
-     * 左栏：现在改的是哪一份配置、（武器页）这把武器过没过门槛、点数、（A、C）槽位、合计效果，底部两个重置按钮。
+     * 左栏：现在改的是哪一份配置、（武器页）这把武器过没过门槛、点数、（A、C）槽位、合计效果，
+     * 底部界面大小按钮 + 两个重置按钮。
      * 合计效果按剩下的高度决定列几项，放不下写「+N 项」；固定部分本身放不下时左栏可以滚动。
      */
     private void drawSide(GuiGraphics guiGraphics, MasteryConfig.Snapshot snapshot, Regions r,
@@ -921,8 +939,13 @@ public class SpecializationScreen extends Screen {
         int right = r.sideRight();
         int width = right - left;
         int top = r.sideTop();
-        int buttonsTop = this.viewOnly ? r.sideBottom() : r.sideBottom() - respecHeight(width);
-        int viewBottom = buttonsTop - (this.viewOnly ? 0 : 6);
+        // 底部一排：最左是界面大小按钮（和重置按钮一样高、和它的下沿对齐），重置按钮在它右边空 4 像素起排；
+        // 看别人的配置时没有重置按钮，只剩界面大小按钮
+        int knob = SIDE_BUTTON_HEIGHT;
+        int respecLeft = left + knob + 4;
+        int respecWidth = right - respecLeft;
+        int buttonsTop = r.sideBottom() - (this.viewOnly ? knob : respecHeight(respecWidth));
+        int viewBottom = buttonsTop - 6;
 
         guiGraphics.enableScissor(left, top, right, viewBottom);
         this.sideClip = new int[]{left, top, width, viewBottom - top};
@@ -969,7 +992,7 @@ public class SpecializationScreen extends Screen {
             drawScrollbar(guiGraphics, right + 2, top, viewBottom, viewport, content, this.sideScroll);
         }
         if (!this.viewOnly) {
-            drawRespecButtons(guiGraphics, snapshot, left, buttonsTop, width, mouseX, mouseY);
+            drawRespecButtons(guiGraphics, snapshot, respecLeft, buttonsTop, respecWidth, mouseX, mouseY);
         }
     }
 
@@ -3882,6 +3905,9 @@ public class SpecializationScreen extends Screen {
             }
             return true;
         }
+        if (this.scaleKnob.mouseClicked(mouseX, mouseY, button)) {
+            return true;
+        }
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
@@ -3901,8 +3927,16 @@ public class SpecializationScreen extends Screen {
     }
 
     @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (this.scaleKnob.mouseReleased(mouseX, mouseY, button)) {
+            return true;
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        if (this.tourStep >= 0) {
+        if (this.tourStep >= 0 || this.scaleKnob.contains(mouseX, mouseY)) {
             return true;
         }
         Regions r = this.regions;
@@ -3927,6 +3961,9 @@ public class SpecializationScreen extends Screen {
                     || keyCode == GLFW.GLFW_KEY_RIGHT) {
                 advanceTour();
             }
+            return true;
+        }
+        if (this.scaleKnob.keyPressed(keyCode)) {
             return true;
         }
         boolean typing = this.searchBox != null && this.searchBox.isFocused();
@@ -3961,6 +3998,13 @@ public class SpecializationScreen extends Screen {
             return this.searchBox.charTyped(codePoint, modifiers);
         }
         return super.charTyped(codePoint, modifiers);
+    }
+
+    @Override
+    public void removed() {
+        super.removed();
+        // 换回原版那一档；接着打开的要是别的专精界面，它的 init 会再换过来，中间不出帧
+        ScreenScale.restore(Minecraft.getInstance());
     }
 
     @Override

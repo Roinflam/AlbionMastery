@@ -253,6 +253,10 @@ public class LeaderboardScreen extends Screen {
 
     @Override
     protected void init() {
+        // 专精界面共用自己的界面缩放：先换档，宽高按换完的那一档重算（窗口改大小、改档也走这里）
+        int[] scaled = ScreenScale.apply(this.minecraft);
+        this.width = scaled[0];
+        this.height = scaled[1];
         this.rankColumnWidth = -1;
         // 窗口缩放会重新 init，框里的字和焦点都得接着用
         String previous = this.searchBox == null ? "" : this.searchBox.getValue();
@@ -278,6 +282,13 @@ public class LeaderboardScreen extends Screen {
             this.lastListRequestMs = 0L;
             requestList(this.period, this.sort);
         }
+    }
+
+    @Override
+    public void removed() {
+        super.removed();
+        // 换回原版那一档；接着打开的要是别的专精界面，它的 init 会再换过来，中间不出帧
+        ScreenScale.restore(Minecraft.getInstance());
     }
 
     @Override

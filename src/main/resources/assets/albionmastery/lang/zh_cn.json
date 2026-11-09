@@ -1276,5 +1276,14 @@
   "config.albionmastery.client.specGuideBar.tooltip": "槽位下面那条：按选中的槽列出该走的几步，再写一句下一步点哪里\n引导条右边的「收起」会关掉它，特化页顶栏的「?」能重新打开",
   "config.albionmastery.client.specGuideVersion": "看过的引导版本",
   "config.albionmastery.client.specGuideVersion.tooltip": "小于当前版本时，第一次打开特化页会走一遍上手引导；改成 0 可以再看一次",
+  "config.albionmastery.client.screenScale": "专精界面大小",
+  "config.albionmastery.client.screenScale.tooltip": "专精罗盘、特化页、段位之路、排行榜共用的界面缩放，只取整数倍，不影响别的界面\nauto：按显示器尺寸自动挑一档，不超过原版的界面尺寸\nauto+1 / auto-1：在自动的基础上大一档 / 小一档\n写 1～8 的数：固定用那一档\n罗盘和特化页左下角的放大镜按钮也能调，调了会写回这里",
+  "gui.albionmastery.scale.title": "界面大小",
+  "gui.albionmastery.scale.auto": "自动",
+  "gui.albionmastery.scale.auto_is": "自动是 %s",
+  "gui.albionmastery.scale.reset": "恢复自动",
+  "gui.albionmastery.scale.note": "只改专精界面，记在本机",
+  "gui.albionmastery.scale.tip": "界面大小：%s",
+  "gui.albionmastery.scale.tip_click": "点开调整",
   "command.albionmastery.spec_overspend": "没改 %s：设完%s会差 %s 点，下次登录会被整份退回。先把来源 / 类型等级调高再设"
 }

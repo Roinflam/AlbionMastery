@@ -1276,5 +1276,14 @@
   "config.albionmastery.client.specGuideBar.tooltip": "The bar under the slots: lists the steps for the selected slot and says what to click next\n\"Hide\" on the bar turns it off; the ? button on the specialization page brings it back",
   "config.albionmastery.client.specGuideVersion": "Seen walkthrough version",
   "config.albionmastery.client.specGuideVersion.tooltip": "Below the current version, the specialization page walks you through on first open; set to 0 to see it again",
+  "config.albionmastery.client.screenScale": "Mastery screen size",
+  "config.albionmastery.client.screenScale.tooltip": "GUI scale shared by the mastery compass, specialization page, rank path and leaderboard; whole steps only, other screens are not affected\nauto: picked from your monitor size, never above the vanilla GUI scale\nauto+1 / auto-1: one step larger / smaller than auto\n1-8: always use that scale\nThe magnifier button at the bottom left of the compass and the specialization page changes this too",
+  "gui.albionmastery.scale.title": "Screen size",
+  "gui.albionmastery.scale.auto": "Auto",
+  "gui.albionmastery.scale.auto_is": "Auto is %s",
+  "gui.albionmastery.scale.reset": "Reset",
+  "gui.albionmastery.scale.note": "Mastery screens only, saved on this PC",
+  "gui.albionmastery.scale.tip": "Screen size: %s",
+  "gui.albionmastery.scale.tip_click": "Click to adjust",
   "command.albionmastery.spec_overspend": "%s unchanged: this would overspend %s by %s, and the whole pool would be refunded on next login. Raise the source / type level first"
 }

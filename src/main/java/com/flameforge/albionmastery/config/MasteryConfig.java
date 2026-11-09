@@ -1848,6 +1848,7 @@ public final class MasteryConfig {
         public final ForgeConfigSpec.EnumValue<SpecScreenLayout> specScreenLayout;
         public final ForgeConfigSpec.BooleanValue specGuideBar;
         public final ForgeConfigSpec.IntValue specGuideVersion;
+        public final ForgeConfigSpec.ConfigValue<String> screenScale;
 
         Client(ForgeConfigSpec.Builder builder) {
             builder.comment("武器专精系统 - 客户端表现")
@@ -1912,6 +1913,14 @@ public final class MasteryConfig {
             this.specGuideVersion = builder
                     .comment("看过的特化页上手引导版本。小于当前版本时，第一次打开特化页会从头走一遍引导；改成 0 可以再看一次。")
                     .defineInRange("specGuideVersion", 0, 0, 1000);
+
+            // 校验写在这里而不是调客户端的 ScreenScale：配置类两端都加载，专用服上不能碰客户端类
+            this.screenScale = builder
+                    .comment("专精界面（罗盘、特化页、段位之路、排行榜）自己的界面缩放，只取整数倍，不影响别的界面。",
+                            "auto = 按显示器尺寸自动挑一档（不超过原版界面尺寸）；auto+1 / auto-1 = 在自动的基础上大 / 小一档；",
+                            "写 1～8 的数就固定用那一档。界面左下角的放大镜按钮也能调，调了会写回这里。")
+                    .define("screenScale", "auto",
+                            v -> v instanceof String text && text.trim().matches("auto(?:[+-][1-8])?|[1-8]"));
 
             builder.pop();
         }

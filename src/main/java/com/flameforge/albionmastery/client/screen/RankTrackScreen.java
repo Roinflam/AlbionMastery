@@ -116,6 +116,10 @@ public class RankTrackScreen extends Screen {
     @Override
     protected void init() {
         super.init();
+        // 专精界面共用自己的界面缩放：先换档，宽高按换完的那一档重算（窗口改大小、改档也走这里）
+        int[] scaled = ScreenScale.apply(this.minecraft);
+        this.width = scaled[0];
+        this.height = scaled[1];
         if (this.openedAt == 0L) {
             countWeapons();
             refresh();
@@ -876,6 +880,13 @@ public class RankTrackScreen extends Screen {
                 return super.keyPressed(keyCode, scanCode, modifiers);
             }
         }
+    }
+
+    @Override
+    public void removed() {
+        super.removed();
+        // 换回原版那一档；接着打开的要是别的专精界面，它的 init 会再换过来，中间不出帧
+        ScreenScale.restore(Minecraft.getInstance());
     }
 
     @Override
