@@ -39,6 +39,9 @@ public final class ClientWeaponRegistry {
         if (WeaponResolver.isTaczLoaded()) {
             PROVIDERS.add(TaczGunProvider.INSTANCE);
         }
+        if (WeaponResolver.isIronsArtificeLoaded()) {
+            PROVIDERS.add(IronsArtificeProvider.INSTANCE);
+        }
         if (WeaponResolver.isLrTacticalLoaded()) {
             PROVIDERS.add(LrTacticalMeleeProvider.INSTANCE);
         }

@@ -84,6 +84,12 @@ import java.util.function.ToDoubleFunction;
  * @param slowChance           命中时让目标缓慢的概率，0 到 1
  * @param weakenChance         命中时让目标虚弱的概率，0 到 1
  * @param lastRoundDamage      枪械弹匣只剩最后三成时的额外倍率
+ * @param ricochet             子弹在方块间额外弹射的次数，整数（铁枪）
+ * @param seeking              子弹追踪力度，加在枪自己的追踪上（铁枪）
+ * @param blowback             开枪时把人往后推的力度，加在枪自己的反冲上，可以是负数（铁枪）
+ * @param firstShotDamage      满弹匣打出的第一发的额外倍率（铁枪）
+ * @param ricochetDamage       子弹弹射过之后再命中的额外倍率（铁枪）
+ * @param effectDamage         改装件附带伤害（爆炸、闪电、魂火）的倍率（铁枪）
  */
 public record SpecializationValues(double magazine,
                                    double reloadTime,
@@ -144,7 +150,13 @@ public record SpecializationValues(double magazine,
                                    double igniteChance,
                                    double slowChance,
                                    double weakenChance,
-                                   double lastRoundDamage) {
+                                   double lastRoundDamage,
+                                   double ricochet,
+                                   double seeking,
+                                   double blowback,
+                                   double firstShotDamage,
+                                   double ricochetDamage,
+                                   double effectDamage) {
 
     /** 全部维度的项名，同时也是网络传输的顺序。改动顺序会破坏兼容性，新项只能追加在末尾。 */
     public static final List<String> KEYS = List.of(
@@ -163,7 +175,8 @@ public record SpecializationValues(double magazine,
             "ammoSave", "pierce",
             "knockback", "reach", "backstabDamage", "damageTaken", "saDamage", "soulGain",
             "killHeal", "frenzyStep", "frenzyMax", "nearDamage", "farDamage",
-            "igniteChance", "slowChance", "weakenChance", "lastRoundDamage");
+            "igniteChance", "slowChance", "weakenChance", "lastRoundDamage",
+            "ricochet", "seeking", "blowback", "firstShotDamage", "ricochetDamage", "effectDamage");
 
     /** 什么都不改的中性值，用于「制式」以及查不到数值时的兜底。 */
     public static final SpecializationValues NEUTRAL = of(SpecializationValues::defaultOf);
@@ -184,7 +197,8 @@ public record SpecializationValues(double magazine,
             case "desperationFloor" -> 0.3D;
             case "critChance", "lifeSteal", "killRefill", "comboStep", "comboMax", "spellLevel", "doubleCast",
                     "ammoSave", "pierce", "killHeal", "frenzyStep", "frenzyMax",
-                    "igniteChance", "slowChance", "weakenChance" -> 0.0D;
+                    "igniteChance", "slowChance", "weakenChance",
+                    "ricochet", "seeking", "blowback" -> 0.0D;
             case "critDamage" -> 1.5D;
             default -> 1.0D;
         };
@@ -258,6 +272,12 @@ public record SpecializationValues(double magazine,
             case "slowChance" -> this.slowChance;
             case "weakenChance" -> this.weakenChance;
             case "lastRoundDamage" -> this.lastRoundDamage;
+            case "ricochet" -> this.ricochet;
+            case "seeking" -> this.seeking;
+            case "blowback" -> this.blowback;
+            case "firstShotDamage" -> this.firstShotDamage;
+            case "ricochetDamage" -> this.ricochetDamage;
+            case "effectDamage" -> this.effectDamage;
             default -> defaultOf(key);
         };
     }
@@ -329,7 +349,13 @@ public record SpecializationValues(double magazine,
                 lookup.applyAsDouble("igniteChance"),
                 lookup.applyAsDouble("slowChance"),
                 lookup.applyAsDouble("weakenChance"),
-                lookup.applyAsDouble("lastRoundDamage"));
+                lookup.applyAsDouble("lastRoundDamage"),
+                lookup.applyAsDouble("ricochet"),
+                lookup.applyAsDouble("seeking"),
+                lookup.applyAsDouble("blowback"),
+                lookup.applyAsDouble("firstShotDamage"),
+                lookup.applyAsDouble("ricochetDamage"),
+                lookup.applyAsDouble("effectDamage"));
     }
 
     /**
@@ -383,6 +409,10 @@ public record SpecializationValues(double magazine,
             case "reach" -> 0.5D;
             // 受到伤害至少一成：不能做成无敌
             case "damageTaken" -> 0.1D;
+            // 铁枪的人物反冲是加法，软垫枪托要往下减；减到 0 以下铁枪自己按 0 算
+            case "blowback" -> -5.0D;
+            // 追踪力度也是加法，留出负数给服主做「子弹更难拐弯」的特化
+            case "seeking" -> -1.0D;
             default -> 0.0D;
         };
     }
@@ -410,7 +440,10 @@ public record SpecializationValues(double magazine,
             case "fireRate" -> 3.0D;
             // 免耗弹封顶 90%：给到 100% 就是无限子弹，弹匣和换弹整套玩法都没了
             case "ammoSave" -> 0.9D;
-            case "pierce" -> 10.0D;
+            case "pierce", "ricochet" -> 10.0D;
+            // 追踪力度：铁枪一个追踪火药改装件给 0.1，到 1 就是子弹几乎一 tick 拐到目标身上
+            case "seeking" -> 1.0D;
+            case "blowback" -> 5.0D;
             case "knockback", "damageTaken" -> 5.0D;
             // 攻击距离最多翻倍：再远就成了隔空砍人，服务端的距离校验也会拦
             case "reach" -> 2.0D;
@@ -453,7 +486,8 @@ public record SpecializationValues(double magazine,
                 // 概率、比例、每层加成：相加
                 case "critChance", "lifeSteal", "killRefill", "comboStep", "spellLevel", "doubleCast",
                         "ammoSave", "pierce", "killHeal", "frenzyStep",
-                        "igniteChance", "slowChance", "weakenChance" ->
+                        "igniteChance", "slowChance", "weakenChance",
+                        "ricochet", "seeking", "blowback" ->
                         clampOf(key, a + b);
                 // 上限、暴击倍率：取大
                 case "comboMax", "frenzyMax", "critDamage" -> Math.max(a, b);
@@ -497,8 +531,8 @@ public record SpecializationValues(double magazine,
      *
      * <ul>
      *     <li>倍率类（伤害、换弹、移速……）：{@code 1 + (参考值 - 1) × 系数}；</li>
-     *     <li>从 0 起算的概率 / 比例 / 每层加成（暴击率、吸血、嗜战每层……）：{@code 参考值 × 系数}；</li>
-     *     <li>穿透是整数，四舍五入；参考值至少 1 时最低给 1，特化的招牌效果不会在低级时整个没了；</li>
+     *     <li>从 0 起算的概率 / 比例 / 每层加成（暴击率、吸血、嗜战每层、追踪力度、人物反冲……）：{@code 参考值 × 系数}；</li>
+     *     <li>穿透、弹射次数是整数，四舍五入；参考值至少 1 时最低给 1，特化的招牌效果不会在低级时整个没了；</li>
      *     <li>不缩放：层数上限、暴击倍率、斩杀和背水的血线——缩这些等于改机制本身，缩概率和每层加成就够了。</li>
      * </ul>
      * 算完按每项的上下限夹一遍。
@@ -516,13 +550,14 @@ public record SpecializationValues(double magazine,
             return switch (key) {
                 case "comboMax", "frenzyMax", "critDamage",
                         "executeThreshold", "desperationThreshold", "desperationFloor" -> ref;
-                case "pierce" -> {
+                case "pierce", "ricochet" -> {
                     double value = Math.round(ref * scale);
                     yield clampOf(key, ref >= 1.0D && scale > 0.0D ? Math.max(1.0D, value) : value);
                 }
                 case "critChance", "lifeSteal", "killRefill", "comboStep", "spellLevel", "doubleCast",
                         "ammoSave", "killHeal", "frenzyStep",
-                        "igniteChance", "slowChance", "weakenChance" -> clampOf(key, ref * scale);
+                        "igniteChance", "slowChance", "weakenChance",
+                        "seeking", "blowback" -> clampOf(key, ref * scale);
                 default -> clampOf(key, 1.0D + (ref - 1.0D) * scale);
             };
         });

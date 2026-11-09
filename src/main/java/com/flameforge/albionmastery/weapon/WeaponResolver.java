@@ -3,6 +3,7 @@ package com.flameforge.albionmastery.weapon;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.weapon.compat.ArsNouveauSupport;
 import com.flameforge.albionmastery.weapon.compat.BowSupport;
+import com.flameforge.albionmastery.weapon.compat.IronsArtificeSupport;
 import com.flameforge.albionmastery.weapon.compat.IronsSpellsSupport;
 import com.flameforge.albionmastery.weapon.compat.LrTacticalSupport;
 import com.flameforge.albionmastery.weapon.compat.SlashBladeSupport;
@@ -51,6 +52,9 @@ public final class WeaponResolver {
     /** 甜蜜魔法的模组 ID。 */
     public static final String SWEETMAGIC_MOD_ID = "sweetmagic";
 
+    /** 铁枪（Iron's Arms 'n Artifice）的模组 ID。 */
+    public static final String IRONS_ARTIFICE_MOD_ID = "irons_artifice";
+
     /** lrtactical 是否已安装，首次查询后缓存。 */
     private static Boolean lrTacticalLoaded;
 
@@ -68,6 +72,9 @@ public final class WeaponResolver {
 
     /** 甜蜜魔法装没装的缓存。 */
     private static Boolean sweetMagicLoaded;
+
+    /** 铁枪装没装的缓存。 */
+    private static Boolean ironsArtificeLoaded;
 
     private WeaponResolver() {
     }
@@ -148,6 +155,18 @@ public final class WeaponResolver {
             taczLoaded = ModList.get().isLoaded(TACZ_MOD_ID);
         }
         return taczLoaded;
+    }
+
+    /**
+     * 铁枪是否已加载。
+     *
+     * @return 已加载返回 true
+     */
+    public static boolean isIronsArtificeLoaded() {
+        if (ironsArtificeLoaded == null) {
+            ironsArtificeLoaded = ModList.get().isLoaded(IRONS_ARTIFICE_MOD_ID);
+        }
+        return ironsArtificeLoaded;
     }
 
     /**
@@ -258,6 +277,13 @@ public final class WeaponResolver {
         ResolvedWeapon resolved = null;
         if (isTaczLoaded()) {
             resolved = TaczSupport.resolve(stack);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+
+        if (isIronsArtificeLoaded()) {
+            resolved = IronsArtificeSupport.resolve(stack);
             if (resolved != null) {
                 return resolved;
             }

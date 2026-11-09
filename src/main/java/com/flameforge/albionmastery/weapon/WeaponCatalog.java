@@ -3,6 +3,7 @@ package com.flameforge.albionmastery.weapon;
 import com.flameforge.albionmastery.AlbionMastery;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.weapon.compat.ArsNouveauSupport;
+import com.flameforge.albionmastery.weapon.compat.IronsArtificeSupport;
 import com.flameforge.albionmastery.weapon.compat.IronsSpellsSupport;
 import com.flameforge.albionmastery.weapon.compat.LrTacticalSupport;
 import com.flameforge.albionmastery.weapon.compat.SlashBladeSupport;
@@ -133,6 +134,9 @@ public final class WeaponCatalog {
         // 每个来源单独兜一层异常：一个附属的注册表坏了，不该拖得别的来源也列不出来
         if (WeaponResolver.isTaczLoaded()) {
             collect("TACZ", () -> TaczSupport.catalog(out));
+        }
+        if (WeaponResolver.isIronsArtificeLoaded()) {
+            collect("Iron's Arms 'n Artifice", () -> IronsArtificeSupport.catalog(out));
         }
         if (WeaponResolver.isLrTacticalLoaded()) {
             collect("lrtactical", () -> LrTacticalSupport.catalog(out, split));

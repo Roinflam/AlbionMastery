@@ -45,6 +45,7 @@ All optional; install any combination:
 - Ars Nouveau (spell glyphs)
 - Tinkers' Construct
 - Sweet Magic
+- Iron's Arms 'n Artifice (guns)
 - Vanilla and modded melee weapons, bows and crossbows (no mod needed)
 
 FTB Quests is also optional: with it installed you get a "Mastery Rank" task type.
@@ -72,10 +73,11 @@ The repository does **not** include third-party mod jars (they belong to their a
 | TACZ | 1.1.7-hotfix2 |
 | LR Tactical | 0.4.1 |
 | SlashBlade Resharped | 1.9.65 |
-| Iron's Spells 'n Spellbooks | 3.16.2, plus Iron's Lib 2.1.0, Caelus 3.2.0, GeckoLib 4.8.4, playerAnimator 1.0.2-rc1, Curios 5.14.1 |
+| Iron's Spells 'n Spellbooks | 3.16.2, plus Iron's Lib 2.3.0, Caelus 3.2.0, GeckoLib 4.8.4, playerAnimator 1.0.2-rc1, Curios 5.14.1 |
 | Ars Nouveau | 4.12.7 |
 | Tinkers' Construct | 3.11.2, plus Mantle 1.11.104 |
 | Sweet Magic | 1.5.1 |
+| Iron's Arms 'n Artifice | 1.1.1 (needs Iron's Lib 2.2.0 or later) |
 | FTB Quests | 2001.4.22, plus FTB Library 2001.2.13, FTB Teams 2001.3.2, Architectury 9.2.14 |
 
 Then build with JDK 17:
@@ -127,6 +129,7 @@ More details for server owners and developers (config, commands, how each source
 - 新生魔艺（Ars Nouveau）
 - 匠魂（Tinkers' Construct）
 - 甜蜜魔法（Sweet Magic）
+- Iron的武备与巧械（Iron's Arms 'n Artifice，枪械）
 - 原版和其它模组的近战武器、弓弩（不用装任何模组）
 
 FTB 任务也是可选的：装了以后多一种「专精段位」任务。
@@ -154,10 +157,11 @@ FTB 任务也是可选的：装了以后多一种「专精段位」任务。
 | TACZ | 1.1.7-hotfix2 |
 | LR Tactical | 0.4.1 |
 | 拔刀剑 SlashBlade Resharped | 1.9.65 |
-| 铁魔法 Iron's Spells 'n Spellbooks | 3.16.2，以及 Iron's Lib 2.1.0、Caelus 3.2.0、GeckoLib 4.8.4、playerAnimator 1.0.2-rc1、Curios 5.14.1 |
+| 铁魔法 Iron's Spells 'n Spellbooks | 3.16.2，以及 Iron's Lib 2.3.0、Caelus 3.2.0、GeckoLib 4.8.4、playerAnimator 1.0.2-rc1、Curios 5.14.1 |
 | 新生魔艺 Ars Nouveau | 4.12.7 |
 | 匠魂 Tinkers' Construct | 3.11.2，以及 Mantle 1.11.104 |
 | 甜蜜魔法 Sweet Magic | 1.5.1 |
+| Iron的武备与巧械 Iron's Arms 'n Artifice | 1.1.1（要 Iron's Lib 2.2.0 及以上） |
 | FTB 任务 FTB Quests | 2001.4.22，以及 FTB Library 2001.2.13、FTB Teams 2001.3.2、Architectury 9.2.14 |
 
 然后用 JDK 17 构建：

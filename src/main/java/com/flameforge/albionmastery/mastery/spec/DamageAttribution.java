@@ -4,6 +4,7 @@ import com.flameforge.albionmastery.weapon.ResolvedWeapon;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
 import com.flameforge.albionmastery.weapon.compat.BowSupport;
+import com.flameforge.albionmastery.weapon.compat.IronsArtificeSupport;
 import com.flameforge.albionmastery.weapon.compat.IronsSpellsSupport;
 import com.flameforge.albionmastery.weapon.compat.SlashBladeSupport;
 import com.flameforge.albionmastery.weapon.compat.TaczSupport;
@@ -26,6 +27,7 @@ import net.minecraft.world.entity.LivingEntity;
  * 穿着荆棘甲拿什么武器，荆棘反伤就吃什么武器的特化；三叉戟扔出去以后主手是空的，三叉戟的特化全都不触发。
  * 现在按伤害本身的来路认：
  * <ol>
+ *     <li>铁枪子弹：子弹带着开火那一刻的整份组装结果，里面就是那把枪；改装件的爆炸、闪电、魂火也算这颗子弹的；</li>
  *     <li>铁魔法的法术伤害：伤害源里带着是哪个法术；</li>
  *     <li>新生魔艺的法术伤害：结算期间由 {@code ArsCombatHandler} 登记的那个法术（主效果符文）；</li>
  *     <li>箭和三叉戟：射出去时记在实体上的武器；</li>
@@ -102,6 +104,14 @@ public final class DamageAttribution {
      */
     @Nullable
     public static ResolvedWeapon weaponFor(ServerPlayer player, DamageSource source) {
+        // 铁枪放最前：电击弹芯的闪电是原版的间接魔法伤害，直接来源是子弹，
+        // 先认走就不会让别的来源按伤害类型去猜
+        if (WeaponResolver.isIronsArtificeLoaded()) {
+            ResolvedWeapon gun = IronsArtificeSupport.fromBullet(source.getDirectEntity());
+            if (gun != null) {
+                return gun;
+            }
+        }
         if (WeaponResolver.isSweetMagicLoaded() && SweetMagicSupport.isMagicDamage(source)) {
             ResolvedWeapon magic = SweetMagicSupport.weaponFor(player, source);
             if (magic != null) {

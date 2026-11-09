@@ -54,6 +54,9 @@ public final class WeaponKeys {
     /** 通用弓弩：所有继承原版 BowItem / CrossbowItem 的物品，大类是弓 / 弩。兜底来源，永远可用。 */
     public static final String PROVIDER_BOW = "bow";
 
+    /** 铁枪（Iron's Arms 'n Artifice）的火器：大类按它自己的持枪姿势分手枪 / 长枪。 */
+    public static final String PROVIDER_IRONS_ARTIFICE = "irons_artifice";
+
     /**
      * 全部来源，按界面上的展示顺序。
      *
@@ -64,7 +67,7 @@ public final class WeaponKeys {
     public static final List<String> ALL_PROVIDERS = List.of(
             PROVIDER_TACZ_GUN, PROVIDER_LRTACTICAL_MELEE, PROVIDER_SLASHBLADE,
             PROVIDER_IRONS_SPELLS, PROVIDER_ARS_NOUVEAU, PROVIDER_VANILLA_MELEE,
-            PROVIDER_TCONSTRUCT, PROVIDER_SWEETMAGIC, PROVIDER_BOW);
+            PROVIDER_TCONSTRUCT, PROVIDER_SWEETMAGIC, PROVIDER_BOW, PROVIDER_IRONS_ARTIFICE);
 
     /**
      * 哪些来源算「拿在手里左键抡」的近战武器。

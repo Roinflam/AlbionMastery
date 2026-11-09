@@ -90,6 +90,14 @@ The mastery system is inspired by the Destiny Board of Albion Online, and the ra
     ordering="AFTER"
     side="BOTH"
 
+# 铁枪（Iron's Arms 'n Artifice）：只认测过的 1.1.1 及以后
+[[dependencies.${mod_id}]]
+    modId="irons_artifice"
+    mandatory=false
+    versionRange="[1.20.1-1.1.1,)"
+    ordering="AFTER"
+    side="BOTH"
+
 # FTB 任务也是可选依赖：装了就多一种「专精段位」任务（按段位 / 段位经验比较），没装不受影响
 [[dependencies.${mod_id}]]
     modId="ftbquests"

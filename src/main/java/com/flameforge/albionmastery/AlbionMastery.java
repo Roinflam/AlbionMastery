@@ -88,6 +88,9 @@ public class AlbionMastery {
         if (WeaponResolver.isSweetMagicLoaded()) {
             MinecraftForge.EVENT_BUS.register(SweetMagicCombatHandler.class);
         }
+        if (WeaponResolver.isIronsArtificeLoaded()) {
+            MinecraftForge.EVENT_BUS.register(com.flameforge.albionmastery.event.IronsArtificeCombatHandler.class);
+        }
         // FTB 任务同样可选：装了就多一种「专精段位」任务，没装时入口里自己判断、不碰 FTB 的类
         FtbQuestsCompat.init();
     }

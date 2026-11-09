@@ -418,7 +418,47 @@ public enum Specialization {
     /** 修习 · 破甲修习：专打重甲。 */
     SM_PIERCE(WeaponKeys.PROVIDER_SWEETMAGIC, "pierce", "study"),
     /** 修习 · 钻研修习：涨经验快，威力低。 */
-    SM_SCHOLAR(WeaponKeys.PROVIDER_SWEETMAGIC, "scholar", "study");
+    SM_SCHOLAR(WeaponKeys.PROVIDER_SWEETMAGIC, "scholar", "study"),
+
+    // ───────────── 铁枪：火药 / 弹丸 / 枪机·枪托 / 装填 / 枪术 ─────────────
+
+    /** 铁枪 · 制式：什么都不改。 */
+    IA_STANDARD(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "standard", ""),
+
+    /** 火药 · 加量装药：一枪更狠，人被推得更远、后坐更大、装得更慢。 */
+    IA_HEAVY_CHARGE(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "heavy_charge", "powder"),
+    /** 火药 · 爆燃火药：改装件的爆炸、闪电、魂火伤害大涨，子弹本身变弱。 */
+    IA_VOLATILE_POWDER(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "volatile_powder", "powder"),
+    /** 火药 · 速燃火药：射速和装填快，伤害和弹速低。 */
+    IA_QUICK_POWDER(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "quick_powder", "powder"),
+
+    /** 弹丸 · 跳弹弹丸：在方块上多弹几次，弹过再命中更痛。 */
+    IA_SKIPPING_BALL(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "skipping_ball", "shot"),
+    /** 弹丸 · 寻踪弹丸：子弹往目标拐，飞得慢。 */
+    IA_HOMING_BALL(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "homing_ball", "shot"),
+    /** 弹丸 · 淬火弹丸：穿一个目标，专打披甲。 */
+    IA_HARDENED_BALL(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "hardened_ball", "shot"),
+
+    /** 枪机 · 扇击击锤：连射快，散得开。 */
+    IA_FANNING_HAMMER(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "fanning_hammer", "lock"),
+    /** 枪机 · 簧轮枪机：稳而准，射速慢。 */
+    IA_WHEELLOCK(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "wheellock", "lock"),
+    /** 枪托 · 软垫枪托：开枪不再把人往后推。 */
+    IA_PADDED_STOCK(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "padded_stock", "lock"),
+
+    /** 装填 · 纸壳定装弹：装得快，威力低。 */
+    IA_PAPER_CARTRIDGE(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "paper_cartridge", "loading"),
+    /** 装填 · 压实装药：满膛第一发更痛，装得慢。 */
+    IA_TAMPED_CHARGE(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "tamped_charge", "loading"),
+    /** 装填 · 节药装填：有几率不扣弹，威力低。 */
+    IA_THRIFTY_LOADING(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "thrifty_loading", "loading"),
+
+    /** 枪术 · 快枪手：近身速射，远了不行。 */
+    IA_QUICKSHOT(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "quickshot", "gunplay"),
+    /** 枪术 · 线列射击：远距离齐射，走得慢。 */
+    IA_LINE_VOLLEY(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "line_volley", "gunplay"),
+    /** 枪术 · 赏金猎人：击杀补弹、嗜战，自己更脆。 */
+    IA_BOUNTY_HUNTER(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "bounty_hunter", "gunplay");
 
     /** 所属来源 ID，同时也是该来源的总体专精键。 */
     private final String sourceId;

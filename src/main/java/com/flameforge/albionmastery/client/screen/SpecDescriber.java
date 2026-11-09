@@ -55,7 +55,7 @@ public final class SpecDescriber {
     private static final List<String> MULTIPLIERS = List.of(
             "damage", "summonedDamage", "directDamage", "saDamage",
             "vsPlayerDamage", "vsMobDamage", "armoredDamage", "unarmoredDamage",
-            "headShotDamage", "bodyShotDamage",
+            "headShotDamage", "bodyShotDamage", "firstShotDamage", "ricochetDamage", "effectDamage",
             "fireRate", "magazine", "reloadTime", "bulletSpeed",
             "recoil", "adsTime", "hipSpread", "aimSpread", "drawTime", "boltTime", "sprintTime",
             "attackInterval", "reach", "knockback", "drawSpeed", "castTime", "spellCooldown", "manaCost",
@@ -139,6 +139,18 @@ public final class SpecDescriber {
         int pierce = (int) Math.round(values.pierce());
         if (pierce > 0) {
             gains.add(Component.translatable(localized(DESC, sourceId, "pierce"), pierce));
+        }
+        int ricochet = (int) Math.round(values.ricochet());
+        if (ricochet > 0) {
+            gains.add(Component.translatable(localized(DESC, sourceId, "ricochet"), ricochet));
+        }
+        if (!isNeutral(values.seeking(), 0.0D)) {
+            (values.seeking() > 0.0D ? gains : costs).add(Component.translatable(localized(DESC, sourceId, "seeking"),
+                    formatSigned(values.seeking())));
+        }
+        if (!isNeutral(values.blowback(), 0.0D)) {
+            (values.blowback() < 0.0D ? gains : costs).add(Component.translatable(localized(DESC, sourceId, "blowback"),
+                    formatSigned(values.blowback())));
         }
         int spellLevel = (int) Math.round(values.spellLevel());
         if (spellLevel > 0) {
@@ -228,6 +240,22 @@ public final class SpecDescriber {
             gains.add(new Entry(shortName(sourceId, "pierce"), "+" + pierce,
                     Component.translatable(localized(DESC, sourceId, "pierce"), pierce)));
         }
+        int ricochet = (int) Math.round(values.ricochet());
+        if (ricochet > 0) {
+            gains.add(new Entry(shortName(sourceId, "ricochet"), "+" + ricochet,
+                    Component.translatable(localized(DESC, sourceId, "ricochet"), ricochet)));
+        }
+        // 追踪力度、人物反冲是加在枪自己的数上的，写成带符号的数而不是百分比；反冲是越小越好
+        if (!isNeutral(values.seeking(), 0.0D)) {
+            (values.seeking() > 0.0D ? gains : costs).add(new Entry(shortName(sourceId, "seeking"),
+                    formatSigned(values.seeking()),
+                    Component.translatable(localized(DESC, sourceId, "seeking"), formatSigned(values.seeking()))));
+        }
+        if (!isNeutral(values.blowback(), 0.0D)) {
+            (values.blowback() < 0.0D ? gains : costs).add(new Entry(shortName(sourceId, "blowback"),
+                    formatSigned(values.blowback()),
+                    Component.translatable(localized(DESC, sourceId, "blowback"), formatSigned(values.blowback()))));
+        }
         int spellLevel = (int) Math.round(values.spellLevel());
         if (spellLevel > 0) {
             gains.add(new Entry(shortName(sourceId, "spell_level"), "+" + spellLevel, null));
@@ -309,6 +337,17 @@ public final class SpecDescriber {
         }
         double percent = (multiplier - 1.0D) * 100.0D;
         return (percent >= 0.0D ? "+" : "−") + formatNumber(Math.abs(percent)) + "%";
+    }
+
+    /**
+     * 加法项（追踪力度、人物反冲）写成带符号的数，保留两位小数：
+     * 这两项的量级在 0.1 上下，只留一位的话 Lv1 到 Lv5 全显示成同一个数。
+     *
+     * @param amount 数
+     * @return 如「+0.14」「−0.60」
+     */
+    public static String formatSigned(double amount) {
+        return (amount >= 0.0D ? "+" : "−") + String.format(Locale.ROOT, "%.2f", Math.abs(amount));
     }
 
     /**

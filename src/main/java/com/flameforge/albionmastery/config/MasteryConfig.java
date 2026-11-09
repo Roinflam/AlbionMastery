@@ -114,7 +114,13 @@ public final class MasteryConfig {
             Map.entry("igniteChance", "命中时点燃目标 4 秒的概率（同一 tick 对同一目标只掷一次，霰弹不会必中）"),
             Map.entry("slowChance", "命中时让目标缓慢 II 3 秒的概率"),
             Map.entry("weakenChance", "命中时让目标虚弱 4 秒的概率"),
-            Map.entry("lastRoundDamage", "枪械弹匣只剩最后三成子弹时的伤害倍率"));
+            Map.entry("lastRoundDamage", "枪械弹匣只剩最后三成子弹时的伤害倍率"),
+            Map.entry("ricochet", "铁枪子弹在方块上额外弹射的次数，整数（2 = 多弹两次），和弹射子弹改装件叠加"),
+            Map.entry("seeking", "铁枪子弹的追踪力度，加在枪自己的追踪上（一个追踪火药改装件是 0.1），上限 1"),
+            Map.entry("blowback", "铁枪开枪时把人往后推的力度，加在枪自己的人物反冲上（燧发枪自带 0.5），负数是减，减到 0 以下按 0 算"),
+            Map.entry("firstShotDamage", "铁枪满弹匣打出的第一发的伤害倍率（单发枪每一发都算），只乘子弹直接命中"),
+            Map.entry("ricochetDamage", "铁枪子弹在方块上弹射过之后再命中的伤害倍率"),
+            Map.entry("effectDamage", "铁枪改装件附带伤害的倍率：黑火药装药的爆炸、电击弹芯的闪电、魂火硬币的灵魂伤害"));
 
     /**
      * 每个特化的数值项，由 {@link #defineSpec} 在构建配置时填入。
@@ -358,6 +364,7 @@ public final class MasteryConfig {
             notes.put(WeaponKeys.PROVIDER_ARS_NOUVEAU, "Ars Nouveau（新生魔艺）");
             notes.put(WeaponKeys.PROVIDER_TCONSTRUCT, "匠魂全家（Tinkers' Construct 及其附属）");
             notes.put(WeaponKeys.PROVIDER_SWEETMAGIC, "甜蜜魔法的魔法卷轴");
+            notes.put(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "Iron's Arms 'n Artifice（铁枪）的火器");
             return Map.copyOf(notes);
         }
 
@@ -1707,6 +1714,90 @@ public final class MasteryConfig {
             defineSpec(builder, Specialization.SM_SCHOLAR, values -> {
                 values.put("xpGain", 1.35D);
                 values.put("damage", 0.9D);
+            });
+
+            // ── 铁枪 · 火药 ──
+            defineSpec(builder, Specialization.IA_HEAVY_CHARGE, values -> {
+                values.put("damage", 1.35D);
+                values.put("blowback", 0.3D);
+                values.put("recoil", 1.25D);
+                values.put("reloadTime", 1.15D);
+            });
+            defineSpec(builder, Specialization.IA_VOLATILE_POWDER, values -> {
+                values.put("effectDamage", 1.8D);
+                values.put("igniteChance", 0.15D);
+                values.put("damage", 0.9D);
+            });
+            defineSpec(builder, Specialization.IA_QUICK_POWDER, values -> {
+                values.put("fireRate", 1.3D);
+                values.put("reloadTime", 0.9D);
+                values.put("damage", 0.88D);
+                values.put("bulletSpeed", 0.9D);
+            });
+            // ── 铁枪 · 弹丸 ──
+            defineSpec(builder, Specialization.IA_SKIPPING_BALL, values -> {
+                values.put("ricochet", 2.0D);
+                values.put("ricochetDamage", 1.5D);
+                values.put("damage", 0.9D);
+            });
+            defineSpec(builder, Specialization.IA_HOMING_BALL, values -> {
+                values.put("seeking", 0.12D);
+                values.put("bulletSpeed", 0.75D);
+                values.put("damage", 0.92D);
+            });
+            defineSpec(builder, Specialization.IA_HARDENED_BALL, values -> {
+                values.put("pierce", 1.0D);
+                values.put("armoredDamage", 1.35D);
+                values.put("unarmoredDamage", 0.85D);
+                values.put("bulletSpeed", 1.1D);
+            });
+            // ── 铁枪 · 枪机 / 枪托 ──
+            defineSpec(builder, Specialization.IA_FANNING_HAMMER, values -> {
+                values.put("fireRate", 1.4D);
+                values.put("hipSpread", 1.3D);
+                values.put("damage", 0.92D);
+            });
+            defineSpec(builder, Specialization.IA_WHEELLOCK, values -> {
+                values.put("recoil", 0.65D);
+                values.put("hipSpread", 0.8D);
+                values.put("fireRate", 0.88D);
+            });
+            defineSpec(builder, Specialization.IA_PADDED_STOCK, values -> {
+                values.put("blowback", -0.5D);
+                values.put("recoil", 0.75D);
+                values.put("damage", 0.92D);
+            });
+            // ── 铁枪 · 装填 ──
+            defineSpec(builder, Specialization.IA_PAPER_CARTRIDGE, values -> {
+                values.put("reloadTime", 0.7D);
+                values.put("damage", 0.85D);
+                values.put("hipSpread", 1.1D);
+            });
+            defineSpec(builder, Specialization.IA_TAMPED_CHARGE, values -> {
+                values.put("firstShotDamage", 1.5D);
+                values.put("reloadTime", 1.2D);
+            });
+            defineSpec(builder, Specialization.IA_THRIFTY_LOADING, values -> {
+                values.put("ammoSave", 0.28D);
+                values.put("damage", 0.88D);
+                values.put("bulletSpeed", 0.9D);
+            });
+            // ── 铁枪 · 枪术 ──
+            defineSpec(builder, Specialization.IA_QUICKSHOT, values -> {
+                values.put("nearDamage", 1.35D);
+                values.put("fireRate", 1.15D);
+                values.put("farDamage", 0.75D);
+            });
+            defineSpec(builder, Specialization.IA_LINE_VOLLEY, values -> {
+                values.put("farDamage", 1.35D);
+                values.put("hipSpread", 0.8D);
+                values.put("moveSpeed", 0.92D);
+            });
+            defineSpec(builder, Specialization.IA_BOUNTY_HUNTER, values -> {
+                values.put("killRefill", 0.5D);
+                values.put("frenzyStep", 0.06D);
+                values.put("frenzyMax", 4.0D);
+                values.put("damageTaken", 1.1D);
             });
 
             builder.pop();

@@ -25,9 +25,11 @@ public final class NetworkHandler {
      * 版本 10 配置快照末尾加了每级段位经验，新增段位晋升包，排行榜排序多了段位。
      * 版本 11 特化改成 4 槽 + 分级：配置快照换成新的养成规则并加单件武器倍率，全量同步加特化等级 / 突破 / 退点冷却，
      * 新增升级 / 突破 / 重置请求，选特化的槽位放到 1～4。
+     * 版本 12 接入铁枪（Iron's Arms 'n Artifice）：特化数值表末尾追加弹射、追踪、人物反冲、满膛首发、
+     * 弹射后命中、改装件附带伤害六项，旧端读同步包会错位。
      * 两端必须一起更新，避免旧客户端误读数据包或显示错误等级。
      */
-    private static final String PROTOCOL_VERSION = "11";
+    private static final String PROTOCOL_VERSION = "12";
 
     /** 主通道。 */
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
