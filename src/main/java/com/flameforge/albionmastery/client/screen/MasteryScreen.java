@@ -3071,8 +3071,8 @@ public class MasteryScreen extends Screen {
         // 外圈的独立配置优先于这里：有几件单独配过的，提一句，免得玩家改了通用配置发现某把枪没变
         int overrides = SpecializationScreen.countOverrides(data, typeKey);
         if (overrides > 0) {
-            cursor = drawWrapped(guiGraphics, Component.translatable("gui.albionmastery.panel.spec_overrides",
-                    overrides), x, cursor + 3, width, MasteryPalette.TEXT_DIM);
+            cursor = drawWrapped(guiGraphics, Plural.component("gui.albionmastery.panel.spec_overrides",
+                    overrides, overrides), x, cursor + 3, width, MasteryPalette.TEXT_DIM);
         }
         return drawSpecButton(guiGraphics, typeKey, null, x, cursor + 6, width);
     }

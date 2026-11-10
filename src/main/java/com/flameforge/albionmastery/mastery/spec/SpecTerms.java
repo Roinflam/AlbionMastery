@@ -16,6 +16,7 @@ import javax.annotation.Nullable;
  *     <li>{@code spec}：单独一项叫什么（改装、铭刻……）；</li>
  *     <li>{@code slot1} ～ {@code slot4}：四个槽叫什么（改装槽 1 / 突破槽 1 / 改装槽 2 / 突破槽 2……）；</li>
  *     <li>{@code point}：升级普通版用的点数叫什么（改装点、修习点……），突破点各来源都叫突破点；</li>
+ *     <li>{@code point_short}：点数的短说法，点数框窄到放不下 {@code point} 时用（英文 Artifice pts，中文和 point 一样）；</li>
  *     <li>{@code group}：分组叫什么（部位、类别……），同一组里只能选一个。</li>
  * </ul>
  * 每个来源都在语言文件里写全了，不做回退，服务端发出去的提示也能直接用。来源不认识时用 {@code default} 那一套。

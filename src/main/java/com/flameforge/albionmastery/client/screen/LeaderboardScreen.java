@@ -879,7 +879,7 @@ public class LeaderboardScreen extends Screen {
         int limit = searchLeft() - 10;
         if (this.state == State.READY || this.state == State.EMPTY) {
             Component count = this.activeQuery.isEmpty()
-                    ? Component.translatable("gui.albionmastery.leaderboard.header_total", this.total)
+                    ? Plural.component("gui.albionmastery.leaderboard.header_total", this.total, this.total)
                     : Component.translatable("gui.albionmastery.leaderboard.header_search",
                             this.activeQuery, this.matched);
             cursor = drawHeaderChip(guiGraphics, count, cursor, textY,

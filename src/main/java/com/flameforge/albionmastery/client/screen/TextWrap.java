@@ -79,7 +79,14 @@ public final class TextWrap {
             // 至少切一个字：宽度小到一个字都放不下时也要往前走，否则会死循环
             int end = start + Math.max(1, fit.length());
             end = avoidWordBreak(paragraph, start, end);
+            int beforePunct = end;
             end = avoidBadBreak(paragraph, start, end);
+            if (end != beforePunct && insideWord(paragraph, end)) {
+                // 为了避开标点往回退，退进了一个英文词里（「free.」退成「fre / e.」）：整词带下去，
+                // 这一行只剩半个词放不下时宁可让标点落在行首
+                int word = wordStart(paragraph, start, end);
+                end = word > start ? word : beforePunct;
+            }
             end = avoidOrphan(paragraph, start, end);
 
             out.add(stripTrailingSpaces(paragraph.substring(start, end)));
@@ -91,7 +98,8 @@ public final class TextWrap {
     }
 
     /**
-     * 英文别从单词中间断开：断点两边都是字母数字时，退回到上一个空格。
+     * 英文别从单词中间断开：断点落在一个英文词（连同贴着它的标点、数字、符号，如「+5.」「1h.」「★2」）里面时，
+     * 退回到这个词的开头。整行就是一个词、退了这一行就空了时才硬切。
      *
      * @param text  原文
      * @param start 本行起点
@@ -99,11 +107,38 @@ public final class TextWrap {
      * @return 调整后的终点
      */
     private static int avoidWordBreak(String text, int start, int end) {
-        if (end >= text.length() || !isWordChar(text.charAt(end)) || !isWordChar(text.charAt(end - 1))) {
+        if (!insideWord(text, end)) {
             return end;
         }
-        int space = text.lastIndexOf(' ', end - 1);
-        return space > start ? space : end;
+        int word = wordStart(text, start, end);
+        return word > start ? word : end;
+    }
+
+    /**
+     * 断点是不是落在一个英文词中间：两边都是非空格、非中日韩字符。中文字之间、中文和英文之间都能断。
+     *
+     * @param text 原文
+     * @param end  断点
+     * @return 在词中间返回 true
+     */
+    private static boolean insideWord(String text, int end) {
+        return end > 0 && end < text.length() && isWordChar(text.charAt(end - 1)) && isWordChar(text.charAt(end));
+    }
+
+    /**
+     * 断点所在英文词的开头（往回找到空格或中文字为止）。
+     *
+     * @param text  原文
+     * @param start 本行起点，不会退到它前面
+     * @param end   断点
+     * @return 词的第一个字符的位置
+     */
+    private static int wordStart(String text, int start, int end) {
+        int i = end;
+        while (i > start && isWordChar(text.charAt(i - 1))) {
+            i--;
+        }
+        return i;
     }
 
     /**
@@ -144,7 +179,7 @@ public final class TextWrap {
      */
     private static int avoidOrphan(String text, int start, int end) {
         int rest = text.length() - end;
-        if (rest <= 0 || rest > 2 || end - start <= 4 || isWordChar(text.charAt(end - 1))) {
+        if (rest <= 0 || rest > 2 || end - start <= 4 || !isCjk(text.charAt(end - 1))) {
             return end;
         }
         int moved = end - 1;
@@ -152,17 +187,27 @@ public final class TextWrap {
         while (moved > start + 1 && NO_LINE_START.indexOf(text.charAt(moved)) >= 0) {
             moved--;
         }
-        return moved;
+        return insideWord(text, moved) ? end : moved;
     }
 
     /**
-     * 是不是不该被切开的单词字符。
+     * 是不是英文词的一部分：除空格外的西文字符都算，字母数字和贴着它的标点、符号（+、%、★、括号）一起不拆开。
      *
      * @param c 字符
      * @return 是返回 true
      */
     private static boolean isWordChar(char c) {
-        return Character.isLetterOrDigit(c) && c < 0x2E80;
+        return c != ' ' && !isCjk(c);
+    }
+
+    /**
+     * 中日韩文字和全角标点：它们之间每个字都能断。
+     *
+     * @param c 字符
+     * @return 是返回 true
+     */
+    private static boolean isCjk(char c) {
+        return c >= 0x2E80;
     }
 
     /**
