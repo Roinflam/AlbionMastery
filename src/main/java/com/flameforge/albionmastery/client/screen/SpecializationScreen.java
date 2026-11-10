@@ -186,6 +186,10 @@ public class SpecializationScreen extends Screen {
     @Nullable
     private Runnable pendingTooltip;
 
+    /** 本帧的鼠标位置（走遮罩、鼠标在界面大小卡片上时挪到界面外），给「字被截断时悬停看全文」用。 */
+    private int tipMouseX = -10000;
+    private int tipMouseY = -10000;
+
     /** 本帧画出来的可点区域（屏幕坐标，已经扣过滚动和裁剪），点击时倒着找，后画的在上面。 */
     private final List<Hit> hits = new ArrayList<>();
 
@@ -400,6 +404,13 @@ public class SpecializationScreen extends Screen {
             this.searchBox.setX(mainLeft + 4);
             this.searchBox.setY(sideTop + 3);
             this.searchBox.setWidth(mainRight - mainLeft - 8);
+            // 原版输入框的提示字不裁剪，C 版中栏窄时会压到右边详情栏上：放不下换短说法，再放不下截断
+            int room = mainRight - mainLeft - 8;
+            String hint = I18n.get("gui.albionmastery.spec_page.search");
+            if (fw(hint) > room) {
+                hint = ellipsis(I18n.get("gui.albionmastery.spec_page.search_short"), room);
+            }
+            this.searchBox.setHint(Component.literal(hint).withStyle(ChatFormatting.DARK_GRAY));
         }
     }
 
@@ -448,6 +459,8 @@ public class SpecializationScreen extends Screen {
         boolean blocked = touring || this.scaleKnob.contains(mouseX, mouseY);
         int mx = blocked ? -10000 : mouseX;
         int my = blocked ? -10000 : mouseY;
+        this.tipMouseX = mx;
+        this.tipMouseY = my;
         this.guide = r.barTop() > 0 || touring ? computeGuide(snapshot) : null;
 
         // 主区先画（要知道鼠标停在哪张卡上），左栏的预览再按它画
@@ -647,6 +660,7 @@ public class SpecializationScreen extends Screen {
         frame(guiGraphics, x, y, width, height, border);
         int color = !enabled ? TEXT_FAINT : hover ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT;
         String text = ellipsis(label.getString(), width - 6);
+        tipIfClipped(guiGraphics, label.getString(), text, x, y, width, height);
         // 文字按不取整的亮像素宽（宽度含末尾 1 像素字距，扣掉）居中；落到屏幕像素格时往左取整
         drawAt(guiGraphics, Component.literal(text), x + (width - (fw(text) - 1.0F)) / 2.0F,
                 y + (height - 8) / 2, color);
@@ -752,10 +766,11 @@ public class SpecializationScreen extends Screen {
         int bar = !view.unlocked() ? MasteryPalette.GOLD_DARK : view.breakthrough() ? BREAK : MasteryPalette.GOLD;
         guiGraphics.fill(x + 1, y + 1, x + width - 1, y + 3, bar);
         int inner = width - PAD * 2;
-        String tag = slotTag(view, selected);
+        String label = view.label().getString();
+        String tag = fitSlotTag(label, slotTag(view, selected), inner);
         int tagColor = selected ? MasteryPalette.GOLD : view.breakthrough() ? BREAK : MasteryPalette.GOLD;
         drawRight(guiGraphics, tag, x + width - PAD, y + 6, tagColor);
-        guiGraphics.drawString(this.font, ellipsis(view.label().getString(), inner - fw(tag) - NAME_VALUE_GAP),
+        guiGraphics.drawString(this.font, ellipsis(label, tag.isEmpty() ? inner : inner - fw(tag) - NAME_VALUE_GAP),
                 x + PAD, y + 6, view.unlocked() ? MasteryPalette.TEXT_DIM : TEXT_FAINT, false);
         if (!view.unlocked()) {
             // 「类型 100 级解锁」+ 进度条「72 / 100」
@@ -779,8 +794,11 @@ public class SpecializationScreen extends Screen {
             }
             return;
         }
-        guiGraphics.drawString(this.font, ellipsis(slotSpecName(view), inner), x + PAD, y + 18,
+        String specName = slotSpecName(view, inner);
+        String shownName = ellipsis(specName, inner);
+        guiGraphics.drawString(this.font, shownName, x + PAD, y + 18,
                 selected ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT, false);
+        tipIfClipped(guiGraphics, specName, shownName, x, y, width, SLOT_TILE_HEIGHT);
         int levelWidth = drawLevelMarks(guiGraphics, view, x + PAD, y + 29);
         String levelText = levelText(view.breakthrough(), view.level());
         guiGraphics.drawString(this.font, levelText, x + PAD + levelWidth + 5, y + 29, TEXT_FAINT, false);
@@ -809,10 +827,12 @@ public class SpecializationScreen extends Screen {
         guiGraphics.fill(x, y, x + 2, y + SLOT_ROW_HEIGHT, bar);
         int left = x + 6;
         int right = x + width - PAD;
-        String tag = slotTag(view, selected);
+        String label = view.label().getString();
+        String tag = fitSlotTag(label, slotTag(view, selected), right - left);
         drawRight(guiGraphics, tag, right, y + 3, selected ? MasteryPalette.GOLD
                 : view.breakthrough() ? BREAK : MasteryPalette.GOLD);
-        guiGraphics.drawString(this.font, ellipsis(view.label().getString(), right - left - fw(tag) - NAME_VALUE_GAP),
+        guiGraphics.drawString(this.font, ellipsis(label, tag.isEmpty() ? right - left
+                        : right - left - fw(tag) - NAME_VALUE_GAP),
                 left, y + 3, view.unlocked() ? MasteryPalette.TEXT_DIM : TEXT_FAINT, false);
         int lineY = y + 14;
         if (!view.unlocked()) {
@@ -837,8 +857,10 @@ public class SpecializationScreen extends Screen {
         drawLevelMarks(guiGraphics, view, right - marksWidth, lineY);
         int nameColor = !view.active() ? MasteryPalette.WARN
                 : selected ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT;
-        guiGraphics.drawString(this.font, ellipsis(slotSpecName(view), right - left - marksWidth - NAME_VALUE_GAP),
-                left, lineY, nameColor, false);
+        String specName = slotSpecName(view, right - left - marksWidth - NAME_VALUE_GAP);
+        String shownName = ellipsis(specName, right - left - marksWidth - NAME_VALUE_GAP);
+        guiGraphics.drawString(this.font, shownName, left, lineY, nameColor, false);
+        tipIfClipped(guiGraphics, specName, shownName, x, y, width, SLOT_ROW_HEIGHT);
         return y + SLOT_ROW_HEIGHT;
     }
 
@@ -859,6 +881,13 @@ public class SpecializationScreen extends Screen {
         }));
     }
 
+    /**
+     * 槽名和右上角小字一行放不下时先保住槽名、小字不画：选中有亮框，普通 / 突破有顶上的色条，小字只是重复。
+     */
+    private String fitSlotTag(String label, String tag, float room) {
+        return fw(label) + NAME_VALUE_GAP + fw(tag) <= room ? tag : "";
+    }
+
     /** 槽右上角的小字：选中时「装到这里」，否则是「普通 / 突破」。 */
     private String slotTag(SlotView view, boolean selected) {
         if (selected && !this.viewOnly) {
@@ -871,6 +900,12 @@ public class SpecializationScreen extends Screen {
     private String slotSpecName(SlotView view) {
         String name = I18n.get(view.spec().nameKey());
         return view.breakthrough() ? I18n.get("gui.albionmastery.spec_page.break_name", name) : name;
+    }
+
+    /** 槽里装着的名字放不下时先去掉突破标记（突破槽有色条，下一行有星），还放不下再截断。 */
+    private String slotSpecName(SlotView view, float room) {
+        String name = slotSpecName(view);
+        return fw(name) <= room ? name : I18n.get(view.spec().nameKey());
     }
 
     /** 空槽收什么：突破槽「只收突破过的（★1 起）」，普通槽「收普通版（Lv1 起）」。 */
@@ -1466,6 +1501,14 @@ public class SpecializationScreen extends Screen {
         return Math.max(this.font.width(cooldown), this.font.width(refund)) <= half;
     }
 
+    private String respecLabel(String base, long remaining, boolean armed, int spent) {
+        return remaining > 0L
+                ? I18n.get("gui.albionmastery.spec_page.respec_cooldown", base, clock(remaining))
+                : armed ? I18n.get("gui.albionmastery.spec_page.respec_confirm")
+                : spent > 0 ? I18n.get("gui.albionmastery.spec_page.respec_refund", base, spent)
+                : I18n.get("gui.albionmastery.spec_page.respec_nothing", base);
+    }
+
     /**
      * 底部两个重置按钮：重置这个来源的改装点 / 这个类型的突破点。冷却中写还剩多久；
      * 点第一下变成「再点一次确认」，三秒内再点才真的发请求（退点要等一天才能再退，误点代价太大）。
@@ -1491,11 +1534,16 @@ public class SpecializationScreen extends Screen {
             boolean enabled = remaining <= 0L && spent > 0;
             boolean armed = pool.equals(this.armedPool);
             // 能点时写退几点，没花过写「还没花」，冷却中写还剩多久
-            String label = remaining > 0L
-                    ? I18n.get("gui.albionmastery.spec_page.respec_cooldown", base, clock(remaining))
-                    : armed ? I18n.get("gui.albionmastery.spec_page.respec_confirm")
-                    : spent > 0 ? I18n.get("gui.albionmastery.spec_page.respec_refund", base, spent)
-                    : I18n.get("gui.albionmastery.spec_page.respec_nothing", base);
+            String label = respecLabel(base, remaining, armed, spent);
+            if (this.font.width(label) > buttonWidth - 6) {
+                // 点数名长、按钮窄时换短说法，悬停看全文
+                String full = label;
+                label = respecLabel(I18n.get(source ? "gui.albionmastery.spec_page.respec_source_short"
+                        : "gui.albionmastery.spec_page.respec_type_short"), remaining, armed, spent);
+                if (!label.equals(full)) {
+                    tipIfClipped(guiGraphics, full, label, bx, by, buttonWidth, SIDE_BUTTON_HEIGHT);
+                }
+            }
             boolean hover = inside(mouseX, mouseY, bx, by, buttonWidth, SIDE_BUTTON_HEIGHT);
             drawButton(guiGraphics, bx, by, buttonWidth, SIDE_BUTTON_HEIGHT, Component.literal(label),
                     hover && enabled, enabled, armed);
@@ -1669,11 +1717,16 @@ public class SpecializationScreen extends Screen {
         int inner = width - PAD * 2;
         int tagWidth = tagWidth(card);
         String name = I18n.get(card.spec().nameKey());
+        // 名字优先：右上角的状态（装在哪个槽、未解锁、可升级）和名字一行放不下就不画。
+        // 装着的有金框，未解锁的是暗的，能不能升级看按钮，悬停面板里也都写着
+        boolean showTag = tagWidth > 0 && fw(name) + NAME_VALUE_GAP + 2 + tagWidth <= inner;
         int nameColor = equipped ? MasteryPalette.GOLD_BRIGHT : card.dimmed() ? MasteryPalette.TEXT_DIM
                 : MasteryPalette.TEXT;
-        guiGraphics.drawString(this.font, ellipsis(name, inner - (tagWidth > 0 ? tagWidth + NAME_VALUE_GAP + 2 : 0)),
+        guiGraphics.drawString(this.font, ellipsis(name, inner - (showTag ? tagWidth + NAME_VALUE_GAP + 2 : 0)),
                 x + PAD, y + PAD, nameColor, false);
-        drawTag(guiGraphics, card, x + width - PAD, y + PAD);
+        if (showTag) {
+            drawTag(guiGraphics, card, x + width - PAD, y + PAD);
+        }
         int levelY = y + PAD + LINE + 1;
         int marks = drawCardMarks(guiGraphics, card, x + PAD, levelY);
         guiGraphics.drawString(this.font, ellipsis(card.levelText(), inner - marks - 5), x + PAD + marks + 5, levelY,
@@ -2452,7 +2505,9 @@ public class SpecializationScreen extends Screen {
             int boxWidth = width + 12;
             int boxHeight = lines.size() * LINE + 8;
             int x = Mth.clamp(mouseX - boxWidth + 20, 4, Math.max(4, this.width - 4 - boxWidth));
-            int y = Math.min(mouseY + 12, Math.max(2, this.height - 4 - boxHeight));
+            // 鼠标下方放不下（贴着底边的重置按钮这类）就放到鼠标上方，别盖住鼠标指着的东西
+            int y = mouseY + 12 + boxHeight <= this.height - 4 ? mouseY + 12
+                    : Math.max(2, mouseY - 6 - boxHeight);
             panel(graphics, x, y, boxWidth, boxHeight);
             int cy = y + 5;
             for (String line : lines) {
@@ -2460,6 +2515,17 @@ public class SpecializationScreen extends Screen {
                 cy += LINE;
             }
         };
+    }
+
+    /**
+     * 字放不下被省略号截掉时，鼠标停在那一块上就浮出全文；这一帧已经有别的悬停面板就不出。
+     */
+    private void tipIfClipped(GuiGraphics guiGraphics, String full, String shown, int x, int y, int width,
+                              int height) {
+        if (this.pendingTooltip == null && !shown.equals(full)
+                && inside(this.tipMouseX, this.tipMouseY, x, y, width, height)) {
+            showTextTooltip(guiGraphics, List.of(full), this.tipMouseX, this.tipMouseY);
+        }
     }
 
     private void panel(GuiGraphics guiGraphics, int x, int y, int width, int height) {
@@ -2510,8 +2576,16 @@ public class SpecializationScreen extends Screen {
         }
         if (r.barTop() > 0) {
             // 引导条开着：「下一步」那句已经在上面了，这里只写通用的操作说明（右键卸下、数字键选槽这类）
-            String hint = I18n.get(r.layout() == SpecScreenLayout.C ? "gui.albionmastery.spec_page.hint_c"
-                    : "gui.albionmastery.spec_page.hint");
+            String key = r.layout() == SpecScreenLayout.C ? "gui.albionmastery.spec_page.hint_c"
+                    : "gui.albionmastery.spec_page.hint";
+            // 完整、短、最短三档，挑放得下的最长那档
+            String hint = I18n.get(key);
+            for (String suffix : new String[]{"_short", "_tiny"}) {
+                if (fw(hint) <= right - left) {
+                    break;
+                }
+                hint = I18n.get(key + suffix);
+            }
             guiGraphics.drawString(this.font, ellipsis(hint, right - left), left, y, TEXT_FAINT, false);
             return;
         }

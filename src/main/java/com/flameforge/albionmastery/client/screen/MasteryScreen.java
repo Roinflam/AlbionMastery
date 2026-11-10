@@ -2362,8 +2362,25 @@ public class MasteryScreen extends Screen {
             }
         }
         if (showName) {
-            drawScaledLabel(guiGraphics, node.displayName().getString(), sx, below + 2.0F, scale,
-                    nameColor, labelBudget(node, scale, focused));
+            String name = node.displayName().getString();
+            int budget = labelBudget(node, scale, focused);
+            if (node.type == MasteryNode.Type.SOURCE && !focused && this.font.width(name) > budget) {
+                // 来源多了、名字又长（英文）时，全貌下内圈一圈挤不下：按词折成两行
+                // 折行宽度不小于最长的词（不把词劈开）、也不小于全名的一半（最多两行）
+                int wrapWidth = Math.max(budget, (this.font.width(name) + 1) / 2 + 4);
+                for (String word : name.split(" ")) {
+                    wrapWidth = Math.max(wrapWidth, this.font.width(word));
+                }
+                // 折出来的两行都不长（不超过全名），照原样画、不再截断
+                List<String> lines = TextWrap.wrap(this.font, name, wrapWidth);
+                drawScaledLabel(guiGraphics, lines.get(0), sx, below + 2.0F, scale, nameColor, 170);
+                if (lines.size() > 1) {
+                    drawScaledLabel(guiGraphics, String.join(" ", lines.subList(1, lines.size())), sx,
+                            below + 2.0F + (this.font.lineHeight + 1) * scale, scale, nameColor, 170);
+                }
+                return;
+            }
+            drawScaledLabel(guiGraphics, name, sx, below + 2.0F, scale, nameColor, budget);
         }
     }
 
@@ -2478,9 +2495,18 @@ public class MasteryScreen extends Screen {
         if (focused) {
             return 170;
         }
-        // 来源和中心一共没几个、隔得远，名字永远写全
-        if (node.type == MasteryNode.Type.SOURCE || node.type == MasteryNode.Type.INFO) {
+        // 中心只有一个，名字写全
+        if (node.type == MasteryNode.Type.INFO) {
             return 170;
+        }
+        if (node.type == MasteryNode.Type.SOURCE) {
+            // 内圈按相邻来源的间距算：来源装得多时全貌下也挤，放大后自然写全。
+            // 邻居沿圆周排，顶上、底下的邻居在左右两边，横向只有一个间距；两侧的邻居在上下，横向宽得多
+            double spacing = Math.PI * 2.0D * this.sourceRingRadius * this.zoom / Math.max(1, this.sourceCount);
+            double ring = Math.hypot(node.graphX, node.graphY);
+            double across = ring <= 0.0D ? 1.0D : Math.abs(node.graphY) / ring;
+            double room = spacing / Math.max(0.35D, across) - 6.0D;
+            return (int) Mth.clamp(room / Math.max(0.1F, scale), 30.0D, 170.0D);
         }
         if (node.type == MasteryNode.Type.TYPE) {
             // 中圈整圈用同一个预算，名字截得一样长
