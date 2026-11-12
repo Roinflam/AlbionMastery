@@ -262,6 +262,9 @@ public class MasteryScreen extends Screen {
     /** 中心装饰环的弧段数量。 */
     private static final int CENTER_ARCS = 5;
 
+    /** 中心装饰环平常放在来源圈的这个比例上，见 {@link #updateCenterRing()}。 */
+    private static final double CENTER_RING_SHARE = 0.42D;
+
     /** 满级节点外围绕圈的星点数量。 */
     private static final int MAXED_STARS = 4;
 
@@ -285,6 +288,41 @@ public class MasteryScreen extends Screen {
 
     /** 默认视角下外圈节点至少要有的屏幕像素半径。 */
     private static final double MIN_DEFAULT_NODE_PIXELS = 5.0D;
+
+    /**
+     * 全貌下武器节点已有这么大（像素半径）的小图，打开时直接看全貌，见 {@link #fitZoom()}。
+     *
+     * <p>三个像素已经看得出是一圈图标、数得清有几件；再小就只剩一圈点，这时还是先保证看清。
+     * 只对武器不到 240 件的图生效，更大的图打开镜头照旧。
+     */
+    private static final double FIT_NODE_PIXELS = 3.0D;
+
+    /**
+     * 「看清」的缩放下类型圈出了屏幕时，全貌下武器节点至少要有这么大（像素半径）才改看全貌，见 {@link #fitZoom()}。
+     *
+     * <p>这么大还看得出是一个个分开的节点、能顺着连线认出属于哪个类型（只装 TACZ 在 480×270 下约 1.9）；
+     * 再小就糊成一圈彩点（TACZ 加拔刀剑在 640×360 下约 1.7，一个类型 60 把挤成一条扇面），
+     * 打开先看清更有用，想看全貌自己往外滚。
+     */
+    private static final double FIT_TYPE_RING_PIXELS = 1.8D;
+
+    /**
+     * 外圈上相邻两件武器之间空着超过这个角度（度），才考虑按内容取景，见 {@link #contentFramed}。
+     *
+     * <p>排满一圈的图，片间空隙最宽 46 度，再加上小来源扇形两侧的留白，最宽的空档一般在五十度上下；
+     * 取 60 度把这些都挡在外面，只留下真正空着一段的图。
+     */
+    private static final double FRAME_EMPTY_ARC_DEG = 60.0D;
+
+    /**
+     * 按内容取景至少要比看整张圆盘放大这么多倍才用，见 {@link #useFramedView()}。
+     *
+     * <p>空档不一定在内容的边上：一个来源底下两个只有一把武器的类型，类型自己的留白就能隔出七八十度，
+     * 平分模式下各片的留白也散在整圈上，这些图裁不掉什么，包围盒和整张圆盘差不多大，
+     * 取景只会把盘心挪离屏幕中心，看着像镜头歪了。能放大一成以上，说明空的那段确实在一边、裁掉值得。
+     * 实际装法里只有单来源和平分模式下只剩原版近战、弓弩两个来源时够得上；来源多的图都不到，和以前一样居中看。
+     */
+    private static final double FRAME_MIN_GAIN = 1.10D;
 
     /** 重置视角按钮的尺寸。 */
     private static final int BUTTON_WIDTH = 74;
@@ -437,12 +475,34 @@ public class MasteryScreen extends Screen {
     /** 外圈武器节点的半径，用于保证默认视角下图标不会小到看不清。 */
     private double weaponNodeRadius = 22.0D;
 
+    /** 三圈最小半径的缩放系数（武器少时小于 1），和布局用的是同一个算法，见 {@link NodeLayout#ringScaleFor}。 */
+    private double ringScale = 1.0D;
+
+    /** 中心装饰缺口环的半径（图坐标），见 {@link #updateCenterRing()}。 */
+    private double centerRingRadius;
+
     /** 正在飞向某个位置（双击聚焦），每帧把平移往目标逼近。拖动或滚轮会打断。 */
     private boolean flying;
 
     /** 飞行的目标：让这个图坐标落在屏幕中心。 */
     private double flyCenterX;
     private double flyCenterY;
+
+    /**
+     * 外圈空着一大段（超过 {@value #FRAME_EMPTY_ARC_DEG} 度），内容包围盒已经量好。
+     *
+     * <p>只看图本身，不看来源有几个：比如只剩拔刀剑一个来源，一个类型底下几十把刀，
+     * 布局为了不让连线穿过盘心只摊开两百度，底下空一段。真正用不用还要看裁掉之后放大得够不够
+     * （{@link #useFramedView()}，和窗口比例有关，所以到用的时候再算）。用的时候全貌和默认视角对着内容的包围盒取景，
+     * 空的那段留在屏幕外；往外滚还能看到整张圆盘（{@link #minZoom()} 不变）。
+     */
+    private boolean contentFramed;
+
+    /** 内容包围盒（图坐标），{@link #contentFramed} 时有效。 */
+    private double contentMinX;
+    private double contentMinY;
+    private double contentMaxX;
+    private double contentMaxY;
 
     /** 上一次点中的节点和时刻，用来判断双击。 */
     @Nullable
@@ -546,8 +606,12 @@ public class MasteryScreen extends Screen {
             // 拿上次的视角把它顶掉，等于把这个功能废了。
             if (this.viewOnly || (!focusHeldWeapon() && !restoreSavedView())) {
                 // 空手打开、又没有上次的视角：居中看全貌
-                this.zoom = fitZoom();
-                this.targetZoom = this.zoom;
+                if (useFramedView()) {
+                    applyFramedView(false);
+                } else {
+                    this.zoom = fitZoom();
+                    this.targetZoom = this.zoom;
+                }
             }
             this.initialized = true;
         }
@@ -1241,6 +1305,15 @@ public class MasteryScreen extends Screen {
      * 加上节点尺寸下限之后，默认视角优先保证看得清，看全貌可以自己往外滚
      * （能滚到多小由 {@link #minZoom()} 按图的大小决定）。
      *
+     * <p>下面几种情况改成直接看全貌：
+     * <ul>
+     *     <li>「看清」的缩放下来源圈出了屏幕（一两千件武器的大图）</li>
+     *     <li>三圈收小了的图（武器不到 240 件，见 {@link NodeLayout#ringScaleFor}），全貌下武器节点已有
+     *     {@value #FIT_NODE_PIXELS} 像素</li>
+     *     <li>三圈收小了的图，「看清」的缩放下类型圈出了屏幕，而且全貌下武器节点还有 {@value #FIT_TYPE_RING_PIXELS} 像素</li>
+     * </ul>
+     * 后两条不碰三圈没收小的图：这些图的布局和以前一样，打开的镜头也照旧。
+     *
      * @return 缩放值
      */
     private double fitZoom() {
@@ -1254,7 +1327,110 @@ public class MasteryScreen extends Screen {
         if (this.sourceRingRadius * zoom > limit) {
             zoom = whole;
         }
+        // 再往外推一层：全貌下武器节点已经有几个像素，或者类型圈在「看清」的缩放下出了屏幕，
+        // 都直接看全貌——为了「看清」把外圈裁掉，打开只看到中心和几个类型，反倒认不出是什么。
+        // 这两条只管三圈收小了的图（武器不到 240 件）：更大的图布局和以前一样，界面一大（960×540 往上）
+        // 类型圈照样会出屏、全貌下武器也有两三个像素，放开的话打开镜头就和以前不一样了。
+        // 类型圈这条还要全貌下武器认得出来才算，不然全貌只剩一圈彩点，还不如照旧先看清。
+        // 只看图本身多大，不看来源有几个：原版近战、弓弩两个来源总在，装一两个武器模组就有三四个来源，
+        // 按来源数卡，最该放开的那几种图反倒被挡在外面
+        double wholePixels = whole * this.weaponNodeRadius;
+        if (this.sourceCount > 0 && this.ringScale < 1.0D && wholePixels >= FIT_TYPE_RING_PIXELS
+                && (wholePixels >= FIT_NODE_PIXELS
+                || this.ringRadii[MasteryNode.Type.TYPE.ordinal()] * zoom > limit)) {
+            zoom = whole;
+        }
         return Mth.clamp(zoom * MasteryConfig.CLIENT.defaultZoom.get(), minZoom(), maxZoom());
+    }
+
+    /**
+     * 按内容取景时的缩放：内容包围盒放进顶栏和按钮行之间的可用区，不小于全貌。
+     *
+     * @return 缩放
+     */
+    private double framedZoom() {
+        double whole = Math.min(this.width, this.height) * 0.44D / Math.max(1.0D, this.outerRadius);
+        return Mth.clamp(Math.max(whole, contentFitZoom()), minZoom(), maxZoom());
+    }
+
+    /**
+     * 按内容取景的可用区高度：顶栏以下、左下角按钮那一行以上，上下各留 6。
+     *
+     * <p>按钮那一行要扣掉：整张圆盘是圆的，左下角本来就空着；取景的包围盒是方的，
+     * 内容铺到底边两角（单来源摊 200° 时左右两头都往下垂），不扣的话最下面那件武器正好压在「重置视角」底下。
+     *
+     * @return 高度
+     */
+    private double frameAvailHeight() {
+        return Math.max(60.0D, this.height - HEADER_HEIGHT - BUTTON_HEIGHT - 24.0D);
+    }
+
+    /**
+     * 内容包围盒刚好放进可用区的缩放（不夹上下限），可用区见 {@link #frameAvailHeight()}。
+     *
+     * @return 缩放
+     */
+    private double contentFitZoom() {
+        double availWidth = Math.max(60.0D, this.width - 16.0D);
+        double availHeight = frameAvailHeight();
+        return Math.min(availWidth / Math.max(1.0D, this.contentMaxX - this.contentMinX),
+                availHeight / Math.max(1.0D, this.contentMaxY - this.contentMinY));
+    }
+
+    /**
+     * 现在这个窗口下要不要按内容取景：外圈空着一大段（{@link #contentFramed}），
+     * 而且包围盒比整张圆盘放进同一块可用区时至少大 {@value #FRAME_MIN_GAIN} 倍。
+     *
+     * <p>两边用的是同一块可用区，比出来的只是裁掉空档省下的那部分，不会因为顶栏、留边让整张圆盘的图也算成「值得取景」。
+     * 包围盒在图坐标里不变，窗口比例会变，所以每次用时现算。
+     *
+     * @return true 按内容取景
+     */
+    private boolean useFramedView() {
+        if (!this.contentFramed) {
+            return false;
+        }
+        double availWidth = Math.max(60.0D, this.width - 16.0D);
+        double availHeight = frameAvailHeight();
+        double disc = Math.min(availWidth, availHeight) / (2.0D * Math.max(1.0D, this.outerRadius));
+        return contentFitZoom() >= disc * FRAME_MIN_GAIN;
+    }
+
+    /**
+     * 按内容取景、缩放为 {@code zoom} 时，屏幕中心对着的图坐标 Y。
+     *
+     * <p>包围盒的中心对准可用区（{@link #frameAvailHeight()}）的中心，而不是整个窗口的中心，
+     * 换成「屏幕中心对准哪个图坐标」是为了直接交给飞行动画（{@link #flyCenterY}）。
+     *
+     * @param zoom 缩放
+     * @return 图坐标 Y
+     */
+    private double framedCenterY(double zoom) {
+        double offset = HEADER_HEIGHT + 6.0D + frameAvailHeight() / 2.0D - this.height / 2.0D;
+        return (this.contentMinY + this.contentMaxY) / 2.0D - offset / zoom;
+    }
+
+    /**
+     * 按内容取景的默认镜头（空手打开、点「重置视角」时用），只在 {@link #useFramedView()} 为 true 时调。
+     *
+     * @param animate true 飞过去，false 直接到位（刚打开界面时）
+     */
+    private void applyFramedView(boolean animate) {
+        double zoom = Mth.clamp(framedZoom() * MasteryConfig.CLIENT.defaultZoom.get(), minZoom(), maxZoom());
+        double centerX = (this.contentMinX + this.contentMaxX) / 2.0D;
+        double centerY = framedCenterY(zoom);
+        this.targetZoom = zoom;
+        this.hasZoomAnchor = false;
+        if (animate) {
+            this.flyCenterX = centerX;
+            this.flyCenterY = centerY;
+            this.flying = true;
+        } else {
+            this.zoom = zoom;
+            this.panX = -centerX * zoom;
+            this.panY = -centerY * zoom;
+            this.flying = false;
+        }
     }
 
     /**
@@ -1282,10 +1458,12 @@ public class MasteryScreen extends Screen {
         this.outerRadius = 1.0D;
         this.focusRadius = 1.0D;
         this.weaponNodeRadius = 0.0D;
+        int weaponNodes = 0;
         for (MasteryNode node : this.nodes) {
             double reach = Math.hypot(node.graphX, node.graphY) + node.radius;
             this.outerRadius = Math.max(this.outerRadius, reach);
             if (node.type == MasteryNode.Type.WEAPON) {
+                weaponNodes++;
                 this.weaponNodeRadius = Math.max(this.weaponNodeRadius, node.radius);
             } else {
                 this.focusRadius = Math.max(this.focusRadius, reach);
@@ -1294,6 +1472,7 @@ public class MasteryScreen extends Screen {
         if (this.weaponNodeRadius <= 0.0D) {
             this.weaponNodeRadius = 22.0D;
         }
+        this.ringScale = NodeLayout.ringScaleFor(Math.max(1, weaponNodes));
 
         this.searchHits.clear();
         java.util.Arrays.fill(this.ringRadii, 0.0D);
@@ -1312,6 +1491,8 @@ public class MasteryScreen extends Screen {
                 this.typeCount++;
             }
         }
+        updateContentFrame();
+        updateCenterRing();
         this.minTypeSpacing = Double.POSITIVE_INFINITY;
         for (MasteryNode node : this.nodes) {
             if (node.type != MasteryNode.Type.TYPE) {
@@ -1335,7 +1516,82 @@ public class MasteryScreen extends Screen {
         }
     }
 
+    /**
+     * 算中心装饰缺口环的半径（图坐标），见 {@link #centerRingRadius}。
+     *
+     * <p>平常放在来源圈的 {@value #CENTER_RING_SHARE} 倍。武器少时三圈收小，来源圈最小到两百五六，
+     * 这个比例落在一百零几，正好压在总览节点上（悬停放大后外沿约 120）；环会碰到总览节点时，
+     * 改放到总览节点外沿和来源节点内沿的正中间。来源圈没收小的图离总览节点还远，位置不变。
+     * 只按图坐标里的节点半径算、不看缩放，滚轮缩放时环不会跳来跳去。
+     */
+    private void updateCenterRing() {
+        double infoRadius = 0.0D;
+        double sourceRadius = 0.0D;
+        for (MasteryNode node : this.nodes) {
+            if (node.type == MasteryNode.Type.INFO) {
+                infoRadius = Math.max(infoRadius, node.radius);
+            } else if (node.type == MasteryNode.Type.SOURCE) {
+                sourceRadius = Math.max(sourceRadius, node.radius);
+            }
+        }
+        double radius = this.sourceRingRadius * CENTER_RING_SHARE;
+        // 悬停时节点最多放大 14%（见 drawGraph 节点那一遍）；环本身朝里还有约 2 的半宽
+        double infoOuter = infoRadius * 1.14D;
+        if (radius - 2.0D <= infoOuter) {
+            radius = (infoOuter + this.sourceRingRadius - sourceRadius) / 2.0D;
+        }
+        this.centerRingRadius = radius;
+    }
+
+    /**
+     * 判断这张图要不要按内容取景，要的话顺带量出内容包围盒（见 {@link #contentFramed}）。
+     *
+     * <p>来源 / 类型节点下面还挂着名字，包围盒按 1.5 倍半径留边；底边至少到来源圈的 0.55 倍，
+     * 把中心那道缺口环带进来，盘心不会贴着屏幕底边。
+     */
+    private void updateContentFrame() {
+        this.contentFramed = false;
+        if (this.sourceCount <= 0) {
+            return;
+        }
+        List<Double> angles = new ArrayList<>();
+        for (MasteryNode node : this.nodes) {
+            if (node.type == MasteryNode.Type.WEAPON) {
+                angles.add(Math.atan2(node.graphY, node.graphX));
+            }
+        }
+        if (angles.isEmpty()) {
+            return;
+        }
+        angles.sort(null);
+        double widest = 0.0D;
+        for (int i = 0; i < angles.size(); i++) {
+            double next = i + 1 < angles.size() ? angles.get(i + 1) : angles.get(0) + Math.PI * 2.0D;
+            widest = Math.max(widest, next - angles.get(i));
+        }
+        if (widest <= Math.toRadians(FRAME_EMPTY_ARC_DEG)) {
+            return;
+        }
+        this.contentFramed = true;
+        this.contentMinX = Double.MAX_VALUE;
+        this.contentMinY = Double.MAX_VALUE;
+        this.contentMaxX = -Double.MAX_VALUE;
+        this.contentMaxY = -Double.MAX_VALUE;
+        for (MasteryNode node : this.nodes) {
+            double pad = node.type == MasteryNode.Type.WEAPON ? node.radius : node.radius * 1.5D;
+            this.contentMinX = Math.min(this.contentMinX, node.graphX - pad);
+            this.contentMaxX = Math.max(this.contentMaxX, node.graphX + pad);
+            this.contentMinY = Math.min(this.contentMinY, node.graphY - pad);
+            this.contentMaxY = Math.max(this.contentMaxY, node.graphY + pad);
+        }
+        this.contentMaxY = Math.max(this.contentMaxY, this.sourceRingRadius * 0.55D);
+    }
+
     private void resetView() {
+        if (useFramedView()) {
+            applyFramedView(true);
+            return;
+        }
         this.panX = 0.0D;
         this.panY = 0.0D;
         this.targetZoom = fitZoom();
@@ -1370,9 +1626,16 @@ public class MasteryScreen extends Screen {
                 centerY = node.graphY;
             }
             case INFO -> {
-                zoom = Mth.clamp(minZoom() / MIN_ZOOM_WHOLE_FACTOR, minZoom(), maxZoom());
-                centerX = 0.0D;
-                centerY = 0.0D;
+                if (useFramedView()) {
+                    // 外圈空着一大段的图，「全貌」就是对准内容，空的那段不占屏幕
+                    zoom = framedZoom();
+                    centerX = (this.contentMinX + this.contentMaxX) / 2.0D;
+                    centerY = framedCenterY(zoom);
+                } else {
+                    zoom = Mth.clamp(minZoom() / MIN_ZOOM_WHOLE_FACTOR, minZoom(), maxZoom());
+                    centerX = 0.0D;
+                    centerY = 0.0D;
+                }
             }
             default -> {
                 // 来源看它的类型，类型看它的武器
@@ -1717,35 +1980,53 @@ public class MasteryScreen extends Screen {
         // 每帧读一次就够，别在几百个节点的循环里反复取
         int maxLevel = ClientMasteryCache.snapshot().maxLevel;
 
-        for (MasteryNode node : this.nodes) {
-            if (node.parent == null) {
-                continue;
-            }
-            float appear = Mth.clamp(appearOf(node, now), 0.0F, 1.0F);
-            if (appear <= 0.0F) {
-                continue;
-            }
-            float x1 = (float) toScreenX(node.parent.graphX);
-            float y1 = (float) toScreenY(node.parent.graphY);
-            float x2 = (float) toScreenX(node.graphX);
-            float y2 = (float) toScreenY(node.graphY);
-            // 整段都在屏幕外就跳过。上千件武器时这个循环是最大的一笔开销，
-            // 而缩放到能看清细节时，视野里通常只剩几十条线
-            if (isSegmentOffScreen(x1, y1, x2, y2)) {
-                continue;
-            }
-            // 连线随子节点的出现进度从父节点长出去
-            float gx = x1 + (x2 - x1) * appear;
-            float gy = y1 + (y2 - y1) * appear;
+        // 弧线连线（只有一个来源时）从来源两侧出发，往同一边去的几条在来源圈上共用一段弧，
+        // 后画的会盖住先画的。所以弧线分三遍画：锁定的先画，解锁的其次，选中链路最后，
+        // 高亮和亮线不会被暗线盖住。直线只在端点相交，照原来的顺序在第一遍里画完
+        int passes = this.sourceCount == 1 ? 3 : 1;
+        for (int pass = 0; pass < passes; pass++) {
+            for (MasteryNode node : this.nodes) {
+                if (node.parent == null) {
+                    continue;
+                }
+                // 只有一个来源时，来源到类型的连线沿来源圈走弧线，剔除和画法都另算（drawArcLink）
+                boolean arc = isArcLink(node);
+                if (!arc && pass > 0) {
+                    continue;
+                }
+                float appear = Mth.clamp(appearOf(node, now), 0.0F, 1.0F);
+                if (appear <= 0.0F) {
+                    continue;
+                }
+                float x1 = (float) toScreenX(node.parent.graphX);
+                float y1 = (float) toScreenY(node.parent.graphY);
+                float x2 = (float) toScreenX(node.graphX);
+                float y2 = (float) toScreenY(node.graphY);
+                // 整段都在屏幕外就跳过。上千件武器时这个循环是最大的一笔开销，
+                // 而缩放到能看清细节时，视野里通常只剩几十条线
+                if (!arc && isSegmentOffScreen(x1, y1, x2, y2)) {
+                    continue;
+                }
 
-            boolean unlocked = levelOf(node) > 0 || !node.hasMastery();
-            boolean onPath = focusing && this.pathNodes.contains(node);
-            int base = onPath ? MasteryPalette.GOLD_BRIGHT
-                    : (unlocked ? MasteryPalette.LINE : MasteryPalette.LINE_LOCKED);
-            float lineAlpha = appear * (focusing && !onPath ? 0.22F : 1.0F);
-            float lineWidth = (float) Math.max(1.0D, (onPath ? 2.6D : 1.4D) * this.zoom);
-            RenderUtil.line(buffer, matrix, x1, y1, gx, gy, lineWidth,
-                    RenderUtil.withAlpha(base, lineAlpha));
+                boolean unlocked = levelOf(node) > 0 || !node.hasMastery();
+                boolean onPath = focusing && this.pathNodes.contains(node);
+                if (arc && passes > 1 && (onPath ? 2 : (unlocked ? 1 : 0)) != pass) {
+                    continue;
+                }
+                int base = onPath ? MasteryPalette.GOLD_BRIGHT
+                        : (unlocked ? MasteryPalette.LINE : MasteryPalette.LINE_LOCKED);
+                float lineAlpha = appear * (focusing && !onPath ? 0.22F : 1.0F);
+                float lineWidth = (float) Math.max(1.0D, (onPath ? 2.6D : 1.4D) * this.zoom);
+                if (arc) {
+                    drawArcLink(buffer, matrix, node, appear, lineWidth, RenderUtil.withAlpha(base, lineAlpha));
+                    continue;
+                }
+                // 连线随子节点的出现进度从父节点长出去
+                float gx = x1 + (x2 - x1) * appear;
+                float gy = y1 + (y2 - y1) * appear;
+                RenderUtil.line(buffer, matrix, x1, y1, gx, gy, lineWidth,
+                        RenderUtil.withAlpha(base, lineAlpha));
+            }
         }
 
         for (MasteryNode node : this.nodes) {
@@ -1801,7 +2082,7 @@ public class MasteryScreen extends Screen {
         }
 
         // 中心的装饰环：一道慢慢转的缺口环，让正中间不至于是一片空地
-        float base = (float) (this.sourceRingRadius * this.zoom * 0.42D);
+        float base = (float) (this.centerRingRadius * this.zoom);
         if (this.sourceRingRadius > 0.0D && base >= 24.0F
                 && !isOffScreen(cx, cy, base + 30.0F)) {
             float ringWidth = Math.max(1.0F, 2.0F * (float) this.zoom);
@@ -1931,11 +2212,21 @@ public class MasteryScreen extends Screen {
             float y1 = (float) toScreenY(node.parent.graphY);
             float x2 = (float) toScreenX(node.graphX);
             float y2 = (float) toScreenY(node.graphY);
+            boolean arc = isArcLink(node);
             for (int i = 0; i < FLOW_DOTS; i++) {
                 // 每颗点在 0~1 之间循环，彼此错开 1/FLOW_DOTS 个身位
                 double phase = (now / 1400.0D + (double) i / FLOW_DOTS) % 1.0D;
-                float px = x1 + (x2 - x1) * (float) phase;
-                float py = y1 + (y2 - y1) * (float) phase;
+                float px;
+                float py;
+                if (arc) {
+                    // 弧线连线上按长度走，光点先沿来源圈转过去、再往外跑
+                    double[] point = arcLinkPoint(node, phase);
+                    px = (float) toScreenX(point[0]);
+                    py = (float) toScreenY(point[1]);
+                } else {
+                    px = x1 + (x2 - x1) * (float) phase;
+                    py = y1 + (y2 - y1) * (float) phase;
+                }
                 // 两头淡、中间亮，免得光点在节点上突然出现又突然消失
                 float fade = (float) Math.sin(phase * Math.PI);
                 RenderUtil.polygon(buffer, matrix, RenderUtil.hexagon(px, py, dotSize),
@@ -4052,6 +4343,140 @@ public class MasteryScreen extends Screen {
                 || (x1 > this.width + margin && x2 > this.width + margin)
                 || (y1 < -margin && y2 < -margin)
                 || (y1 > this.height + margin && y2 > this.height + margin);
+    }
+
+    /**
+     * 这条连线是不是「沿来源圈走弧线」的那种。
+     *
+     * <p>只有一个来源时，它的类型铺满整圈（见 {@code NodeLayout.buildSingleSource}），
+     * 来源节点在正上方，直着连到下半圈的类型会横穿中心。这种连线先沿来源圈走到类型的方位、
+     * 再径直出去；画线、出场动画、流光、屏幕外剔除都走 {@link #drawArcLink} / {@link #arcLinkPoint}。
+     *
+     * @param node 子节点（连线的外端）
+     * @return 是弧线连线返回 true
+     */
+    private boolean isArcLink(MasteryNode node) {
+        return this.sourceCount == 1 && node.type == MasteryNode.Type.TYPE
+                && node.parent != null && node.parent.type == MasteryNode.Type.SOURCE;
+    }
+
+    /**
+     * 弧线连线从来源节点的方位转到类型节点的方位，取近的那一边，范围 [-π, π]。
+     *
+     * @param node 类型节点
+     * @return 带方向的转角
+     */
+    private static double arcLinkSweep(MasteryNode node) {
+        double sweep = Math.atan2(node.graphY, node.graphX) - Math.atan2(node.parent.graphY, node.parent.graphX);
+        while (sweep > Math.PI) {
+            sweep -= Math.PI * 2.0D;
+        }
+        while (sweep < -Math.PI) {
+            sweep += Math.PI * 2.0D;
+        }
+        return sweep;
+    }
+
+    /**
+     * 弧线连线上按长度走到 {@code t}（0 是来源节点，1 是类型节点）的那一点，图坐标。
+     *
+     * @param node 类型节点
+     * @param t    0～1
+     * @return {x, y}
+     */
+    private static double[] arcLinkPoint(MasteryNode node, double t) {
+        double rs = Math.hypot(node.parent.graphX, node.parent.graphY);
+        double a0 = Math.atan2(node.parent.graphY, node.parent.graphX);
+        double sweep = arcLinkSweep(node);
+        double a1 = a0 + sweep;
+        double arcLength = rs * Math.abs(sweep);
+        double radial = Math.max(0.0D, Math.hypot(node.graphX, node.graphY) - rs);
+        double reach = Mth.clamp(t, 0.0D, 1.0D) * (arcLength + radial);
+        if (reach <= arcLength && arcLength > 1.0E-6D) {
+            double angle = a0 + sweep * (reach / arcLength);
+            return new double[]{Math.cos(angle) * rs, Math.sin(angle) * rs};
+        }
+        double r = rs + Math.min(radial, reach - arcLength);
+        return new double[]{Math.cos(a1) * r, Math.sin(a1) * r};
+    }
+
+    /**
+     * 画一条弧线连线：先沿来源圈走弧，再沿类型的方位径直出去。
+     *
+     * <p>出场动画照直线的规矩「从父节点长出去」：按总长度的 {@code appear} 比例画，先长弧、再长直段。
+     *
+     * @param buffer 顶点缓冲
+     * @param matrix 变换矩阵
+     * @param node   类型节点
+     * @param appear 出场进度 0～1
+     * @param width  线宽（像素）
+     * @param argb   颜色
+     */
+    private void drawArcLink(BufferBuilder buffer, Matrix4f matrix, MasteryNode node,
+                             float appear, float width, int argb) {
+        double rs = Math.hypot(node.parent.graphX, node.parent.graphY);
+        double a0 = Math.atan2(node.parent.graphY, node.parent.graphX);
+        double sweep = arcLinkSweep(node);
+        double a1 = a0 + sweep;
+        double arcLength = rs * Math.abs(sweep);
+        double radial = Math.max(0.0D, Math.hypot(node.graphX, node.graphY) - rs);
+        double reach = appear * (arcLength + radial);
+        float cx = (float) toScreenX(0.0D);
+        float cy = (float) toScreenY(0.0D);
+        float half = width / 2.0F;
+
+        if (arcLength > 1.0E-6D) {
+            double drawn = sweep * Math.min(1.0D, reach / arcLength);
+            double start = drawn >= 0.0D ? a0 : a0 + drawn;
+            double span = Math.abs(drawn);
+            float screenRing = (float) (rs * this.zoom);
+            if (span > 0.0D && !isArcOffScreen(cx, cy, screenRing + half, start, span, width)) {
+                RenderUtil.ring(buffer, matrix, cx, cy, screenRing - half, screenRing + half, argb, start, span);
+            }
+        }
+        if (reach > arcLength && radial > 0.0D) {
+            double outer = rs + Math.min(radial, reach - arcLength);
+            float x1 = (float) toScreenX(Math.cos(a1) * rs);
+            float y1 = (float) toScreenY(Math.sin(a1) * rs);
+            float x2 = (float) toScreenX(Math.cos(a1) * outer);
+            float y2 = (float) toScreenY(Math.sin(a1) * outer);
+            if (!isSegmentOffScreen(x1, y1, x2, y2)) {
+                RenderUtil.line(buffer, matrix, x1, y1, x2, y2, width, argb);
+            }
+        }
+    }
+
+    /**
+     * 一段圆弧是否整段都在屏幕外：拿弧的外接矩形（两个端点加上弧经过的正上下左右四点）判断，
+     * 和 {@link #isSegmentOffScreen} 一样只求便宜、不误杀。
+     *
+     * <p>外接矩形按弧的外沿算，朝圆心那一侧的内沿比外沿近了一整条线宽，所以留边要把线宽加上：
+     * 放到最大时线有十几二十像素宽，只留固定的几像素会把贴着屏幕边的弧误剔掉。
+     *
+     * @param cx     圆心 X
+     * @param cy     圆心 Y
+     * @param radius 外沿半径（已含半条线宽）
+     * @param start  起始角
+     * @param span   扫过的角度，非负
+     * @param width  线宽（像素）
+     * @return 完全在屏幕外返回 true
+     */
+    private boolean isArcOffScreen(float cx, float cy, float radius, double start, double span, float width) {
+        double minX = Math.min(Math.cos(start), Math.cos(start + span));
+        double maxX = Math.max(Math.cos(start), Math.cos(start + span));
+        double minY = Math.min(Math.sin(start), Math.sin(start + span));
+        double maxY = Math.max(Math.sin(start), Math.sin(start + span));
+        double quarter = Math.PI / 2.0D;
+        for (long k = (long) Math.ceil(start / quarter); k * quarter <= start + span; k++) {
+            double angle = k * quarter;
+            minX = Math.min(minX, Math.cos(angle));
+            maxX = Math.max(maxX, Math.cos(angle));
+            minY = Math.min(minY, Math.sin(angle));
+            maxY = Math.max(maxY, Math.sin(angle));
+        }
+        float margin = 8.0F + width;
+        return cx + maxX * radius < -margin || cx + minX * radius > this.width + margin
+                || cy + maxY * radius < -margin || cy + minY * radius > this.height + margin;
     }
 
     private boolean isOffScreen(float sx, float sy, float margin) {
