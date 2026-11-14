@@ -8,9 +8,13 @@ import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FormattedText;
+import net.minecraft.network.chat.Style;
 import net.minecraftforge.client.ConfigScreenHandler;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.ModLoadingContext;
@@ -350,8 +354,20 @@ public final class MasteryConfigScreen {
                 : Optional.of(Component.translatable(PREFIX + "invalid"));
     }
 
+    /**
+     * 说明按换行拆开，每行再按当前窗口宽度折行。Cloth 的悬停框不会自己折行，
+     * 窄窗口（如 854×480）下长说明会超出屏幕右边。中文没有空格，按字折；英文按词折。
+     */
     private static Component[] split(String text) {
-        return text.lines().map(Component::literal).toArray(Component[]::new);
+        Minecraft minecraft = Minecraft.getInstance();
+        Font font = minecraft.font;
+        int width = Math.max(120, Math.min(360, minecraft.getWindow().getGuiScaledWidth() - 40));
+        return text.lines()
+                .flatMap(line -> line.isEmpty() ? java.util.stream.Stream.of(line)
+                        : font.getSplitter().splitLines(line, width, Style.EMPTY).stream()
+                                .map(FormattedText::getString))
+                .map(Component::literal)
+                .toArray(Component[]::new);
     }
 
     private static List<String> append(List<String> path, String child) {

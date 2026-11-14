@@ -468,7 +468,8 @@ public class SpecializationScreen extends Screen {
         if (r.layout() == SpecScreenLayout.C) {
             drawList(guiGraphics, snapshot, r, mx, my);
             drawDetail(guiGraphics, snapshot, r, mx, my);
-            guiGraphics.fill(r.mainRight() + 6, r.mainTop(), r.mainRight() + 7, r.sideBottom(), 0x596B5223);
+            // 竖线只画到底栏上沿：C 版底栏提示跨中栏和右栏，画到底会从字中间穿过
+            guiGraphics.fill(r.mainRight() + 6, r.mainTop(), r.mainRight() + 7, r.mainBottom(), 0x596B5223);
         } else {
             int chipsBottom = drawChips(guiGraphics, mx, my, r.mainLeft(), r.mainRight(),
                     r.mainTop() + SEARCH_HEIGHT + 4);

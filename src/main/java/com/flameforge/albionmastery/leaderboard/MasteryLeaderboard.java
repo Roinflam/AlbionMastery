@@ -367,7 +367,7 @@ public final class MasteryLeaderboard extends SavedData {
         text.append(past.key()).append("（").append(past.period().describeKey(past.key())).append("）\n");
         text.append("存档时间：").append(Instant.ofEpochMilli(past.closedAt()).atZone(ZoneId.systemDefault())
                 .toLocalDateTime().withNano(0).toString().replace('T', ' ')).append('\n');
-        text.append("本期有进展的共 ").append(past.participants()).append(" 人，按本期涨的经验排，存前 ")
+        text.append("本期有进展的共 ").append(past.participants()).append(" 人，按本期经验排序，存前 ")
                 .append(past.rows().size()).append(" 名\n\n");
         text.append("名次\t玩家\t本期经验\t本期升级\t本期满级\t本期新解锁\tUUID\n");
         for (int i = 0; i < past.rows().size(); i++) {

@@ -106,7 +106,7 @@ public final class MasteryAdminCommand {
             {"/albionmastery wipe <玩家>", "command.albionmastery.help_wipe"},
             {"/albionmastery weapon give <玩家> <来源> <武器ID>", "command.albionmastery.help_weapon_give"},
             {"/albionmastery weapon count", "command.albionmastery.help_weapon_count"},
-            {"/albionmastery spec set <玩家> <来源> <类型> <栏位> <特化>", "command.albionmastery.help_spec_set"},
+            {"/albionmastery spec set <玩家> <来源> <类型> <槽位> <特化>", "command.albionmastery.help_spec_set"},
             {"/albionmastery spec clear <玩家>", "command.albionmastery.help_spec_clear"},
             {"/albionmastery spec cooldown <玩家>", "command.albionmastery.help_spec_cooldown"},
             {"/albionmastery config spec <来源> <特化>", "command.albionmastery.help_config_spec"},

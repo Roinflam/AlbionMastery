@@ -43,7 +43,7 @@ public final class DimensionXpBonus {
             }
             int split = raw.lastIndexOf('=');
             if (split <= 0 || split + 1 >= raw.length()) {
-                AlbionMastery.LOGGER.warn("维度经验倍率配置格式不对，应为「维度ID=倍率」: {}", raw);
+                AlbionMastery.LOGGER.warn("维度经验倍率配置格式错误，应为「维度ID=倍率」: {}", raw);
                 continue;
             }
             String id = raw.substring(0, split).trim().toLowerCase(Locale.ROOT);
