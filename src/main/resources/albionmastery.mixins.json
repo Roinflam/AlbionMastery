@@ -51,7 +51,9 @@
     "range.StompSpellRangeMixin",
     "range.BurningDashSpellRangeMixin",
     "range.VoltStrikeSpellRangeMixin",
-    "range.AcupunctureSpellRangeMixin"
+    "range.AcupunctureSpellRangeMixin",
+    "range.ErodingBoulderSpellRangeMixin",
+    "range.SeismicSurfSpellRangeMixin"
   ],
   "client": [
     "GuiOverlayAccessor",

@@ -35,6 +35,7 @@ public final class AlbionMixinPlugin implements IMixinConfigPlugin {
             {"mods.flammpfeil.slashblade.", "slashblade"},
             {"io.redspace.ironsspellbooks.", "irons_spellbooks"},
             {"com.hollingsworth.arsnouveau.", "ars_nouveau"},
+            {"com.gametechbc.gtbcs_geomancy_plus.", "gtbcs_geomancy_plus"},
     };
 
     @Override
