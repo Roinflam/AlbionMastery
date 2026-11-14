@@ -306,9 +306,7 @@ public class LeaderboardScreen extends Screen {
         }
     }
 
-    // ======================================================================
     // 网络
-    // ======================================================================
 
     /**
      * 向服务端要一份榜单。
@@ -487,9 +485,7 @@ public class LeaderboardScreen extends Screen {
         this.noticeUntilMs = Util.getMillis() + NOTICE_MS;
     }
 
-    // ======================================================================
     // 布局
-    // ======================================================================
 
     /**
      * @return 排序按钮那一排的顶边：有时间范围那排就排在它下面，没有就顶上去
@@ -816,9 +812,7 @@ public class LeaderboardScreen extends Screen {
         return mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
     }
 
-    // ======================================================================
     // 渲染
-    // ======================================================================
 
     @Override
     public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
@@ -1545,9 +1539,7 @@ public class LeaderboardScreen extends Screen {
         }
     }
 
-    // ======================================================================
     // 绘图小工具
-    // ======================================================================
 
     private void drawFramedBox(GuiGraphics guiGraphics, int x, int y, int w, int h, int fill, int border) {
         guiGraphics.fill(x, y, x + w, y + h, fill);
@@ -1595,9 +1587,7 @@ public class LeaderboardScreen extends Screen {
         return minecraft.player != null && minecraft.player.getUUID().equals(row.uuid());
     }
 
-    // ======================================================================
     // 交互
-    // ======================================================================
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {

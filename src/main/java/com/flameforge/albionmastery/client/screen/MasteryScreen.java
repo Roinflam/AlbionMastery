@@ -1061,9 +1061,7 @@ public class MasteryScreen extends Screen {
         }
     }
 
-    // ======================================================================
     // 段位徽章
-    // ======================================================================
 
     /**
      * 这份数据的段位经验，一帧只算一次。看别人时算的是别人的。
@@ -1702,9 +1700,7 @@ public class MasteryScreen extends Screen {
         return false;
     }
 
-    // ======================================================================
     // 坐标换算
-    // ======================================================================
 
     private double baseX() {
         // 面板是浮在左侧的覆盖层，不参与居中计算，否则开关面板时整张图会跳
@@ -1836,9 +1832,7 @@ public class MasteryScreen extends Screen {
         return baseY() + this.panY + graphY * this.zoom;
     }
 
-    // ======================================================================
     // 渲染
-    // ======================================================================
 
     @Override
     public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
@@ -2901,9 +2895,7 @@ public class MasteryScreen extends Screen {
         return textX + this.font.width(text) + 10;
     }
 
-    // ======================================================================
     // 详情面板
-    // ======================================================================
 
     /**
      * 绘制右侧详情面板。
@@ -4064,9 +4056,7 @@ public class MasteryScreen extends Screen {
         guiGraphics.pose().popPose();
     }
 
-    // ======================================================================
     // 交互
-    // ======================================================================
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
@@ -4246,9 +4236,7 @@ public class MasteryScreen extends Screen {
         return false;
     }
 
-    // ======================================================================
     // 工具
-    // ======================================================================
 
     /**
      * 判断坐标是否落在详情面板上。面板没显示时永远返回 false。

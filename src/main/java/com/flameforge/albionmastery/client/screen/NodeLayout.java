@@ -349,14 +349,12 @@ public final class NodeLayout {
         // 一整圈刨掉片间最小空隙之后，能分给所有扇形的总角度
         double arcBudget = Math.max(Math.toRadians(30.0D), Math.PI * 2.0D - minGap * gapCount);
 
-        // ------------------------------------------------------------------
         // 统一外圈半径
         //
         // 半径同时要满足两件事，取两者里更大的那个：
         //   1) 最大的一片按理想间距排开之后，角度不超过单片上限；
         //   2) 所有片加起来按理想间距排开之后，总角度塞得进一圈（已扣掉最小空隙）。
         // 半径越大，同样的弧长占的角度越小，所以这两条都是「半径的下限」。
-        // ------------------------------------------------------------------
         double ring = Math.max(WEAPON_RING_MIN * scale,
                 Math.max(maxUnits * desiredSpacing / maxWedge,
                         totalUnits * desiredSpacing / arcBudget));
@@ -375,12 +373,10 @@ public final class NodeLayout {
         double[] wedges = new double[count];
         double usedArc = 0.0D;
         if (MasteryConfig.CLIENT.equalSourceWedges.get()) {
-            // ------------------------------------------------------------------
             // 平分模式：每个来源占的角度一样大，来源之间的空隙一样宽。
             // 剑这种把全部模组的剑都收进来的来源武器特别多，按数量分会把整圈的大半吃掉，
             // 挤得别的来源贴在一起；平分之后各家边界清楚，武器多的自己在片里排密一点。
             // 半径按最大的那片重新算：让它在等分的角度里尽量还能按理想间距排开。
-            // ------------------------------------------------------------------
             double share = Math.PI * 2.0D / count;
             double equalGap = Math.max(Math.toRadians(EQUAL_GAP_MIN_DEG),
                     Math.min(Math.toRadians(EQUAL_GAP_MAX_DEG), share * EQUAL_GAP_SHARE));

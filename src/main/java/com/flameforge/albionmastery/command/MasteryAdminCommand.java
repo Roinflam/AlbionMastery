@@ -115,9 +115,7 @@ public final class MasteryAdminCommand {
             {"/albionmastery config reset <配置项>", "command.albionmastery.help_config_reset"},
     };
 
-    // ======================================================================
     // 参数
-    // ======================================================================
 
     private static RequiredArgumentBuilder<CommandSourceStack, EntitySelector> targets() {
         return Commands.argument("targets", EntityArgument.players());
@@ -155,9 +153,7 @@ public final class MasteryAdminCommand {
         return IntegerArgumentType.getInteger(context, "level");
     }
 
-    // ======================================================================
     // max / level / wipe
-    // ======================================================================
 
     private static ArgumentBuilder<CommandSourceStack, ?> maxNode() {
         return Commands.literal("max").then(targets()
@@ -283,9 +279,7 @@ public final class MasteryAdminCommand {
                 result.weapons(), result.types(), result.sources(), level).withStyle(ChatFormatting.GOLD), true);
     }
 
-    // ======================================================================
     // weapon
-    // ======================================================================
 
     private static ArgumentBuilder<CommandSourceStack, ?> weaponNode() {
         return Commands.literal("weapon")
@@ -341,9 +335,7 @@ public final class MasteryAdminCommand {
         return all.size();
     }
 
-    // ======================================================================
     // spec
-    // ======================================================================
 
     private static ArgumentBuilder<CommandSourceStack, ?> specNode() {
         return Commands.literal("spec")
@@ -607,9 +599,7 @@ public final class MasteryAdminCommand {
         return count;
     }
 
-    // ======================================================================
     // config
-    // ======================================================================
 
     private static ArgumentBuilder<CommandSourceStack, ?> configNode() {
         return Commands.literal("config")
@@ -880,9 +870,7 @@ public final class MasteryAdminCommand {
                         Component.translatable("command.albionmastery.click_to_edit"))));
     }
 
-    // ======================================================================
     // 补全
-    // ======================================================================
 
     private static CompletableFuture<Suggestions> suggestSources(CommandContext<CommandSourceStack> context,
                                                                  SuggestionsBuilder builder) {
@@ -999,9 +987,7 @@ public final class MasteryAdminCommand {
         return result;
     }
 
-    // ======================================================================
     // 工具
-    // ======================================================================
 
     private static boolean checkSource(CommandContext<CommandSourceStack> context, String source) {
         // 只认已知的几个来源：打错一个字母就会凭空建出一条总体记录，还会被排行榜算进满级数
