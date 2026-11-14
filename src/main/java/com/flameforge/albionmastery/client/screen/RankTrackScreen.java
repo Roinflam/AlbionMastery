@@ -75,12 +75,12 @@ public class RankTrackScreen extends Screen {
     @Nullable
     private final Screen parent;
 
-    // ---- 打开时算一次：武器清单不会在这一页里变 ----
+    // 打开时算一次：武器清单不会在这一页里变
     private int weaponCount;
     private long endLevels;
     private long endXp;
 
-    // ---- 每秒刷新一次：开着这页时服务端可能又同步了等级 ----
+    // 每秒刷新一次：开着这页时服务端可能又同步了等级
     private long xp;
     private int rank;
     /** 终点段位。现有段位已经超过按清单算的终点（比如删过枪包），终点就是现有段位。 */
@@ -165,9 +165,7 @@ public class RankTrackScreen extends Screen {
         }
     }
 
-    // ======================================================================
     // 布局
-    // ======================================================================
 
     private int trackLeft() {
         return MARGIN;
@@ -271,9 +269,7 @@ public class RankTrackScreen extends Screen {
         this.animating = false;
     }
 
-    // ======================================================================
     // 绘制
-    // ======================================================================
 
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
@@ -358,7 +354,7 @@ public class RankTrackScreen extends Screen {
         RankEmblem.draw(guiGraphics, this.rank, left + 6 + SUMMARY_EMBLEM / 2.0F, top + SUMMARY_HEIGHT / 2.0F,
                 SUMMARY_EMBLEM, 1.0F, RankEmblem.clockSeconds());
 
-        // ---- 左：当前段位 ----
+        // 左：当前段位
         int textX = left + 12 + SUMMARY_EMBLEM;
         String name = MasteryRank.name(this.rank).getString();
         guiGraphics.drawString(this.font, name, textX, top + 6, primary, false);
@@ -381,7 +377,7 @@ public class RankTrackScreen extends Screen {
                 Math.max(this.font.width(next), this.font.width(I18n.get("gui.albionmastery.rank.tooltip.xp",
                         digits(this.xp)))) * SMALL));
 
-        // ---- 右：终点和总进度 ----
+        // 右：终点和总进度
         int endPrimary = RankEmblem.primaryColor(this.endRank);
         String endName = MasteryRank.name(this.endRank).getString();
         String endPrefix = I18n.get("gui.albionmastery.rank_track.end") + " ";
@@ -437,7 +433,7 @@ public class RankTrackScreen extends Screen {
 
         drawTierBands(guiGraphics, from, to, lineY, shownRank);
 
-        // ---- 连线：每两个段位之间一段，在徽章处断开，徽章镂空的地方不透出线 ----
+        // 连线：每两个段位之间一段，在徽章处断开，徽章镂空的地方不透出线
         // 底下一段暗线，上面按进度填亮
         float startX = xOf(0.0F);
         float endX = xOf(this.endRank);
@@ -489,7 +485,7 @@ public class RankTrackScreen extends Screen {
             }
         }
 
-        // ---- 文字：上面门槛，下面名字和编号 ----
+        // 文字：上面门槛，下面名字和编号
         for (int i = from; i <= to; i++) {
             boolean reached = i <= shownRank;
             boolean current = i == this.rank && reached && !this.animating;
@@ -776,9 +772,7 @@ public class RankTrackScreen extends Screen {
         return Math.abs(mouseX - xOf(i)) <= SPACING / 2.0F - 2.0F ? i : -1;
     }
 
-    // ======================================================================
     // 输入
-    // ======================================================================
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
@@ -899,9 +893,7 @@ public class RankTrackScreen extends Screen {
         return false;
     }
 
-    // ======================================================================
     // 小工具
-    // ======================================================================
 
     private void drawSmall(GuiGraphics guiGraphics, String text, float x, float y, int color) {
         drawScaled(guiGraphics, text, x, y, color, SMALL);

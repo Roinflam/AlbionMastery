@@ -93,7 +93,7 @@ public final class ScaleKnob {
         return inKnob(mx, my) || inCard(mx, my);
     }
 
-    // ------------------------------------------------------------ 几何
+    // 几何
 
     private record Card(int x, int y, int w, int h, int boxW, int autoW) {
     }
@@ -168,7 +168,7 @@ public final class ScaleKnob {
         };
     }
 
-    // ------------------------------------------------------------ 画
+    // 画
 
     /** 画按钮，展开时画卡片、悬停时画一张小提示。调用方负责把 z 抬到别的东西上面。 */
     public void render(GuiGraphics g, int mx, int my) {
@@ -246,7 +246,7 @@ public final class ScaleKnob {
         g.drawString(font, label, bx + (w - tw(font, label)) / 2, ry + (ROW_H - 8) / 2, color, false);
     }
 
-    // ------------------------------------------------------------ 输入
+    // 输入
 
     /** 界面的 mouseClicked 最先调这里；返回 true 表示这一下归按钮 / 卡片，界面别再处理。 */
     public boolean mouseClicked(double mx, double my, int btn) {
@@ -305,7 +305,7 @@ public final class ScaleKnob {
         return false;
     }
 
-    // ------------------------------------------------------------ 小工具
+    // 小工具
 
     /** 字的亮像素宽：font.width 含末尾 1 像素字距，扣掉。 */
     private static int tw(Font font, String s) {

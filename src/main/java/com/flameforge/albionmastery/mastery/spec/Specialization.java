@@ -23,7 +23,7 @@ import java.util.Map;
  */
 public enum Specialization {
 
-    // ───────────── 枪械：按改装部位分系，两个槽只能各装一个部位 ─────────────
+    // 枪械：按改装部位分系，两个槽只能各装一个部位
 
     /** 枪械 · 制式配置：不做任何改动。 */
     GUN_STANDARD(WeaponKeys.PROVIDER_TACZ_GUN, "standard", ""),
@@ -99,7 +99,7 @@ public enum Specialization {
     /** 装具 · 肾上腺素：连杀越打越狠、杀一个回一口血，挨打更疼。 */
     GUN_ADRENALINE(WeaponKeys.PROVIDER_TACZ_GUN, "adrenaline", "kit"),
 
-    // ───────────── 近战刀包：握柄 / 刀身 / 刃口 / 战法 / 保养 ─────────────
+    // 近战刀包：握柄 / 刀身 / 刃口 / 战法 / 保养
 
     /** 近战 · 制式。 */
     MELEE_STANDARD(WeaponKeys.PROVIDER_LRTACTICAL_MELEE, "standard", ""),
@@ -141,7 +141,7 @@ public enum Specialization {
     /** 保养 · 磨石：练得快、耐用。 */
     MELEE_WHETSTONE(WeaponKeys.PROVIDER_LRTACTICAL_MELEE, "whetstone", "care"),
 
-    // ───────────── 拔刀剑：刀装 / 幻影 / 剑技 / 心法 ─────────────
+    // 拔刀剑：刀装 / 幻影 / 剑技 / 心法
 
     /** 拔刀剑 · 制式。 */
     BLADE_STANDARD(WeaponKeys.PROVIDER_SLASHBLADE, "standard", ""),
@@ -182,7 +182,7 @@ public enum Specialization {
     /** 心法 · 修罗：杀得越多越狠，挨打更疼。 */
     BLADE_SHURA(WeaponKeys.PROVIDER_SLASHBLADE, "shura", "mind"),
 
-    // ───────────── 铁魔法：媒介 / 墨水 / 符文 / 章节 / 咒印 ─────────────
+    // 铁魔法：媒介 / 墨水 / 符文 / 章节 / 咒印
 
     /** 法术 · 制式：什么都不改。 */
     SPELL_STANDARD(WeaponKeys.PROVIDER_IRONS_SPELLS, "standard", ""),
@@ -226,7 +226,7 @@ public enum Specialization {
     /** 咒印 · 灵魂收割：击杀回血、叠嗜战，更费法力。 */
     SPELL_SOUL_HARVEST(WeaponKeys.PROVIDER_IRONS_SPELLS, "soul_harvest", "seal"),
 
-    // ───────────── 新生魔艺：催化 / 书写 / 书带 / 书页 / 刻印 / 形态 ─────────────
+    // 新生魔艺：催化 / 书写 / 书带 / 书页 / 刻印 / 形态
 
     /** 符文 · 制式：什么都不改。 */
     GLYPH_STANDARD(WeaponKeys.PROVIDER_ARS_NOUVEAU, "standard", ""),
@@ -265,7 +265,7 @@ public enum Specialization {
     /** 形态 · 贯穿形态：投射物穿透。 */
     GLYPH_PIERCING_FORM(WeaponKeys.PROVIDER_ARS_NOUVEAU, "piercing_form", "form"),
 
-    // ───────────── 原版剑类：剑身 / 剑刃 / 剑柄 / 剑术 ─────────────
+    // 原版剑类：剑身 / 剑刃 / 剑柄 / 剑术
 
     /** 剑 · 制式：什么都不改。 */
     SWORD_STANDARD(WeaponKeys.PROVIDER_VANILLA_MELEE, "standard", ""),
@@ -306,7 +306,7 @@ public enum Specialization {
     /** 剑术 · 凯旋剑术：击杀回血、叠嗜战，出手略慢。 */
     SWORD_TRIUMPH(WeaponKeys.PROVIDER_VANILLA_MELEE, "triumph", "art"),
 
-    // ───────────── 弓弩：弓臂 / 弓弦 / 箭头 / 箭杆 / 箭囊 ─────────────
+    // 弓弩：弓臂 / 弓弦 / 箭头 / 箭杆 / 箭囊
 
     /** 弓弩 · 制式：什么都不改。 */
     BOW_STANDARD(WeaponKeys.PROVIDER_BOW, "standard", ""),
@@ -348,7 +348,7 @@ public enum Specialization {
     /** 箭囊 · 回收箭袋：省箭。 */
     BOW_RECOVERY_QUIVER(WeaponKeys.PROVIDER_BOW, "recovery_quiver", "quiver"),
 
-    // ───────────── 匠魂：锻头 / 手柄 / 镶嵌 / 锻打 ─────────────
+    // 匠魂：锻头 / 手柄 / 镶嵌 / 锻打
 
     /** 匠魂 · 制式：什么都不改。 */
     TINKER_STANDARD(WeaponKeys.PROVIDER_TCONSTRUCT, "standard", ""),
@@ -383,7 +383,7 @@ public enum Specialization {
     /** 锻打 · 狂锻：越打越猛，也越脆。 */
     TINKER_FRENZY(WeaponKeys.PROVIDER_TCONSTRUCT, "frenzy", "forging"),
 
-    // ───────────── 甜蜜魔法：杖芯 / 术式 / 媒介 / 修习 ─────────────
+    // 甜蜜魔法：杖芯 / 术式 / 媒介 / 修习
 
     /** 甜蜜魔法 · 制式：什么都不改。 */
     SM_STANDARD(WeaponKeys.PROVIDER_SWEETMAGIC, "standard", ""),
@@ -420,7 +420,7 @@ public enum Specialization {
     /** 修习 · 钻研修习：涨经验快，威力低。 */
     SM_SCHOLAR(WeaponKeys.PROVIDER_SWEETMAGIC, "scholar", "study"),
 
-    // ───────────── 铁枪：火药 / 弹丸 / 枪机·枪托 / 装填 / 枪术 ─────────────
+    // 铁枪：火药 / 弹丸 / 枪机·枪托 / 装填 / 枪术
 
     /** 铁枪 · 制式：什么都不改。 */
     IA_STANDARD(WeaponKeys.PROVIDER_IRONS_ARTIFICE, "standard", ""),

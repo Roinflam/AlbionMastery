@@ -45,7 +45,7 @@ import java.util.Locale;
  */
 public final class RankCeremony {
 
-    // ---- 时间轴（毫秒） ----
+    // 时间轴（毫秒）
 
     /** 新徽章揭晓的时刻。 */
     private static final float REVEAL_MS = 340.0F;
@@ -72,7 +72,7 @@ public final class RankCeremony {
     /** 音效最多迟到多久还补放：按 F1 隐藏了一阵再打开时，不把攒下的几声一起放出来。 */
     private static final float SOUND_GRACE_MS = 500.0F;
 
-    // ---- 文案 ----
+    // 文案
 
     private static final String KEY_PROMOTED = "gui.albionmastery.rank.ceremony.promoted";
     private static final String KEY_ASSESSED = "gui.albionmastery.rank.ceremony.assessed";
@@ -84,7 +84,7 @@ public final class RankCeremony {
     /** 文字底板上下的羽化宽度。 */
     private static final float SCRIM_FEATHER = 9.0F;
 
-    // ---- 火花与闪光（类加载时按序号算好，结果固定，每帧不再分配） ----
+    // 火花与闪光（类加载时按序号算好，结果固定，每帧不再分配）
 
     private static final int SPARKS = 36;
     private static final int SPARKS_LEGENDARY = 52;
@@ -266,9 +266,7 @@ public final class RankCeremony {
         show.jumpWidth = show.jump == null ? 0 : font.width(show.jump);
     }
 
-    // ======================================================================
     // 音效
-    // ======================================================================
 
     /**
      * 按时间轴放音效：蓄力时一声信标启动，揭晓时挑战完成的号角叠紫水晶的叮，段位名浮现时再叮一声。
@@ -298,9 +296,7 @@ public final class RankCeremony {
         }
     }
 
-    // ======================================================================
     // 绘制
-    // ======================================================================
 
     private static void draw(GuiGraphics guiGraphics, Minecraft minecraft, Show show, float e) {
         Font font = minecraft.font;
@@ -366,7 +362,7 @@ public final class RankCeremony {
         guiGraphics.flush();
         Matrix4f matrix = guiGraphics.pose().last().pose();
 
-        // ---- 第一层（普通混合）：压暗底、文字垫底、标题两侧的饰线、装饰环 ----
+        // 第一层（普通混合）：压暗底、文字垫底、标题两侧的饰线、装饰环
         BufferBuilder buffer = RenderUtil.begin();
         float vignette = smooth(0.0F, 300.0F, e) * fade;
         RenderUtil.radialGradient(buffer, matrix, cx, cy, r * 2.4F,
@@ -401,7 +397,7 @@ public final class RankCeremony {
         }
         RenderUtil.end();
 
-        // ---- 第二层（叠加）：徽章背后的光芒、横向光痕、冲击波、光晕 ----
+        // 第二层（叠加）：徽章背后的光芒、横向光痕、冲击波、光晕
         buffer = RenderUtil.beginAdditive();
         float raysAlpha = smooth(420.0F, 1000.0F, e) * fade * breath * (show.legendary ? 0.26F : 0.18F);
         if (raysAlpha > 0.0F) {
@@ -445,7 +441,7 @@ public final class RankCeremony {
         }
         RenderUtil.endAdditive();
 
-        // ---- 徽章：旧的收进光里，新的从略大处落定 ----
+        // 徽章：旧的收进光里，新的从略大处落定
         if (show.showOld && e < OLD_FADE_MS) {
             float t = e / OLD_FADE_MS;
             float oldAlpha = smooth(0.0F, 0.18F, t) * (1.0F - smooth(0.70F, 1.0F, t));
@@ -461,7 +457,7 @@ public final class RankCeremony {
                     e / 1000.0F, shimmer, flash);
         }
 
-        // ---- 第三层（叠加）：揭晓的白闪、光痕的白芯、火花、零星闪光 ----
+        // 第三层（叠加）：揭晓的白闪、光痕的白芯、火花、零星闪光
         matrix = guiGraphics.pose().last().pose();
         buffer = RenderUtil.beginAdditive();
         float flashGlow = e < REVEAL_MS ? 0.6F * smooth(200.0F, REVEAL_MS, e)
@@ -481,7 +477,7 @@ public final class RankCeremony {
         }
         RenderUtil.endAdditive();
 
-        // ---- 文字 ----
+        // 文字
         drawTitle(guiGraphics, font, show, cx, titleTop, titleWidth, tracking, titleIn * fade);
         drawName(guiGraphics, font, show, cx, nameTop + 8.0F * (1.0F - easeOutCubic(nameRaw)),
                 nameScale, nameIn * fade, shimmer, hueBase);
@@ -697,9 +693,7 @@ public final class RankCeremony {
         pose.popPose();
     }
 
-    // ======================================================================
     // 工具
-    // ======================================================================
 
     /**
      * 段位名流光的进度：揭晓后扫一次，停留期间每隔一段再扫，退场前不再起新的。

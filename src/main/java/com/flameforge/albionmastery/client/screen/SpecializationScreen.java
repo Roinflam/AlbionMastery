@@ -347,9 +347,7 @@ public class SpecializationScreen extends Screen {
         return firstOpen == 0 ? 1 : firstOpen;
     }
 
-    // ======================================================================
     // 版面
-    // ======================================================================
 
     /**
      * 实际按哪一版摆：配置是 C 但窗口太窄时按 B。
@@ -429,9 +427,7 @@ public class SpecializationScreen extends Screen {
         return (this.width - MARGIN * 2 - 4 * (columns - 1)) / columns;
     }
 
-    // ======================================================================
     // 绘制
-    // ======================================================================
 
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
@@ -723,7 +719,7 @@ public class SpecializationScreen extends Screen {
         return y + CHIP_HEIGHT;
     }
 
-    // ---------------------------------------------------------------- 槽位
+    // 槽位
 
     /**
      * B 版：槽位横排在最上面，太窄时排成两行。
@@ -962,7 +958,7 @@ public class SpecializationScreen extends Screen {
         return new Need(I18n.get("gui.albionmastery.spec_page.need_weapon_short", gate), now, gate);
     }
 
-    // ---------------------------------------------------------------- 左栏
+    // 左栏
 
     /**
      * 左栏：现在改的是哪一份配置、（武器页）这把武器过没过门槛、点数、（A、C）槽位、合计效果，
@@ -1608,7 +1604,7 @@ public class SpecializationScreen extends Screen {
         }
     }
 
-    // ---------------------------------------------------------------- 卡片（A、B）
+    // 卡片（A、B）
 
     /**
      * 卡片网格：按分组分段，每段一个小标题，卡片按列数排；一行的高度取这一行里最高的卡片。
@@ -1930,7 +1926,7 @@ public class SpecializationScreen extends Screen {
         return lines;
     }
 
-    // ---------------------------------------------------------------- 列表 + 详情（C）
+    // 列表 + 详情（C）
 
     /**
      * C 版中栏：按分组列出名字和等级，点一行在右栏看详情。
@@ -2181,7 +2177,7 @@ public class SpecializationScreen extends Screen {
         }
     }
 
-    // ---------------------------------------------------------------- 每级数值表
+    // 每级数值表
 
     /**
      * 排好的数值表：表头一行项名，下面 Lv1～LvN、一条细线、★1～★M。项多到一张表放不下时，按列切成几张上下叠。
@@ -2323,7 +2319,7 @@ public class SpecializationScreen extends Screen {
         return "—";
     }
 
-    // ---------------------------------------------------------------- 效果列表（V1）
+    // 效果列表（V1）
 
     /**
      * 效果列表的一行。
@@ -2651,9 +2647,7 @@ public class SpecializationScreen extends Screen {
         drawSegments(guiGraphics, segWidth(full) <= right - left ? full : brief, left, y, right - left);
     }
 
-    // ======================================================================
     // 上手引导
-    // ======================================================================
 
     private static final String K = "gui.albionmastery.spec_page.";
     /** 拼带颜色的句子时，占位符先换成「这个字符 + 序号字母」，再按它切开。 */
@@ -3174,7 +3168,7 @@ public class SpecializationScreen extends Screen {
         }
     }
 
-    // ---------------------------------------------------------------- 分步遮罩
+    // 分步遮罩
 
     private void startTour() {
         this.tourStep = 0;
@@ -3450,7 +3444,7 @@ public class SpecializationScreen extends Screen {
         return out;
     }
 
-    // ---------------------------------------------------------------- 小画法
+    // 小画法
 
     private void frame(GuiGraphics guiGraphics, int x, int y, int width, int height, int color) {
         guiGraphics.fill(x, y, x + width, y + 1, color);
@@ -3572,9 +3566,7 @@ public class SpecializationScreen extends Screen {
         return String.format(Locale.ROOT, "%d:%02d", minutes / 60L, minutes % 60L);
     }
 
-    // ======================================================================
     // 数据
-    // ======================================================================
 
     private static SpecRules rules() {
         return ClientMasteryCache.snapshot().specRules;
@@ -3958,9 +3950,7 @@ public class SpecializationScreen extends Screen {
         return "spec_family.albionmastery." + this.providerId + "." + family;
     }
 
-    // ======================================================================
     // 请求
-    // ======================================================================
 
     /**
      * 点卡片：已经装在选中的槽里就卸下，否则装进去。
@@ -4001,9 +3991,7 @@ public class SpecializationScreen extends Screen {
         playClick();
     }
 
-    // ======================================================================
     // 输入
-    // ======================================================================
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
