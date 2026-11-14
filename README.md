@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://cdn.modrinth.com/data/cached_images/6d4fe62679315f9998eea2225731a16ae3a1ec5b_0.webp" alt="Albion Mastery" width="800">
+<img src="docs/banner.png" alt="Albion Mastery" width="800">
 
 # Albion Mastery | 阿尔比恩专精
 
