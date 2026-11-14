@@ -7,7 +7,6 @@ import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.SwordItem;
 import net.minecraft.world.item.TridentItem;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import com.flameforge.albionmastery.AlbionMastery;
@@ -15,6 +14,8 @@ import net.minecraft.tags.ItemTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 
+import net.minecraft.core.registries.BuiltInRegistries;
+import com.flameforge.albionmastery.AMIds;
 /**
  * 通用近战武器：所有继承原版 {@code SwordItem} / {@code AxeItem} / {@code TridentItem} 的物品，
  * 不管来自哪个模组。来源「近战武器」，大类三个：剑、斧、三叉戟；单件 = 物品。
@@ -91,7 +92,7 @@ public final class VanillaMeleeSupport {
         if (stack.isEmpty()) {
             return null;
         }
-        ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (WeaponOverrides.isExcluded(id)) {
             return null;
         }
@@ -135,7 +136,7 @@ public final class VanillaMeleeSupport {
      * @return 标签键
      */
     private static TagKey<Item> tag(String namespace, String path) {
-        return ItemTags.create(new ResourceLocation(namespace, path));
+        return ItemTags.create(AMIds.of(namespace, path));
     }
 
     /**
@@ -150,7 +151,7 @@ public final class VanillaMeleeSupport {
         if (type == null) {
             return null;
         }
-        ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (id == null) {
             return null;
         }

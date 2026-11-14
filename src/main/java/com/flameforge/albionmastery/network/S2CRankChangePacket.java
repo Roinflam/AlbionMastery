@@ -1,14 +1,13 @@
 package com.flameforge.albionmastery.network;
 
+import com.flameforge.albionmastery.AMIds;
 import com.flameforge.albionmastery.client.ClientLeaderboardHandler;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.network.NetworkEvent;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import javax.annotation.Nullable;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * 总榜前三易主的通知（S2C）。
@@ -16,7 +15,11 @@ import java.util.function.Supplier;
  * <p>不走聊天：客户端收到后弹一条和升级提示同款的横幅，带上位者的头像。
  * 本人和旁观者看到的文案不一样，由客户端按自己是不是那个人来选。
  */
-public class S2CRankChangePacket {
+public class S2CRankChangePacket implements CustomPacketPayload {
+
+    /** 负载 ID。 */
+    public static final CustomPacketPayload.Type<S2CRankChangePacket> TYPE =
+            new CustomPacketPayload.Type<>(AMIds.of("rank_change"));
 
     /** 名字最大长度。 */
     private static final int MAX_NAME = 48;
@@ -72,15 +75,18 @@ public class S2CRankChangePacket {
     }
 
     /**
-     * 主线程处理：交给客户端弹横幅。
+     * 主线程处理：交给客户端弹横幅。只会在客户端被调用。
      *
+     * @param packet  网络包
      * @param context 网络上下文
      */
-    public void handle(Supplier<NetworkEvent.Context> context) {
-        NetworkEvent.Context ctx = context.get();
-        ctx.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                () -> () -> ClientLeaderboardHandler.acceptRankChange(this.newcomer, this.newcomerName,
-                        this.displacedName, this.rank)));
-        ctx.setPacketHandled(true);
+    public static void handle(S2CRankChangePacket packet, IPayloadContext context) {
+        ClientLeaderboardHandler.acceptRankChange(packet.newcomer, packet.newcomerName,
+                packet.displacedName, packet.rank);
+    }
+
+    @Override
+    public CustomPacketPayload.Type<S2CRankChangePacket> type() {
+        return TYPE;
     }
 }

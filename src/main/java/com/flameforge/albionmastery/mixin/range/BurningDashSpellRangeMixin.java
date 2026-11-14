@@ -28,9 +28,9 @@ public abstract class BurningDashSpellRangeMixin {
      * @param caster 施法者，可能为空
      * @return 不受专精额外放大的强度值
      */
-    @Redirect(method = {"onCast"},
+    @Redirect(method = {"onCast(Lnet/minecraft/world/level/Level;ILnet/minecraft/world/entity/LivingEntity;Lio/redspace/ironsspellbooks/api/spells/CastSource;Lio/redspace/ironsspellbooks/api/magic/MagicData;)V"},
             at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/spells/fire/BurningDashSpell;getSpellPower(ILnet/minecraft/world/entity/Entity;)F"),
-            require = 1, expect = 1)
+            require = 0, expect = 1)
     private float albionmastery$rangePower(@Coerce Object spell, int spellLevel, Entity caster) {
         return SpellRangeProtection.spellPower((AbstractSpell) spell, spellLevel, caster);
     }

@@ -20,9 +20,10 @@ import org.spongepowered.asm.mixin.injection.At;
 public abstract class TooltipsManaMixin {
 
     @WrapOperation(
-            method = "formatActiveSpellTooltip",
+            method = "formatActiveSpellTooltip(Lnet/minecraft/world/item/ItemStack;Lio/redspace/ironsspellbooks/api/spells/SpellData;"
+                    + "Lio/redspace/ironsspellbooks/api/spells/CastSource;Lnet/minecraft/client/player/LocalPlayer;)Ljava/util/List;",
             at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/api/spells/AbstractSpell;getManaCost(I)I"),
-            require = 0
+            require = 0, expect = 2
     )
     private static int albionmastery$activeSpellCost(AbstractSpell spell, int level, Operation<Integer> original,
                                                      ItemStack stack, SpellData spellData, CastSource castSource,
@@ -44,9 +45,10 @@ public abstract class TooltipsManaMixin {
      * @return 实际冷却
      */
     @WrapOperation(
-            method = "formatActiveSpellTooltip",
+            method = "formatActiveSpellTooltip(Lnet/minecraft/world/item/ItemStack;Lio/redspace/ironsspellbooks/api/spells/SpellData;"
+                    + "Lio/redspace/ironsspellbooks/api/spells/CastSource;Lnet/minecraft/client/player/LocalPlayer;)Ljava/util/List;",
             at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/capabilities/magic/MagicManager;getEffectiveSpellCooldown(Lio/redspace/ironsspellbooks/api/spells/AbstractSpell;Lnet/minecraft/world/entity/player/Player;Lio/redspace/ironsspellbooks/api/spells/CastSource;)I"),
-            require = 0
+            require = 0, expect = 1
     )
     private static int albionmastery$activeSpellCooldown(AbstractSpell spell, Player player, CastSource source,
                                                          Operation<Integer> original, ItemStack stack,
@@ -68,9 +70,9 @@ public abstract class TooltipsManaMixin {
      * @return 实际冷却
      */
     @WrapOperation(
-            method = "formatScrollTooltip",
+            method = "formatScrollTooltip(Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/entity/player/Player;)Ljava/util/List;",
             at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/capabilities/magic/MagicManager;getEffectiveSpellCooldown(Lio/redspace/ironsspellbooks/api/spells/AbstractSpell;Lnet/minecraft/world/entity/player/Player;Lio/redspace/ironsspellbooks/api/spells/CastSource;)I"),
-            require = 0
+            require = 0, expect = 1
     )
     private static int albionmastery$scrollCooldown(AbstractSpell spell, Player player, CastSource source,
                                                     Operation<Integer> original, ItemStack stack, Player holder) {
@@ -79,9 +81,9 @@ public abstract class TooltipsManaMixin {
     }
 
     @WrapOperation(
-            method = "formatScrollTooltip",
+            method = "formatScrollTooltip(Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/entity/player/Player;)Ljava/util/List;",
             at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/api/spells/AbstractSpell;getManaCost(I)I"),
-            require = 0
+            require = 0, expect = 2
     )
     private static int albionmastery$scrollCost(AbstractSpell spell, int level, Operation<Integer> original,
                                                 ItemStack stack, Player player) {

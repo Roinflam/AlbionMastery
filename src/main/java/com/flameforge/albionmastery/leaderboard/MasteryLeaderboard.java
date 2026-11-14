@@ -7,6 +7,7 @@ import com.flameforge.albionmastery.mastery.MasteryHelper;
 import com.flameforge.albionmastery.mastery.spec.Specialization;
 import com.flameforge.albionmastery.network.NetworkHandler;
 import com.flameforge.albionmastery.network.S2CRankChangePacket;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -129,7 +130,7 @@ public final class MasteryLeaderboard extends SavedData {
      */
     public static MasteryLeaderboard get(MinecraftServer server) {
         return server.overworld().getDataStorage()
-                .computeIfAbsent(MasteryLeaderboard::load, MasteryLeaderboard::new, DATA_NAME);
+                .computeIfAbsent(new SavedData.Factory<>(MasteryLeaderboard::new, MasteryLeaderboard::load), DATA_NAME);
     }
 
     // ======================================================================
@@ -367,7 +368,7 @@ public final class MasteryLeaderboard extends SavedData {
         text.append(past.key()).append("（").append(past.period().describeKey(past.key())).append("）\n");
         text.append("存档时间：").append(Instant.ofEpochMilli(past.closedAt()).atZone(ZoneId.systemDefault())
                 .toLocalDateTime().withNano(0).toString().replace('T', ' ')).append('\n');
-        text.append("本期有进展的共 ").append(past.participants()).append(" 人，按本期涨的经验排，存前 ")
+        text.append("本期有进展的共 ").append(past.participants()).append(" 人，按本期经验排序，存前 ")
                 .append(past.rows().size()).append(" 名\n\n");
         text.append("名次\t玩家\t本期经验\t本期升级\t本期满级\t本期新解锁\tUUID\n");
         for (int i = 0; i < past.rows().size(); i++) {
@@ -772,10 +773,11 @@ public final class MasteryLeaderboard extends SavedData {
     /**
      * 从存盘文件读出榜单。概况不存盘，读的时候按当前配置现算；基线照读。
      *
-     * @param root 存盘 NBT
+     * @param root     存盘 NBT
+     * @param provider 注册表查询（榜单里没有要查注册表的东西，用不上）
      * @return 榜单
      */
-    public static MasteryLeaderboard load(CompoundTag root) {
+    public static MasteryLeaderboard load(CompoundTag root, HolderLookup.Provider provider) {
         MasteryLeaderboard board = new MasteryLeaderboard();
         MasteryConfig.Snapshot snapshot = MasteryConfig.serverSnapshot();
         ListTag list = root.getList("Players", Tag.TAG_COMPOUND);
@@ -831,7 +833,7 @@ public final class MasteryLeaderboard extends SavedData {
     }
 
     @Override
-    public CompoundTag save(CompoundTag root) {
+    public CompoundTag save(CompoundTag root, HolderLookup.Provider provider) {
         ListTag list = new ListTag();
         for (Map.Entry<UUID, Entry> mapEntry : this.entries.entrySet()) {
             Entry entry = mapEntry.getValue();

@@ -9,23 +9,23 @@ import com.flameforge.albionmastery.weapon.ResolvedWeapon;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.core.Holder;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.EquipmentSlotGroup;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.common.ForgeMod;
-import net.minecraftforge.event.ItemAttributeModifierEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.util.thread.EffectiveSide;
+import net.minecraft.world.item.component.ItemAttributeModifiers;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.neoforge.event.ItemAttributeModifierEvent;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.util.thread.EffectiveSide;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
-import java.util.UUID;
 
+import net.neoforged.fml.common.EventBusSubscriber;
 /**
  * 把专精加成写进物品的属性修饰符里，只改提示里的显示（仅客户端逻辑侧）。
  *
@@ -40,10 +40,13 @@ import java.util.UUID;
  * 拿不到持有者，服务端无法判断该用谁的专精数据。实际伤害由
  * {@code MeleeCombatHandler} 在服务端结算，两边用的是同一套加成公式。
  *
- * <p>只处理主手的 {@code ADDITION} 修饰符：按百分比生效的修饰符（比如刀包里常见的
+ * <p>只处理主手的 {@code ADD_VALUE} 修饰符：按百分比生效的修饰符（比如刀包里常见的
  * 移速加成）如果也乘上倍率，语义会完全错掉。
+ *
+ * <p>这个事件不分槽位，一次给出物品所有槽位组的修饰符，只改 {@link EquipmentSlotGroup#MAINHAND} 那一组。
+ * 提示框每个槽位组都会重新取一次修饰符（一次构建触发十次），每次都是从默认修饰符重新算，不会越乘越大。
  */
-@Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID, value = Dist.CLIENT)
+@EventBusSubscriber(modid = AlbionMastery.MOD_ID, value = Dist.CLIENT)
 public final class MasteryAttributeHandler {
 
     private MasteryAttributeHandler() {
@@ -73,8 +76,13 @@ public final class MasteryAttributeHandler {
         return 1.0D;
     }
 
-    /** 提示里「攻击距离」那一行用的修饰符 UUID，只存在于客户端的提示里。 */
-    private static final UUID REACH_DISPLAY_ID = UUID.fromString("9d3b6f2a-4c8e-4a1f-b7d5-0e2c8a6f4b19");
+    /**
+     * 提示里「攻击距离」那一行用的修饰符 ID，只存在于客户端的提示里。
+     *
+     * <p>和原版的 {@code base_entity_reach} 不同，所以显示成「+15% 实体交互距离」那一类，不并进基础行。
+     */
+    private static final ResourceLocation REACH_DISPLAY_ID =
+            ResourceLocation.fromNamespaceAndPath(AlbionMastery.MOD_ID, "spec_reach_display");
 
     /**
      * 改写属性栏：攻击力乘专精和特化倍率，吃原版属性的近战
@@ -94,9 +102,6 @@ public final class MasteryAttributeHandler {
             return;
         }
         if (!MasteryConfig.CLIENT.overrideDamageDisplay.get()) {
-            return;
-        }
-        if (event.getSlotType() != EquipmentSlot.MAINHAND) {
             return;
         }
         LocalPlayer player = Minecraft.getInstance().player;
@@ -128,9 +133,9 @@ public final class MasteryAttributeHandler {
             }
             if (Math.abs(values.reach() - 1.0D) > 1.0E-6D) {
                 // 和实际挂的修饰符一样是「乘总值」，属性栏会显示成「+15% 实体交互距离」
-                event.addModifier(ForgeMod.ENTITY_REACH.get(), new AttributeModifier(REACH_DISPLAY_ID,
-                        "albionmastery:spec_reach_display", values.reach() - 1.0D,
-                        AttributeModifier.Operation.MULTIPLY_TOTAL));
+                event.addModifier(Attributes.ENTITY_INTERACTION_RANGE, new AttributeModifier(REACH_DISPLAY_ID,
+                        values.reach() - 1.0D, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL),
+                        EquipmentSlotGroup.MAINHAND);
             }
         }
     }
@@ -138,29 +143,49 @@ public final class MasteryAttributeHandler {
     /**
      * 把某个属性上主手的「加法」修饰符改写成乘过倍率之后的样子。
      *
-     * <p>原版在主手攻击力、攻速这两行会把玩家的基础值加进去一起显示，
-     * 这里按「(基础 + 修饰) * 倍率 - 基础」换算，保证提示里的总值就是实际生效的值。
-     * 按百分比生效的修饰符（比如刀包里常见的移速加成）不动，乘上倍率语义就全错了。
+     * <p>提示框会把 ID 等于属性基础 ID（攻击力 {@code base_attack_damage}、攻速 {@code base_attack_speed}）
+     * 的那一项当成基础行，加上玩家的基础值显示成「X 攻击伤害」，其余加法项显示成「+X」。
+     * 改写时保留原修饰符 ID，基础行才还是基础行；换了 ID 就会变成「+X 攻击伤害」。
+     *
+     * <p>换算让提示里的总值等于实际生效的值：实际是「(基础 + 各加法项之和) * 倍率」，
+     * 所以每一项都乘倍率，玩家基础值多出来的那一截「基础 * (倍率 - 1)」只记一次——
+     * 记在基础行上，没有基础行就记在第一项上。只有一项时就是「(基础 + 修饰) * 倍率 - 基础」。
+     * 打开 NeoForge 的合并提示时，基础行和其余项由 NeoForge 加总成一行，加出来同样是实际值。
+     *
+     * <p>按百分比生效的修饰符（比如刀包里常见的移速加成）不动，乘上倍率语义就全错了。
      */
-    private static void rescale(ItemAttributeModifierEvent event, LocalPlayer player, Attribute attribute,
+    private static void rescale(ItemAttributeModifierEvent event, LocalPlayer player, Holder<Attribute> attribute,
                                 double multiplier) {
         if (Math.abs(multiplier - 1.0D) <= 1.0E-6D) {
             return;
         }
-        Collection<AttributeModifier> current = event.getModifiers().get(attribute);
-        // 先拷一份再改，避免在遍历 Multimap 视图的同时修改它
-        List<AttributeModifier> additions = new ArrayList<>();
-        for (AttributeModifier modifier : current) {
-            if (modifier.getOperation() == AttributeModifier.Operation.ADDITION) {
-                additions.add(modifier);
+        // 先拷一份再改：事件给的是视图，改写时底下的表会变
+        List<ItemAttributeModifiers.Entry> additions = new ArrayList<>();
+        ItemAttributeModifiers.Entry baseEntry = null;
+        ResourceLocation baseId = attribute.value().getBaseId();
+        for (ItemAttributeModifiers.Entry entry : event.getModifiers()) {
+            if (entry.attribute().equals(attribute) && entry.slot() == EquipmentSlotGroup.MAINHAND
+                    && entry.modifier().operation() == AttributeModifier.Operation.ADD_VALUE) {
+                additions.add(entry);
+                if (baseEntry == null && entry.modifier().id().equals(baseId)) {
+                    baseEntry = entry;
+                }
             }
         }
+        if (additions.isEmpty()) {
+            return;
+        }
+        if (baseEntry == null) {
+            baseEntry = additions.get(0);
+        }
         double base = player.getAttributeBaseValue(attribute);
-        for (AttributeModifier modifier : additions) {
-            event.removeModifier(attribute, modifier);
-            double scaled = (base + modifier.getAmount()) * multiplier - base;
-            event.addModifier(attribute, new AttributeModifier(
-                    modifier.getId(), modifier.getName(), scaled, AttributeModifier.Operation.ADDITION));
+        for (ItemAttributeModifiers.Entry entry : additions) {
+            double scaled = entry.modifier().amount() * multiplier;
+            if (entry == baseEntry) {
+                scaled += base * (multiplier - 1.0D);
+            }
+            event.replaceModifier(attribute, new AttributeModifier(entry.modifier().id(), scaled,
+                    AttributeModifier.Operation.ADD_VALUE), entry.slot());
         }
     }
 }

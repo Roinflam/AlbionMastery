@@ -27,10 +27,15 @@ import org.spongepowered.asm.mixin.Unique;
  * 强行压缩反而不像。掏枪、拉栓在第三人称没有单独的动作。
  *
  * <p>倍率取自会同步的属性，所以看谁就是谁的倍率，不会拿自己的特化去套别人。
- * 目标是 TACZ 的类，{@code remap = false}；TACZ 或 Player Animator 没装时这个 Mixin 整个不应用。
+ * TACZ 或 Player Animator 没装时这个 Mixin 整个不应用。
  */
-@Mixin(value = AnimationManager.class, remap = false)
+@Mixin(AnimationManager.class)
 public abstract class GunThirdPersonAnimMixin {
+
+    /** 注入目标：播一段上半身一次性动作。 */
+    private static final String ALBIONMASTERY$PLAY_ONCE = "playOnceAnimation(Lnet/minecraft/client/player/AbstractClientPlayer;"
+            + "Lcom/tacz/guns/client/resource/GunDisplayInstance;Lnet/minecraft/resources/ResourceLocation;"
+            + "Ljava/lang/String;)V";
 
     /**
      * 这一层现在空着吗——也就是 TACZ 待会儿到底会不会真的把动作换掉。
@@ -52,7 +57,7 @@ public abstract class GunThirdPersonAnimMixin {
      * @param name        动画名
      * @param ci          回调
      */
-    @Inject(method = "playOnceAnimation", at = @At("HEAD"), require = 0)
+    @Inject(method = ALBIONMASTERY$PLAY_ONCE, at = @At("HEAD"), require = 0, expect = 1)
     private static void albionmastery$checkLayer(AbstractClientPlayer player, GunDisplayInstance display,
                                                  ResourceLocation animationId, String name, CallbackInfo ci) {
         albionmastery$layerWasIdle = PlayerAnimSpeed.isIdle(player, PlayerAnimatorCompat.ONCE_UPPER_ANIMATION);
@@ -67,7 +72,7 @@ public abstract class GunThirdPersonAnimMixin {
      * @param name        动画名
      * @param ci          回调
      */
-    @Inject(method = "playOnceAnimation", at = @At("RETURN"), require = 0)
+    @Inject(method = ALBIONMASTERY$PLAY_ONCE, at = @At("RETURN"), require = 0, expect = 3)
     private static void albionmastery$speed(AbstractClientPlayer player, GunDisplayInstance display,
                                             ResourceLocation animationId, String name, CallbackInfo ci) {
         if (!albionmastery$layerWasIdle) {

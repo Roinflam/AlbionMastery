@@ -12,7 +12,7 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.TextColor;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.common.MinecraftForge;
+import net.neoforged.neoforge.common.NeoForge;
 
 import javax.annotation.Nullable;
 import java.util.HashMap;
@@ -118,7 +118,7 @@ public final class MasteryRankTracker {
      */
     private static void postChanged(ServerPlayer player, long oldRankXp, long newRankXp, boolean fromGameplay) {
         try {
-            MinecraftForge.EVENT_BUS.post(new MasteryRankChangedEvent(player, oldRankXp, newRankXp, fromGameplay));
+            NeoForge.EVENT_BUS.post(new MasteryRankChangedEvent(player, oldRankXp, newRankXp, fromGameplay));
         } catch (Exception exception) {
             AlbionMastery.LOGGER.error("段位变化事件的监听方出错: {}", player.getGameProfile().getName(), exception);
         }

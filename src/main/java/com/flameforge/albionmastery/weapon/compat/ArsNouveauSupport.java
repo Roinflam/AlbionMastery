@@ -9,14 +9,14 @@ import com.flameforge.albionmastery.weapon.WeaponCatalog;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import com.hollingsworth.arsnouveau.api.item.ICasterTool;
 import com.hollingsworth.arsnouveau.api.registry.GlyphRegistry;
+import com.hollingsworth.arsnouveau.api.registry.SpellCasterRegistry;
 import com.hollingsworth.arsnouveau.api.spell.AbstractAugment;
 import com.hollingsworth.arsnouveau.api.spell.AbstractCastMethod;
+import com.hollingsworth.arsnouveau.api.spell.AbstractCaster;
 import com.hollingsworth.arsnouveau.api.spell.AbstractEffect;
 import com.hollingsworth.arsnouveau.api.spell.AbstractSpellPart;
-import com.hollingsworth.arsnouveau.api.spell.ISpellCaster;
 import com.hollingsworth.arsnouveau.api.spell.Spell;
 import com.hollingsworth.arsnouveau.api.spell.SpellSchool;
-import com.hollingsworth.arsnouveau.api.util.CasterUtil;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
@@ -65,8 +65,8 @@ public final class ArsNouveauSupport {
      * @return 能施法返回 true
      */
     public static boolean isCaster(ItemStack stack) {
-        // 不能用 CasterUtil.getCaster != null 判断：它对任何物品都会 new 一个空的 SpellCaster 出来，
-        // 永远不为 null，会把所有武器都当成新生魔艺的施法物品——拔刀剑、近战刀的提示和经验全被吞掉
+        // 只认实现了施法接口的物品（魔艺自带的法术书、法杖、卷轴、施法书等都实现了）。
+        // 非施法物品取不到施法器，currentSpell 返回 null；这里不必去取施法器，看接口就够
         return !stack.isEmpty() && stack.getItem() instanceof ICasterTool;
     }
 
@@ -108,7 +108,10 @@ public final class ArsNouveauSupport {
             return null;
         }
         try {
-            ISpellCaster caster = CasterUtil.getCaster(stack);
+            // 施法物品走它自己的取法（附属可以覆写），其余物品按登记表取，没登记、没施法器组件的返回 null
+            AbstractCaster<?> caster = stack.getItem() instanceof ICasterTool tool
+                    ? tool.getSpellCaster(stack)
+                    : SpellCasterRegistry.from(stack);
             if (caster == null) {
                 return null;
             }
@@ -126,11 +129,11 @@ public final class ArsNouveauSupport {
      * @return 武器列表
      */
     public static List<ResolvedWeapon> partsOf(@Nullable Spell spell) {
-        if (spell == null || spell.recipe == null || spell.recipe.isEmpty()) {
+        if (spell == null || spell.isEmpty()) {
             return List.of();
         }
         Set<ResolvedWeapon> parts = new LinkedHashSet<>();
-        for (AbstractSpellPart part : spell.recipe) {
+        for (AbstractSpellPart part : spell.recipe()) {
             ResolvedWeapon weapon = ofPart(part);
             if (weapon != null) {
                 parts.add(weapon);
@@ -331,10 +334,10 @@ public final class ArsNouveauSupport {
      */
     @Nullable
     public static ResolvedWeapon primaryWeapon(@Nullable Spell spell) {
-        if (spell == null || spell.recipe == null) {
+        if (spell == null || spell.isEmpty()) {
             return null;
         }
-        for (AbstractSpellPart part : spell.recipe) {
+        for (AbstractSpellPart part : spell.recipe()) {
             if (part instanceof AbstractEffect) {
                 return ofPart(part);
             }
@@ -350,10 +353,10 @@ public final class ArsNouveauSupport {
      * @return 数值
      */
     public static SpecializationValues primarySpec(@Nullable LivingEntity caster, @Nullable Spell spell) {
-        if (spell == null || spell.recipe == null) {
+        if (spell == null || spell.isEmpty()) {
             return SpecializationValues.NEUTRAL;
         }
-        for (AbstractSpellPart part : spell.recipe) {
+        for (AbstractSpellPart part : spell.recipe()) {
             if (part instanceof AbstractEffect) {
                 return SpecializationEffects.forWeapon(caster, ofPart(part));
             }

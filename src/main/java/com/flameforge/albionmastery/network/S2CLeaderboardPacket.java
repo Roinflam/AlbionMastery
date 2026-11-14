@@ -1,19 +1,18 @@
 package com.flameforge.albionmastery.network;
 
+import com.flameforge.albionmastery.AMIds;
 import com.flameforge.albionmastery.client.ClientLeaderboardHandler;
 import com.flameforge.albionmastery.leaderboard.LeaderboardPeriod;
 import com.flameforge.albionmastery.leaderboard.LeaderboardRow;
 import com.flameforge.albionmastery.leaderboard.LeaderboardSort;
 import com.flameforge.albionmastery.leaderboard.MasteryLeaderboard;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.network.NetworkEvent;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Supplier;
 
 /**
  * 排行榜回包（S2C）。
@@ -21,7 +20,11 @@ import java.util.function.Supplier;
  * <p>正常情况下带前若干名和请求者自己的名次；服务端没开排行榜或者请求太频繁时只带一个状态，
  * 客户端据此显示提示，不会一直停在「加载中」。
  */
-public class S2CLeaderboardPacket {
+public class S2CLeaderboardPacket implements CustomPacketPayload {
+
+    /** 负载 ID。 */
+    public static final CustomPacketPayload.Type<S2CLeaderboardPacket> TYPE =
+            new CustomPacketPayload.Type<>(AMIds.of("leaderboard"));
 
     /** 单个包最多接受多少行，只用来挡异常包（和配置 topCount 的上限一致）。 */
     private static final int MAX_ROWS = 500;
@@ -168,16 +171,19 @@ public class S2CLeaderboardPacket {
     }
 
     /**
-     * 主线程处理：交给客户端的排行榜界面。
+     * 主线程处理：交给客户端的排行榜界面。只会在客户端被调用。
      *
+     * @param packet  网络包
      * @param context 网络上下文
      */
-    public void handle(Supplier<NetworkEvent.Context> context) {
-        NetworkEvent.Context ctx = context.get();
-        ctx.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                () -> () -> ClientLeaderboardHandler.acceptRows(this.status, this.periodsEnabled,
-                        this.period, this.sort, this.rows, this.ranks, this.selfRank, this.selfRow, this.total,
-                        this.query, this.matched)));
-        ctx.setPacketHandled(true);
+    public static void handle(S2CLeaderboardPacket packet, IPayloadContext context) {
+        ClientLeaderboardHandler.acceptRows(packet.status, packet.periodsEnabled,
+                packet.period, packet.sort, packet.rows, packet.ranks, packet.selfRank, packet.selfRow,
+                packet.total, packet.query, packet.matched);
+    }
+
+    @Override
+    public CustomPacketPayload.Type<S2CLeaderboardPacket> type() {
+        return TYPE;
     }
 }

@@ -12,12 +12,13 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.fml.ModList;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.neoforged.fml.ModList;
 
 import java.util.List;
 import java.util.Map;
 
+import net.minecraft.core.registries.BuiltInRegistries;
+import com.flameforge.albionmastery.AMIds;
 /**
  * TACZ 枪械来源。
  *
@@ -36,7 +37,7 @@ public final class TaczGunProvider implements IWeaponProvider {
 
     /** 现代动能枪械物品的注册名，用于构造图标失败时的兜底。 */
     private static final ResourceLocation MODERN_KINETIC_GUN =
-            new ResourceLocation(TACZ_MOD_ID, "modern_kinetic_gun");
+            AMIds.of(TACZ_MOD_ID, "modern_kinetic_gun");
 
     private TaczGunProvider() {
     }
@@ -120,8 +121,8 @@ public final class TaczGunProvider implements IWeaponProvider {
             AlbionMastery.LOGGER.debug("构建枪械图标失败，回退到手动方式: {}", gunId, exception);
         }
 
-        Item item = ForgeRegistries.ITEMS.getValue(MODERN_KINETIC_GUN);
-        // Forge 注册表查不到时会返回默认值（空气），所以要判空而不是判 null
+        Item item = BuiltInRegistries.ITEM.get(MODERN_KINETIC_GUN);
+        // 物品注册表查不到时返回默认值（空气），下面还要再判一次空堆
         if (item == null) {
             return ItemStack.EMPTY;
         }

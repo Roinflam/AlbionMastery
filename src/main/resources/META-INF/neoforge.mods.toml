@@ -14,7 +14,7 @@ authors="${mod_authors}"
 # 灵感出处、内嵌库和商标声明都放在简介末尾，不用 credits（它排在作者前面，长了会占满首屏）
 description='''
 阿尔比恩式武器专精系统
-任何 1.20.1 Forge 整合包都能装。
+任何 1.21.1 NeoForge 整合包都能装。
 
 · 自动识别已装的枪包、刀包、拔刀剑、法术、弓弩
 · 来源 - 类型 - 单件武器三圈专精，越练伤害越高
@@ -22,7 +22,7 @@ description='''
 · FTB 任务可设段位门槛
 · 游戏内配置界面，每一项都有说明
 
-A weapon mastery system for any 1.20.1 Forge modpack.
+A weapon mastery system for any 1.21.1 NeoForge modpack.
 · Reads gun packs, melee packs, SlashBlade, spells and bows
 · Source, type and weapon mastery: the more you use it, the harder it hits
 · Trade-off specializations, mastery ranks and leaderboards
@@ -40,72 +40,83 @@ A weapon mastery system for any 1.20.1 Forge modpack.
 The mastery system is inspired by the Destiny Board of Albion Online, and the rank rules and emblem designs are based on Warframe's Mastery Rank. Cloth Config API by shedaniel (GNU LGPLv3) is bundled unmodified as a separate jar-in-jar library, used only for the config screen. Albion Online is a trademark of Sandbox Interactive GmbH and Warframe is a trademark of Digital Extremes Ltd.; this is an unofficial fan-made mod and is not affiliated with or endorsed by them.
 '''
 
+# NeoForge 不读 mandatory：依赖类型缺省就是必需，可选的都要写 type="optional"
 [[dependencies.${mod_id}]]
-    modId="forge"
-    mandatory=true
-    versionRange="${forge_version_range}"
-    ordering="NONE"
-    side="BOTH"
+modId="neoforge"
+type="required"
+versionRange="${neo_version_range}"
+ordering="NONE"
+side="BOTH"
 
 [[dependencies.${mod_id}]]
-    modId="minecraft"
-    mandatory=true
-    versionRange="${minecraft_version_range}"
-    ordering="NONE"
-    side="BOTH"
+modId="minecraft"
+type="required"
+versionRange="${minecraft_version_range}"
+ordering="NONE"
+side="BOTH"
 
-# 四个武器来源全是可选依赖：装了哪个就接入哪个，没装的来源不会出现在专精树上，相关功能也不启用
+# 武器来源全是可选依赖：装了哪个就接入哪个，没装的来源不会出现在专精树上，相关功能也不启用。
+# 下限是对接时测过的版本
 [[dependencies.${mod_id}]]
-    modId="tacz"
-    mandatory=false
-    versionRange="[1.1,)"
-    ordering="AFTER"
-    side="BOTH"
-
-[[dependencies.${mod_id}]]
-    modId="lrtactical"
-    mandatory=false
-    versionRange="[0.4,)"
-    ordering="AFTER"
-    side="BOTH"
+modId="tacz"
+type="optional"
+versionRange="[1.2,)"
+ordering="AFTER"
+side="BOTH"
 
 [[dependencies.${mod_id}]]
-    modId="slashblade"
-    mandatory=false
-    versionRange="[1.9,)"
-    ordering="AFTER"
-    side="BOTH"
+modId="lrtactical"
+type="optional"
+versionRange="[0.4.3,)"
+ordering="AFTER"
+side="BOTH"
 
 [[dependencies.${mod_id}]]
-    modId="irons_spellbooks"
-    mandatory=false
-    versionRange="[1.20.1-3.16,)"
-    ordering="AFTER"
-    side="BOTH"
+modId="slashblade"
+type="optional"
+versionRange="[2.1.9,)"
+ordering="AFTER"
+side="BOTH"
 
 [[dependencies.${mod_id}]]
-    modId="ars_nouveau"
-    mandatory=false
-    versionRange="[4.12,)"
-    ordering="AFTER"
-    side="BOTH"
+modId="irons_spellbooks"
+type="optional"
+versionRange="[1.21.1-3.16.3,)"
+ordering="AFTER"
+side="BOTH"
 
-# 铁枪（Iron's Arms 'n Artifice）：只认测过的 1.1.1 及以后
 [[dependencies.${mod_id}]]
-    modId="irons_artifice"
-    mandatory=false
-    versionRange="[1.20.1-1.1.1,)"
-    ordering="AFTER"
-    side="BOTH"
+modId="ars_nouveau"
+type="optional"
+versionRange="[5.13,)"
+ordering="AFTER"
+side="BOTH"
 
-# FTB 任务也是可选依赖：装了就多一种「专精段位」任务（按段位 / 段位经验比较），没装不受影响
+# 铁枪（Iron's Arms 'n Artifice）
 [[dependencies.${mod_id}]]
-    modId="ftbquests"
-    mandatory=false
-    versionRange="[2001.4,)"
-    ordering="AFTER"
-    side="BOTH"
+modId="irons_artifice"
+type="optional"
+versionRange="[1.21.1-1.1.1,)"
+ordering="AFTER"
+side="BOTH"
 
-# 本模组的 Mixin；可选模组没装时对应的 Mixin 由 AlbionMixinPlugin 跳过
+# FTB 任务：装了就多一种「专精段位」任务（按段位 / 段位经验比较），没装不受影响
+[[dependencies.${mod_id}]]
+modId="ftbquests"
+type="optional"
+versionRange="[2101.1.38,)"
+ordering="AFTER"
+side="BOTH"
+
+# Cloth Config 以 jar-in-jar 内嵌，写这一条是为了加载顺序（本模组构造时登记配置界面）；
+# 设成 optional：整合包里内嵌库被剥掉或被别的版本顶替时只是配置界面不可用，不会卡在缺少前置
+[[dependencies.${mod_id}]]
+modId="cloth_config"
+type="optional"
+versionRange="[${cloth_config_version},)"
+ordering="AFTER"
+side="BOTH"
+
+# 本模组的 Mixin（1.20.5 起在这里登记）；可选模组没装时对应的 Mixin 由 AlbionMixinPlugin 跳过
 [[mixins]]
 config="${mod_id}.mixins.json"

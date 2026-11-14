@@ -33,14 +33,14 @@ public abstract class GunCanReloadMixin {
      * @return 应用特化之后的容量
      */
     @ModifyExpressionValue(
-            method = "canReload",
+            method = "canReload(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/item/ItemStack;)Z",
             at = @At(
                     value = "INVOKE",
                     target = "Lcom/tacz/guns/util/AttachmentDataUtils;getAmmoCountWithAttachment"
                             + "(Lnet/minecraft/world/item/ItemStack;"
                             + "Lcom/tacz/guns/resource/pojo/data/gun/GunData;)I"
             ),
-            require = 0
+            require = 0, expect = 1
     )
     private int albionmastery$applyMagazineSpec(int original, LivingEntity entity, ItemStack stack) {
         SpecializationValues values = SpecializationEffects.forStack(entity, stack);

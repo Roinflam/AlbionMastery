@@ -17,7 +17,6 @@ import net.minecraft.world.entity.projectile.AbstractArrow;
 import javax.annotation.Nullable;
 import com.flameforge.albionmastery.config.SpecializationValues;
 import com.flameforge.albionmastery.weapon.compat.ArsNouveauSupport;
-import com.flameforge.albionmastery.weapon.compat.SweetMagicSupport;
 import net.minecraft.world.entity.LivingEntity;
 
 /**
@@ -92,7 +91,12 @@ public final class DamageAttribution {
      * 同一 tick 里的箭、子弹、挥砍都会被错认成法术。
      */
     private static boolean isArsDamage(ServerPlayer player, DamageSource source) {
-        return arsCaster == player && WeaponResolver.isArsLoaded() && ArsNouveauSupport.isSpellDamage(source);
+        if (arsCaster != player || !WeaponResolver.isArsLoaded()) {
+            return false;
+        }
+        boolean spell = false;
+        spell = ArsNouveauSupport.isSpellDamage(source);
+        return spell;
     }
 
     /**
@@ -110,12 +114,6 @@ public final class DamageAttribution {
             ResolvedWeapon gun = IronsArtificeSupport.fromBullet(source.getDirectEntity());
             if (gun != null) {
                 return gun;
-            }
-        }
-        if (WeaponResolver.isSweetMagicLoaded() && SweetMagicSupport.isMagicDamage(source)) {
-            ResolvedWeapon magic = SweetMagicSupport.weaponFor(player, source);
-            if (magic != null) {
-                return magic;
             }
         }
         if (WeaponResolver.isIronsLoaded()) {

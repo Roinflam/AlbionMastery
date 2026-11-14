@@ -33,9 +33,9 @@ public abstract class GunDrawTimeMixin {
      * @return 缩放后的掏枪时长
      */
     @ModifyExpressionValue(
-            method = "lambda$getDrawCoolDown$0",
+            method = "lambda$getDrawCoolDown$0(Lcom/tacz/guns/resource/index/CommonGunIndex;)Ljava/lang/Long;",
             at = @At(value = "INVOKE", target = "Lcom/tacz/guns/resource/pojo/data/gun/GunData;getDrawTime()F"),
-            require = 0
+            require = 0, expect = 1
     )
     private float albionmastery$drawTime(float drawTime) {
         double factor = SpecializationEffects.forStack(this.shooter, this.shooter.getMainHandItem()).drawTime();

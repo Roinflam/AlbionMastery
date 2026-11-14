@@ -6,12 +6,12 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.RangedAttribute;
-import net.minecraftforge.event.entity.EntityAttributeModificationEvent;
-import net.minecraftforge.eventbus.api.IEventBus;
-import net.minecraftforge.registries.DeferredRegister;
-import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.registries.RegistryObject;
+import net.neoforged.neoforge.event.entity.EntityAttributeModificationEvent;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.neoforge.registries.DeferredRegister;
+import net.neoforged.neoforge.registries.DeferredHolder;
 
+import net.minecraft.core.registries.Registries;
 /**
  * 「这个玩家的动作该放多快」——做成几个会自动同步的玩家属性。
  *
@@ -31,22 +31,22 @@ public final class SpecVisualAttributes {
 
     /** 属性注册表。 */
     private static final DeferredRegister<Attribute> REGISTRY =
-            DeferredRegister.create(ForgeRegistries.ATTRIBUTES, AlbionMastery.MOD_ID);
+            DeferredRegister.create(Registries.ATTRIBUTE, AlbionMastery.MOD_ID);
 
     /** 拉弓 / 上弦的倍速（弓弩）。 */
-    public static final RegistryObject<Attribute> DRAW_SPEED =
+    public static final DeferredHolder<Attribute, Attribute> DRAW_SPEED =
             REGISTRY.register("visual_draw_speed", () -> speed("albionmastery.visual_draw_speed"));
 
     /** 近战出手的倍速（近战附属）。 */
-    public static final RegistryObject<Attribute> MELEE_SPEED =
+    public static final DeferredHolder<Attribute, Attribute> MELEE_SPEED =
             REGISTRY.register("visual_melee_speed", () -> speed("albionmastery.visual_melee_speed"));
 
     /** 换弹的倍速（枪械）。 */
-    public static final RegistryObject<Attribute> RELOAD_SPEED =
+    public static final DeferredHolder<Attribute, Attribute> RELOAD_SPEED =
             REGISTRY.register("visual_reload_speed", () -> speed("albionmastery.visual_reload_speed"));
 
     /** 施法前摇的倍速（铁魔法）。这条是开始施法的那一刻按当前法术算的，不看主手。 */
-    public static final RegistryObject<Attribute> CAST_SPEED =
+    public static final DeferredHolder<Attribute, Attribute> CAST_SPEED =
             REGISTRY.register("visual_cast_speed", () -> speed("albionmastery.visual_cast_speed"));
 
     private SpecVisualAttributes() {
@@ -69,10 +69,10 @@ public final class SpecVisualAttributes {
      * @param event 属性补充事件
      */
     public static void onAttributeModification(EntityAttributeModificationEvent event) {
-        event.add(EntityType.PLAYER, DRAW_SPEED.get());
-        event.add(EntityType.PLAYER, MELEE_SPEED.get());
-        event.add(EntityType.PLAYER, RELOAD_SPEED.get());
-        event.add(EntityType.PLAYER, CAST_SPEED.get());
+        event.add(EntityType.PLAYER, DRAW_SPEED);
+        event.add(EntityType.PLAYER, MELEE_SPEED);
+        event.add(EntityType.PLAYER, RELOAD_SPEED);
+        event.add(EntityType.PLAYER, CAST_SPEED);
     }
 
     /**
@@ -82,11 +82,11 @@ public final class SpecVisualAttributes {
      * @param attribute 属性
      * @return 倍速；没有这个属性、或者值不合理时返回 1.0
      */
-    public static double of(LivingEntity entity, RegistryObject<Attribute> attribute) {
-        if (!attribute.isPresent()) {
+    public static double of(LivingEntity entity, DeferredHolder<Attribute, Attribute> attribute) {
+        if (!attribute.isBound()) {
             return 1.0D;
         }
-        AttributeInstance instance = entity.getAttribute(attribute.get());
+        AttributeInstance instance = entity.getAttribute(attribute);
         if (instance == null) {
             return 1.0D;
         }

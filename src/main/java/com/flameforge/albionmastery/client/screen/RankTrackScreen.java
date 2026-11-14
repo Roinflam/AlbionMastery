@@ -276,6 +276,11 @@ public class RankTrackScreen extends Screen {
     // ======================================================================
 
     @Override
+    public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        // 界面自己铺底，不要原版的模糊和菜单背景；super.render 开头会调这里，不覆盖的话背景会盖在内容上面
+    }
+
+    @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         long now = Util.getMillis();
         float dt = Mth.clamp((now - this.lastFrame) / 1000.0F, 0.0F, 0.1F);
@@ -846,7 +851,7 @@ public class RankTrackScreen extends Screen {
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double delta) {
         stopAnimation();
         // 滚轮往上看低段位，往下看高段位
         this.scrollTarget = clampScroll(this.scrollTarget - (float) delta * SPACING * 1.5F);

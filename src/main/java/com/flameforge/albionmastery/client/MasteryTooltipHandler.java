@@ -17,14 +17,14 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.TextColor;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.event.entity.player.ItemTooltipEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.neoforge.event.entity.player.ItemTooltipEvent;
+import net.neoforged.bus.api.SubscribeEvent;
 
 import java.util.ArrayList;
 import java.util.List;
 
+import net.neoforged.fml.common.EventBusSubscriber;
 /**
  * 物品提示文本处理器：给所有可专精的武器加同一块专精信息。
  *
@@ -49,7 +49,7 @@ import java.util.List;
  * 几种混在一起就是一股记事本味。这里用和专精界面同一套的金—褐色系，靠明度分主次。
  * 满级时主行的颜色特效由 {@link MasteryFlair} 负责。
  */
-@Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID, value = Dist.CLIENT)
+@EventBusSubscriber(modid = AlbionMastery.MOD_ID, value = Dist.CLIENT)
 public final class MasteryTooltipHandler {
 
     /** 同一行里几段信息之间的分隔符。 */

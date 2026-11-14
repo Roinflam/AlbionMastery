@@ -22,9 +22,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 在那里清空是安全的自愈点。
  *
  * <p>这个基类同时覆盖 TACZ 的枪和近战附属的刀（{@code LuaAnimationStateMachine} 没有覆写
- * {@code trigger}）。目标是 TACZ 的类，{@code remap = false}；注不上只是动画不变速。
+ * {@code trigger}）。注不上只是动画不变速。
  */
-@Mixin(value = AnimationStateMachine.class, remap = false)
+@Mixin(AnimationStateMachine.class)
 public abstract class AnimationTriggerMixin {
 
     /**
@@ -33,7 +33,7 @@ public abstract class AnimationTriggerMixin {
      * @param input 输入名
      * @param ci    回调
      */
-    @Inject(method = "trigger", at = @At("HEAD"), require = 0)
+    @Inject(method = "trigger(Ljava/lang/String;)V", at = @At("HEAD"), require = 0, expect = 1)
     private void albionmastery$pushInput(String input, CallbackInfo ci) {
         AnimationSpeeds.pushInput(input);
     }
@@ -44,7 +44,7 @@ public abstract class AnimationTriggerMixin {
      * @param input 输入名
      * @param ci    回调
      */
-    @Inject(method = "trigger", at = @At("RETURN"), require = 0)
+    @Inject(method = "trigger(Ljava/lang/String;)V", at = @At("RETURN"), require = 0, expect = 2)
     private void albionmastery$popInput(String input, CallbackInfo ci) {
         AnimationSpeeds.popInput();
     }
@@ -54,7 +54,7 @@ public abstract class AnimationTriggerMixin {
      *
      * @param ci 回调
      */
-    @Inject(method = "update", at = @At("HEAD"), require = 0)
+    @Inject(method = "update()V", at = @At("HEAD"), require = 0, expect = 1)
     private void albionmastery$clearInputs(CallbackInfo ci) {
         AnimationSpeeds.clearInputs();
     }

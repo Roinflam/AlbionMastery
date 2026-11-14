@@ -4,20 +4,24 @@ import com.flameforge.albionmastery.weapon.ResolvedWeapon;
 import com.flameforge.albionmastery.weapon.WeaponCatalog;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import mods.flammpfeil.slashblade.SlashBlade;
+import mods.flammpfeil.slashblade.capability.slashblade.BladeStateAccess;
+import mods.flammpfeil.slashblade.capability.slashblade.BladeStateData;
 import mods.flammpfeil.slashblade.item.ItemSlashBlade;
 import mods.flammpfeil.slashblade.registry.slashblade.SlashBladeDefinition;
 import net.minecraft.core.Registry;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
 import java.util.List;
 import mods.flammpfeil.slashblade.entity.EntityAbstractSummonedSword;
 import net.minecraft.world.entity.Entity;
-import net.minecraftforge.registries.ForgeRegistries;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
 
+import net.minecraft.core.registries.BuiltInRegistries;
 /**
  * 拔刀剑的双端解析支持。
  *
@@ -32,8 +36,19 @@ public final class SlashBladeSupport {
     /**
      * 取出物品堆对应的刀 ID。
      *
-     * <p>拔刀剑把「是哪一把刀」记在物品的 {@code BLADESTATE} Capability 里，
-     * {@code ItemSlashBlade.getBladeId} 已经封装好了取值与解析，不用自己去拆翻译键。
+     * <p>拔刀剑把「是哪一把刀」记在物品的 {@code slashblade:blade_state} 组件的翻译键里
+     * （{@code item.ns.path}），刀 ID 由 {@code ItemSlashBlade.parseBladeID} 解析成 {@code ns:path}。
+     * 这里不调 {@code ItemSlashBlade.getBladeId}：它经 {@code BladeStateAccess.of} 取状态，
+     * 刀上没有组件时会顺手写入一个默认组件。本方法在提示框、HUD、受伤判定里调得很频繁，
+     * 客户端还会翻背包，写物品会让本地物品堆和服务端对不上，所以改用只读的
+     * {@code BladeStateAccess.getData}，取值顺序和 {@code getBladeId} 相同。
+     *
+     * <p>组件缺失或翻译键为空时，再读 {@code minecraft:custom_data} 下的 {@code bladeState.translationKey}：
+     * 1.20.1 把刀状态存在物品标签 {@code bladeState} 里，升级存档时原版的物品组件化修复把认不得的标签
+     * 整体挪进 {@code custom_data}，拔刀剑新版不读它。读这里能让旧档里的刀认回原来的刀 ID，
+     * 专精经验记到同一个节点上。只读，不替拔刀剑迁移刀的状态。
+     *
+     * <p>两处都没有翻译键时退回物品 ID，和 {@code getBladeId} 一致。
      *
      * <p>各附属包会注册自己的物品类（例如 {@code srelic:srelic_slashblade}），
      * 但都继承自 {@code ItemSlashBlade}，所以用 instanceof 判定能一并覆盖。
@@ -43,15 +58,59 @@ public final class SlashBladeSupport {
      */
     @Nullable
     public static ResourceLocation bladeId(ItemStack stack) {
-        if (stack.isEmpty() || !(stack.getItem() instanceof ItemSlashBlade blade)) {
+        if (stack.isEmpty() || !(stack.getItem() instanceof ItemSlashBlade)) {
             return null;
         }
-        ResourceLocation id = blade.getBladeId(stack);
+        ResourceLocation id = parseKey(BladeStateAccess.getData(stack)
+                .map(BladeStateData::translationKey)
+                .orElse(""));
+        if (id == null) {
+            id = parseKey(legacyTranslationKey(stack));
+        }
+        if (id == null) {
+            id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        }
         if (id == null || id.getPath().isEmpty()) {
             return null;
         }
         return id;
     }
+
+    /**
+     * 把翻译键解析成刀 ID，空键或解析不出时返回 null。
+     *
+     * <p>{@code parseBladeID} 直接截掉前 5 个字符（{@code item.}），过短的键先挡掉，免得抛异常。
+     */
+    @Nullable
+    private static ResourceLocation parseKey(@Nullable String key) {
+        if (key == null || key.isBlank() || key.length() <= LANG_PREFIX_LENGTH) {
+            return null;
+        }
+        return ItemSlashBlade.parseBladeID(key);
+    }
+
+    /** 翻译键前缀 {@code item.} 的长度。 */
+    private static final int LANG_PREFIX_LENGTH = 5;
+
+    /**
+     * 旧档刀上留下的翻译键：{@code minecraft:custom_data} → {@code bladeState.translationKey}。
+     *
+     * @param stack 物品堆
+     * @return 翻译键；没有时为空串
+     */
+    private static String legacyTranslationKey(ItemStack stack) {
+        CustomData legacy = stack.get(DataComponents.CUSTOM_DATA);
+        if (legacy == null || !legacy.contains(LEGACY_STATE_KEY)) {
+            return "";
+        }
+        return legacy.copyTag().getCompound(LEGACY_STATE_KEY).getString(LEGACY_TRANSLATION_KEY);
+    }
+
+    /** 1.20.1 拔刀剑存刀状态的物品标签键。 */
+    private static final String LEGACY_STATE_KEY = "bladeState";
+
+    /** 刀状态里翻译键的字段名。 */
+    private static final String LEGACY_TRANSLATION_KEY = "translationKey";
 
     /**
      * 把物品堆解析成完整定位。
@@ -114,7 +173,7 @@ public final class SlashBladeSupport {
         if (direct instanceof EntityAbstractSummonedSword) {
             return true;
         }
-        ResourceLocation typeId = ForgeRegistries.ENTITY_TYPES.getKey(direct.getType());
+        ResourceLocation typeId = BuiltInRegistries.ENTITY_TYPE.getKey(direct.getType());
         return typeId != null && WeaponResolver.SLASHBLADE_MOD_ID.equals(typeId.getNamespace());
     }
 }

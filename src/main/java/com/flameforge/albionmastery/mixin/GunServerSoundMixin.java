@@ -31,7 +31,10 @@ public abstract class GunServerSoundMixin {
     /**
      * 广播枪声前按开枪者的特化缩放。
      */
-    @Inject(method = "sendSoundToNearby", at = @At("HEAD"), cancellable = true, require = 0)
+    @Inject(method = "sendSoundToNearby(Lnet/minecraft/world/entity/LivingEntity;I"
+            + "Lnet/minecraft/resources/ResourceLocation;Lnet/minecraft/resources/ResourceLocation;"
+            + "Ljava/lang/String;FF)V",
+            at = @At("HEAD"), cancellable = true, require = 0, expect = 1)
     private static void albionmastery$scaleGunVolume(LivingEntity source, int distance, ResourceLocation gunId,
                                                      ResourceLocation gunDisplayId, String soundName, float volume,
                                                      float pitch, CallbackInfo callback) {

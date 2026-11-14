@@ -28,7 +28,8 @@ public abstract class SpellCastTimeMixin {
      * @param caster       施法者
      * @param callbackInfo 携带原始施法时间（tick）的回调
      */
-    @Inject(method = "getEffectiveCastTime", at = @At("RETURN"), cancellable = true, require = 0)
+    @Inject(method = "getEffectiveCastTime(ILnet/minecraft/world/entity/LivingEntity;)I", at = @At("RETURN"),
+            cancellable = true, require = 0, expect = 1)
     private void albionmastery$scaleCastTime(int spellLevel, LivingEntity caster,
                                              CallbackInfoReturnable<Integer> callbackInfo) {
         // 持续引导的法术（光束、吐息），这个值是「能引导多久」而不是「要读多久」：

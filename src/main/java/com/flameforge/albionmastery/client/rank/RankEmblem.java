@@ -7,8 +7,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.Tesselator;
-import com.mojang.blaze3d.vertex.VertexFormat;
+import com.flameforge.albionmastery.client.screen.RenderUtil;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -20,6 +19,7 @@ import org.joml.Matrix4f;
 
 import java.util.Arrays;
 
+import com.flameforge.albionmastery.AMIds;
 /**
  * 段位徽章。
  *
@@ -73,7 +73,7 @@ public final class RankEmblem {
 
     static {
         for (int rank = 0; rank <= LAST_TEXTURED_RANK; rank++) {
-            TEXTURES[rank] = new ResourceLocation(AlbionMastery.MOD_ID, "textures/gui/rank/" + rank + ".png");
+            TEXTURES[rank] = AMIds.of("textures/gui/rank/" + rank + ".png");
         }
     }
 
@@ -199,9 +199,8 @@ public final class RankEmblem {
             }
             return;
         }
-        BufferBuilder buffer = Tesselator.getInstance().getBuilder();
-        if (buffer.building()) {
-            // 调用方自己还开着一批顶点没提交：这时再 begin 会直接抛异常，宁可这一帧不画
+        if (RenderUtil.isBatchOpen()) {
+            // 调用方自己还开着一批顶点没提交：这时再开一批会直接抛异常，宁可这一帧不画
             return;
         }
         RenderSystem.enableBlend();
@@ -209,15 +208,14 @@ public final class RankEmblem {
         RenderSystem.disableCull();
         RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-        SINK.buffer = buffer;
+        SINK.buffer = RenderUtil.openBatch(DefaultVertexFormat.POSITION_COLOR);
         SINK.matrix = guiGraphics.pose().last().pose();
         try {
             PAINTER.paint(SINK, tierOf(rank), metalOf(rank), cx, cy, size, alpha, timeSeconds, glossPhase, flash);
         } finally {
             SINK.buffer = null;
             SINK.matrix = null;
-            Tesselator.getInstance().end();
+            RenderUtil.submitBatch();
             RenderSystem.enableCull();
             RenderSystem.defaultBlendFunc();
             RenderSystem.disableBlend();
@@ -362,9 +360,7 @@ public final class RankEmblem {
 
         @Override
         public void vertex(float x, float y, int argb) {
-            this.buffer.vertex(this.matrix, x, y, 0.0F)
-                    .color((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF, (argb >>> 24) & 0xFF)
-                    .endVertex();
+            this.buffer.addVertex(this.matrix, x, y, 0.0F).setColor(argb);
         }
     }
 }

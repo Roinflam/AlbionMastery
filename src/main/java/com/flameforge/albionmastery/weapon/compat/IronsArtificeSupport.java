@@ -10,25 +10,24 @@ import io.redspace.irons_artifice.gun.ArmPoseKind;
 import io.redspace.irons_artifice.gun.ShotProfile;
 import io.redspace.irons_artifice.item.GunItem;
 import io.redspace.irons_artifice.registry.ItemRegistry;
-import net.minecraft.resources.ResourceKey;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 铁枪（Iron's Arms 'n Artifice）的火器。
  *
  * <p>七把枪的物品类都是 {@link GunItem}，大类照铁枪自己的持枪姿势分：单手的算手枪，双手的算长枪。
  * 以后铁枪或者它的附属再加枪，只要是 {@code GunItem} 就自动归对类，不用手写归类表。
- * 武器键就是物品注册名，改装件装在枪的 NBT 里，换改装件不会让经验分家。
+ * 武器键就是物品注册名，改装件存在枪的数据组件里，换改装件不会让经验分家。
  *
  * <p>命中能追到是哪把枪：子弹实体身上带着开火那一刻的整份组装结果，里面的物品就是那把枪。
  * 改装件的爆炸、闪电、魂火伤害，直接来源也都是那颗子弹。
@@ -80,7 +79,7 @@ public final class IronsArtificeSupport {
         if (!(stack.getItem() instanceof GunItem gun)) {
             return null;
         }
-        ResourceLocation id = ForgeRegistries.ITEMS.getKey(gun);
+        ResourceLocation id = BuiltInRegistries.ITEM.getKey(gun);
         return id == null ? null : ResolvedWeapon.of(WeaponKeys.PROVIDER_IRONS_ARTIFICE, id, typeOf(gun));
     }
 
@@ -90,25 +89,26 @@ public final class IronsArtificeSupport {
      * @param out 输出
      */
     public static void catalog(List<WeaponCatalog.Entry> out) {
-        for (Map.Entry<ResourceKey<Item>, Item> entry : ForgeRegistries.ITEMS.getEntries()) {
-            if (!(entry.getValue() instanceof GunItem gun)) {
+        // 按注册编号顺序遍历，清单顺序每次启动都一样，也和 1.20.1 的插入顺序一致
+        for (Holder.Reference<Item> holder : (Iterable<Holder.Reference<Item>>) BuiltInRegistries.ITEM.holders()::iterator) {
+            if (!(holder.value() instanceof GunItem gun)) {
                 continue;
             }
             ResolvedWeapon weapon = ResolvedWeapon.of(WeaponKeys.PROVIDER_IRONS_ARTIFICE,
-                    entry.getKey().location(), typeOf(gun));
+                    holder.key().location(), typeOf(gun));
             out.add(new WeaponCatalog.Entry(weapon, () -> gunItems(gun)));
         }
     }
 
     /**
-     * 一把枪外加两组子弹。枪刚造出来时弹匣没写进 NBT，铁枪按满弹匣算，拿到就能开火。
+     * 一把枪外加两组子弹。铁枪给枪挂了默认的满弹匣组件，新造出来的枪拿到就能开火。
      */
     private static List<ItemStack> gunItems(GunItem gun) {
         List<ItemStack> items = new ArrayList<>();
         items.add(new ItemStack(gun));
         Item bullet = ItemRegistry.BULLET.get();
         for (int i = 0; i < AMMO_STACKS; i++) {
-            items.add(new ItemStack(bullet, bullet.getMaxStackSize()));
+            items.add(new ItemStack(bullet, bullet.getDefaultMaxStackSize()));
         }
         return items;
     }

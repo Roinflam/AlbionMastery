@@ -6,7 +6,7 @@ import com.flameforge.albionmastery.weapon.compat.SlashBladeSupport;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
 import mods.flammpfeil.slashblade.SlashBlade;
-import mods.flammpfeil.slashblade.item.ItemSlashBlade;
+import mods.flammpfeil.slashblade.capability.slashblade.BladeStateAccess;
 import mods.flammpfeil.slashblade.registry.slashblade.SlashBladeDefinition;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -16,7 +16,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraftforge.fml.ModList;
+import net.neoforged.fml.ModList;
 
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import com.flameforge.albionmastery.AMIds;
 /**
  * 拔刀剑来源。
  *
@@ -36,7 +37,7 @@ import java.util.Set;
  * 而不是分类。命名空间是唯一 100% 覆盖且对玩家有意义的维度。
  *
  * <p><b>形态刀</b>：有的附属包让一把刀切形态（绮梦真我的初汐切成「拂晓故世」之类），做法是直接改刀的
- * 翻译键，于是 {@code getBladeId} 解析出来的是一个定义表里没有的 ID。专精照这个 ID 记（双端一致），
+ * 翻译键，于是 {@link SlashBladeSupport#bladeId} 解析出来的是一个定义表里没有的 ID。专精照这个 ID 记（双端一致），
  * 可树上没有它的节点：手拿形态刀按 B 找不到节点，等级也没处看。所以除了定义表，
  * 玩家身上带着的刀、专精记录里有的刀也一起列进来。
  *
@@ -224,14 +225,15 @@ public final class SlashBladeProvider implements IWeaponProvider {
     private static ItemStack borrowIcon(Registry<SlashBladeDefinition> registry, ResourceLocation id) {
         String path = id.getPath();
         for (int cut = path.lastIndexOf('_'); cut > 0; cut = path.lastIndexOf('_', cut - 1)) {
-            SlashBladeDefinition base = registry.get(new ResourceLocation(id.getNamespace(), path.substring(0, cut)));
+            SlashBladeDefinition base = registry.get(AMIds.of(id.getNamespace(), path.substring(0, cut)));
             if (base == null) {
                 continue;
             }
             ItemStack icon = createIcon(base);
             if (!icon.isEmpty()) {
                 String langKey = translationKeyOf(id);
-                icon.getCapability(ItemSlashBlade.BLADESTATE).ifPresent(state -> state.setTranslationKey(langKey));
+                // 图标是 getBlade() 新造的，写回它的 blade_state 组件不影响任何实际物品
+                BladeStateAccess.of(icon).ifPresent(state -> state.setTranslationKey(langKey));
             }
             return icon;
         }

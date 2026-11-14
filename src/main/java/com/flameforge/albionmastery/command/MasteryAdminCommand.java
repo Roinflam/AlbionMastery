@@ -43,7 +43,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.common.ForgeConfigSpec;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -75,7 +75,7 @@ public final class MasteryAdminCommand {
 
     /** 配置项路径 -&gt; 配置值，第一次用时从配置规格里走一遍。 */
     @Nullable
-    private static Map<String, ForgeConfigSpec.ConfigValue<?>> configPaths;
+    private static Map<String, ModConfigSpec.ConfigValue<?>> configPaths;
 
     private MasteryAdminCommand() {
     }
@@ -106,7 +106,7 @@ public final class MasteryAdminCommand {
             {"/albionmastery wipe <玩家>", "command.albionmastery.help_wipe"},
             {"/albionmastery weapon give <玩家> <来源> <武器ID>", "command.albionmastery.help_weapon_give"},
             {"/albionmastery weapon count", "command.albionmastery.help_weapon_count"},
-            {"/albionmastery spec set <玩家> <来源> <类型> <栏位> <特化>", "command.albionmastery.help_spec_set"},
+            {"/albionmastery spec set <玩家> <来源> <类型> <槽位> <特化>", "command.albionmastery.help_spec_set"},
             {"/albionmastery spec clear <玩家>", "command.albionmastery.help_spec_clear"},
             {"/albionmastery spec cooldown <玩家>", "command.albionmastery.help_spec_cooldown"},
             {"/albionmastery config spec <来源> <特化>", "command.albionmastery.help_config_spec"},
@@ -638,30 +638,30 @@ public final class MasteryAdminCommand {
     /**
      * 走一遍 COMMON 配置规格，列出全部配置项。规格在模组构造时就定死了，缓存一次就够。
      */
-    private static synchronized Map<String, ForgeConfigSpec.ConfigValue<?>> configPaths() {
+    private static synchronized Map<String, ModConfigSpec.ConfigValue<?>> configPaths() {
         if (configPaths == null) {
-            Map<String, ForgeConfigSpec.ConfigValue<?>> out = new TreeMap<>();
+            Map<String, ModConfigSpec.ConfigValue<?>> out = new TreeMap<>();
             walk(MasteryConfig.COMMON_SPEC.getValues(), out);
             configPaths = Collections.unmodifiableMap(out);
         }
         return configPaths;
     }
 
-    private static void walk(UnmodifiableConfig config, Map<String, ForgeConfigSpec.ConfigValue<?>> out) {
+    private static void walk(UnmodifiableConfig config, Map<String, ModConfigSpec.ConfigValue<?>> out) {
         for (UnmodifiableConfig.Entry entry : config.entrySet()) {
             Object value = entry.getValue();
             if (value instanceof UnmodifiableConfig child) {
                 walk(child, out);
-            } else if (value instanceof ForgeConfigSpec.ConfigValue<?> configValue) {
+            } else if (value instanceof ModConfigSpec.ConfigValue<?> configValue) {
                 out.put(String.join(".", configValue.getPath()), configValue);
             }
         }
     }
 
     @Nullable
-    private static ForgeConfigSpec.ConfigValue<?> configValue(CommandContext<CommandSourceStack> context) {
+    private static ModConfigSpec.ConfigValue<?> configValue(CommandContext<CommandSourceStack> context) {
         String path = StringArgumentType.getString(context, "path");
-        ForgeConfigSpec.ConfigValue<?> value = configPaths().get(path);
+        ModConfigSpec.ConfigValue<?> value = configPaths().get(path);
         if (value == null) {
             context.getSource().sendFailure(Component.translatable("command.albionmastery.config_bad_path", path));
         }
@@ -669,18 +669,18 @@ public final class MasteryAdminCommand {
     }
 
     @Nullable
-    private static ForgeConfigSpec.ValueSpec valueSpec(ForgeConfigSpec.ConfigValue<?> value) {
+    private static ModConfigSpec.ValueSpec valueSpec(ModConfigSpec.ConfigValue<?> value) {
         Object spec = MasteryConfig.COMMON_SPEC.getSpec().get(value.getPath());
-        return spec instanceof ForgeConfigSpec.ValueSpec valueSpec ? valueSpec : null;
+        return spec instanceof ModConfigSpec.ValueSpec valueSpec ? valueSpec : null;
     }
 
     private static int configGet(CommandContext<CommandSourceStack> context) {
-        ForgeConfigSpec.ConfigValue<?> value = configValue(context);
+        ModConfigSpec.ConfigValue<?> value = configValue(context);
         if (value == null) {
             return 0;
         }
         String path = String.join(".", value.getPath());
-        ForgeConfigSpec.ValueSpec spec = valueSpec(value);
+        ModConfigSpec.ValueSpec spec = valueSpec(value);
         Object range = spec == null ? null : spec.getRange();
         Component line = range == null
                 ? Component.translatable("command.albionmastery.config_value_norange", path,
@@ -699,7 +699,7 @@ public final class MasteryAdminCommand {
     }
 
     private static int configSet(CommandContext<CommandSourceStack> context) {
-        ForgeConfigSpec.ConfigValue<?> value = configValue(context);
+        ModConfigSpec.ConfigValue<?> value = configValue(context);
         if (value == null) {
             return 0;
         }
@@ -708,7 +708,7 @@ public final class MasteryAdminCommand {
 
     @SuppressWarnings("unchecked")
     private static int configReset(CommandContext<CommandSourceStack> context) {
-        ForgeConfigSpec.ConfigValue<?> value = configValue(context);
+        ModConfigSpec.ConfigValue<?> value = configValue(context);
         if (value == null) {
             return 0;
         }
@@ -716,7 +716,7 @@ public final class MasteryAdminCommand {
         String path = String.join(".", value.getPath());
         Object before = value.get();
         Object fallback = value.getDefault();
-        ((ForgeConfigSpec.ConfigValue<Object>) value).set(fallback);
+        ((ModConfigSpec.ConfigValue<Object>) value).set(fallback);
         configChanged(context.getSource().getServer());
         context.getSource().sendSuccess(() -> Component.translatable("command.albionmastery.config_set",
                 path, String.valueOf(before), String.valueOf(fallback)).withStyle(ChatFormatting.GOLD), true);
@@ -727,7 +727,7 @@ public final class MasteryAdminCommand {
      * 按这一项的类型把文字解析成值，过一遍规格里的范围校验，写回配置文件并立刻生效。
      */
     @SuppressWarnings("unchecked")
-    private static int applyConfig(CommandContext<CommandSourceStack> context, ForgeConfigSpec.ConfigValue<?> value,
+    private static int applyConfig(CommandContext<CommandSourceStack> context, ModConfigSpec.ConfigValue<?> value,
                                    String raw) {
         String path = String.join(".", value.getPath());
         if (value.getDefault() instanceof List<?>) {
@@ -742,7 +742,7 @@ public final class MasteryAdminCommand {
                     path, raw, exception.getMessage() == null ? "" : exception.getMessage()));
             return 0;
         }
-        ForgeConfigSpec.ValueSpec spec = valueSpec(value);
+        ModConfigSpec.ValueSpec spec = valueSpec(value);
         if (spec != null && !spec.test(parsed)) {
             Object range = spec.getRange();
             context.getSource().sendFailure(Component.translatable("command.albionmastery.config_bad_value",
@@ -750,7 +750,7 @@ public final class MasteryAdminCommand {
             return 0;
         }
         Object before = value.get();
-        ((ForgeConfigSpec.ConfigValue<Object>) value).set(parsed);
+        ((ModConfigSpec.ConfigValue<Object>) value).set(parsed);
         configChanged(context.getSource().getServer());
         context.getSource().sendSuccess(() -> Component.translatable("command.albionmastery.config_set",
                 path, String.valueOf(before), String.valueOf(parsed)).withStyle(ChatFormatting.GOLD), true);
@@ -796,17 +796,14 @@ public final class MasteryAdminCommand {
     }
 
     /**
-     * 改完配置：存文件、刷新快照、清掉武器清单缓存（近战拆分口径可能变了），再给所有在线玩家全量同步。
+     * 改完配置：只存文件。
      *
-     * <p>存文件之后 Forge 的文件监视还会再触发一次重载事件，那边会顺带重算排行榜，这里就不重复做了。
+     * <p>{@code save()} 会在当前线程同步发出配置重载事件，刷新快照、清武器清单缓存、全员全量同步、
+     * 重算排行榜都由重载处理统一做（经 {@code server.execute} 回主线程）；这里再做一遍只会多一轮全量同步。
+     * 之后文件监视多半还会再发一次重载，结果一样。
      */
     private static void configChanged(MinecraftServer server) {
         MasteryConfig.COMMON_SPEC.save();
-        MasteryConfig.refreshServerSnapshot();
-        WeaponCatalog.invalidate();
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            CommonEventHandler.syncFull(player);
-        }
     }
 
     /**
@@ -831,11 +828,11 @@ public final class MasteryAdminCommand {
         context.getSource().sendSuccess(() -> Component.translatable("command.albionmastery.config_spec_header",
                 Component.translatable(spec.nameKey()), source, specId).withStyle(ChatFormatting.GOLD), false);
         int shown = 0;
-        for (Map.Entry<String, ForgeConfigSpec.DoubleValue> dim : new TreeMap<>(entry.values()).entrySet()) {
+        for (Map.Entry<String, ModConfigSpec.DoubleValue> dim : new TreeMap<>(entry.values()).entrySet()) {
             if (only != null && !only.equals(dim.getKey())) {
                 continue;
             }
-            ForgeConfigSpec.DoubleValue value = dim.getValue();
+            ModConfigSpec.DoubleValue value = dim.getValue();
             Component line = Component.translatable("command.albionmastery.config_spec_line", dim.getKey(),
                     formatNumber(value.get()), formatNumber(value.getDefault()),
                     Component.translatableWithFallback("gui.albionmastery.spec_stat." + dim.getKey(), dim.getKey()));
@@ -857,7 +854,7 @@ public final class MasteryAdminCommand {
         Specialization spec = findSpec(source, specId);
         MasteryConfig.SpecEntry entry = spec == null ? null : MasteryConfig.specEntry(spec);
         String dim = StringArgumentType.getString(context, "dim");
-        ForgeConfigSpec.DoubleValue value = entry == null ? null : entry.values().get(dim);
+        ModConfigSpec.DoubleValue value = entry == null ? null : entry.values().get(dim);
         if (value == null) {
             context.getSource().sendFailure(Component.translatable("command.albionmastery.config_bad_path",
                     source + "_" + specId + "." + dim));
@@ -962,7 +959,7 @@ public final class MasteryAdminCommand {
 
     private static CompletableFuture<Suggestions> suggestConfigValue(CommandContext<CommandSourceStack> context,
                                                                      SuggestionsBuilder builder) {
-        ForgeConfigSpec.ConfigValue<?> value = configPaths().get(StringArgumentType.getString(context, "path"));
+        ModConfigSpec.ConfigValue<?> value = configPaths().get(StringArgumentType.getString(context, "path"));
         if (value == null) {
             return builder.buildFuture();
         }

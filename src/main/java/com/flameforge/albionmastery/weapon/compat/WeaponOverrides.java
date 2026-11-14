@@ -166,7 +166,7 @@ public final class WeaponOverrides {
                 continue;
             }
             if (!VALID.contains(type)) {
-                AlbionMastery.LOGGER.warn("[albionmastery] extraWeapons 里的大类不认识（只能是 {}），已跳过：{}",
+                AlbionMastery.LOGGER.warn("[albionmastery] extraWeapons 里的类型无法识别（只能是 {}），已跳过：{}",
                         VALID, entry);
                 continue;
             }

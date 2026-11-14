@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.At;
 /**
  * 客户端点射的冷却和连发间隔按射速特化缩放，和服务端一致，不然客户端会按原速排程开火、被服务端拒掉。
  */
-@Mixin(value = LocalPlayerShoot.class, remap = false)
+@Mixin(LocalPlayerShoot.class)
 public abstract class LocalBurstRateMixin {
 
     /**
@@ -20,10 +20,12 @@ public abstract class LocalBurstRateMixin {
      * @return 缩放后的间隔
      */
     @ModifyExpressionValue(
-            method = "getCoolDown",
+            method = "getCoolDown(Lcom/tacz/guns/api/item/IGun;Lnet/minecraft/world/item/ItemStack;"
+                    + "Lcom/tacz/guns/resource/pojo/data/gun/GunData;)J",
             at = @At(value = "INVOKE",
                     target = "Lcom/tacz/guns/resource/pojo/data/gun/BurstData;getMinInterval()D"),
-            require = 0
+            require = 0,
+            expect = 1
     )
     private double albionmastery$burstCoolDown(double interval) {
         return GunRateScaling.scaleSeconds(Minecraft.getInstance().player, interval);
@@ -36,10 +38,12 @@ public abstract class LocalBurstRateMixin {
      * @return 缩放后的间隔
      */
     @ModifyExpressionValue(
-            method = "doShoot",
+            method = "doShoot(Lcom/tacz/guns/client/resource/GunDisplayInstance;Lcom/tacz/guns/api/item/IGun;"
+                    + "Lnet/minecraft/world/item/ItemStack;Lcom/tacz/guns/resource/pojo/data/gun/GunData;JF)V",
             at = @At(value = "INVOKE",
                     target = "Lcom/tacz/guns/resource/pojo/data/gun/GunData;getBurstShootInterval()J"),
-            require = 0
+            require = 0,
+            expect = 1
     )
     private long albionmastery$burstShootInterval(long interval) {
         return GunRateScaling.scaleMillis(Minecraft.getInstance().player, interval);

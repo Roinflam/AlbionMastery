@@ -1,15 +1,14 @@
 package com.flameforge.albionmastery.network;
 
+import com.flameforge.albionmastery.AMIds;
 import com.flameforge.albionmastery.client.ClientMasteryCache;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.network.NetworkEvent;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.function.Supplier;
 
 /**
  * 增量同步包（S2C）。
@@ -17,7 +16,11 @@ import java.util.function.Supplier;
  * <p>战斗中经验变化非常频繁（霰弹枪一次开火就是若干发弹丸），所以服务端不会每次变化都发包，
  * 而是把变动的键收集起来，每隔若干 tick 合并成一个增量包发出。
  */
-public class S2CUpdateMasteryPacket {
+public class S2CUpdateMasteryPacket implements CustomPacketPayload {
+
+    /** 负载 ID。 */
+    public static final CustomPacketPayload.Type<S2CUpdateMasteryPacket> TYPE =
+            new CustomPacketPayload.Type<>(AMIds.of("update_mastery"));
 
     /** 单个包允许携带的最大条目数。 */
     private static final int MAX_ENTRIES = 4096;
@@ -79,15 +82,13 @@ public class S2CUpdateMasteryPacket {
     }
 
     /**
-     * 主线程处理：写入客户端缓存。
+     * 主线程处理：写入客户端缓存。只会在客户端被调用。
      *
+     * @param packet  网络包
      * @param context 网络上下文
      */
-    public void handle(Supplier<NetworkEvent.Context> context) {
-        NetworkEvent.Context ctx = context.get();
-        ctx.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                () -> () -> ClientMasteryCache.acceptDelta(this.weapons, this.types, this.overalls)));
-        ctx.setPacketHandled(true);
+    public static void handle(S2CUpdateMasteryPacket packet, IPayloadContext context) {
+        ClientMasteryCache.acceptDelta(packet.weapons, packet.types, packet.overalls);
     }
 
     private static void writeMap(FriendlyByteBuf buf, Map<String, Long> map) {
@@ -118,5 +119,10 @@ public class S2CUpdateMasteryPacket {
             throw new IllegalArgumentException("AlbionMastery: 增量同步包条目数非法 " + size);
         }
         return size;
+    }
+
+    @Override
+    public CustomPacketPayload.Type<S2CUpdateMasteryPacket> type() {
+        return TYPE;
     }
 }

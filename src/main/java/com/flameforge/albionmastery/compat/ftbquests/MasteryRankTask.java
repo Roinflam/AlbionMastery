@@ -20,18 +20,20 @@ import dev.ftb.mods.ftbquests.quest.task.Task;
 import dev.ftb.mods.ftbquests.quest.task.TaskType;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 import java.util.Locale;
 
+import com.flameforge.albionmastery.AMIds;
 /**
  * FTB 任务的「专精段位」任务：玩家的段位或段位经验满足比较条件即完成。
  *
@@ -51,7 +53,7 @@ import java.util.Locale;
 public final class MasteryRankTask extends Task {
 
     /** 任务类型 ID，也就是任务文件里 {@code type} 字段的值。 */
-    public static final ResourceLocation TYPE_ID = new ResourceLocation(AlbionMastery.MOD_ID, "mastery_rank");
+    public static final ResourceLocation TYPE_ID = AMIds.of("mastery_rank");
 
     /** 任务类型图标上画的段位：黄金苍鹰，金色徽章在添加任务的列表里最好认。 */
     static final int TYPE_ICON_RANK = 18;
@@ -247,16 +249,16 @@ public final class MasteryRankTask extends Task {
     }
 
     @Override
-    public void writeData(CompoundTag nbt) {
-        super.writeData(nbt);
+    public void writeData(CompoundTag nbt, HolderLookup.Provider provider) {
+        super.writeData(nbt, provider);
         nbt.putString("metric", metric.id());
         nbt.putString("comparison", comparison.id());
         nbt.putLong("value", value);
     }
 
     @Override
-    public void readData(CompoundTag nbt) {
-        super.readData(nbt);
+    public void readData(CompoundTag nbt, HolderLookup.Provider provider) {
+        super.readData(nbt, provider);
         // 认不出的 ID（手写写错、以后删掉的选项）退回默认值
         metric = METRICS.get(nbt.getString("metric"));
         comparison = COMPARISONS.get(nbt.getString("comparison"));
@@ -264,7 +266,7 @@ public final class MasteryRankTask extends Task {
     }
 
     @Override
-    public void writeNetData(FriendlyByteBuf buffer) {
+    public void writeNetData(RegistryFriendlyByteBuf buffer) {
         super.writeNetData(buffer);
         // 枚举按 ID 字符串传，不按下标：两端版本对不上时认不出的值退回默认，不会把后面的字段读串
         buffer.writeUtf(metric.id());
@@ -273,7 +275,7 @@ public final class MasteryRankTask extends Task {
     }
 
     @Override
-    public void readNetData(FriendlyByteBuf buffer) {
+    public void readNetData(RegistryFriendlyByteBuf buffer) {
         super.readNetData(buffer);
         metric = METRICS.get(buffer.readUtf());
         comparison = COMPARISONS.get(buffer.readUtf());

@@ -1,5 +1,6 @@
 package com.flameforge.albionmastery.network;
 
+import com.flameforge.albionmastery.AMIds;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.event.CommonEventHandler;
 import com.flameforge.albionmastery.mastery.MasteryData;
@@ -15,17 +16,21 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
-import net.minecraftforge.network.NetworkEvent;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import javax.annotation.Nullable;
-import java.util.function.Supplier;
 
 /**
  * 客户端请求升级特化、突破、重置点数。
  *
  * <p>和选特化一样，客户端只说「想做什么」，点数够不够、冷却到没到全在服务端重新算。
  */
-public class C2SSpecProgressPacket {
+public class C2SSpecProgressPacket implements CustomPacketPayload {
+
+    /** 负载 ID。 */
+    public static final CustomPacketPayload.Type<C2SSpecProgressPacket> TYPE =
+            new CustomPacketPayload.Type<>(AMIds.of("spec_progress"));
 
     /** 要做的事。 */
     public enum Action {
@@ -64,38 +69,33 @@ public class C2SSpecProgressPacket {
         return new C2SSpecProgressPacket(buf.readEnum(Action.class), buf.readUtf(256), buf.readUtf(128));
     }
 
-    public void handle(Supplier<NetworkEvent.Context> context) {
-        NetworkEvent.Context ctx = context.get();
-        ctx.enqueueWork(() -> {
-            ServerPlayer player = ctx.getSender();
-            if (player == null) {
-                return;
+    public static void handle(C2SSpecProgressPacket packet, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        Specialization spec = Specialization.byKey(packet.specKey);
+        SpecializationManager.Result result = switch (packet.action) {
+            case UPGRADE -> spec == null ? SpecializationManager.Result.INVALID
+                    : SpecializationManager.upgrade(player, spec);
+            case BREAKTHROUGH -> spec == null ? SpecializationManager.Result.INVALID
+                    : SpecializationManager.breakthrough(player, packet.key, spec);
+            case RESPEC_SOURCE -> SpecializationManager.respecSource(player, packet.key);
+            case RESPEC_TYPE -> SpecializationManager.respecType(player, packet.key);
+        };
+        Component feedback = packet.describe(player, spec, result);
+        if (feedback != null) {
+            player.displayClientMessage(feedback, true);
+        }
+        switch (result) {
+            case OK -> player.playNotifySound(SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 0.6F,
+                    packet.action == Action.BREAKTHROUGH ? 1.8F : 1.4F);
+            case INVALID, UNCHANGED -> {
             }
-            Specialization spec = Specialization.byKey(this.specKey);
-            SpecializationManager.Result result = switch (this.action) {
-                case UPGRADE -> spec == null ? SpecializationManager.Result.INVALID
-                        : SpecializationManager.upgrade(player, spec);
-                case BREAKTHROUGH -> spec == null ? SpecializationManager.Result.INVALID
-                        : SpecializationManager.breakthrough(player, this.key, spec);
-                case RESPEC_SOURCE -> SpecializationManager.respecSource(player, this.key);
-                case RESPEC_TYPE -> SpecializationManager.respecType(player, this.key);
-            };
-            Component feedback = describe(player, spec, result);
-            if (feedback != null) {
-                player.displayClientMessage(feedback, true);
-            }
-            switch (result) {
-                case OK -> player.playNotifySound(SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 0.6F,
-                        this.action == Action.BREAKTHROUGH ? 1.8F : 1.4F);
-                case INVALID, UNCHANGED -> {
-                }
-                default -> player.playNotifySound(SoundEvents.VILLAGER_NO, SoundSource.PLAYERS, 0.7F, 1.0F);
-            }
-            if (result == SpecializationManager.Result.OK) {
-                CommonEventHandler.syncFull(player);
-            }
-        });
-        ctx.setPacketHandled(true);
+            default -> player.playNotifySound(SoundEvents.VILLAGER_NO, SoundSource.PLAYERS, 0.7F, 1.0F);
+        }
+        if (result == SpecializationManager.Result.OK) {
+            CommonEventHandler.syncFull(player);
+        }
     }
 
     @Nullable
@@ -135,5 +135,10 @@ public class C2SSpecProgressPacket {
             case DISABLED -> Component.translatable("msg.albionmastery.spec_disabled").withStyle(ChatFormatting.RED);
             default -> null;
         };
+    }
+
+    @Override
+    public CustomPacketPayload.Type<C2SSpecProgressPacket> type() {
+        return TYPE;
     }
 }

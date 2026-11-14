@@ -3,7 +3,7 @@ package com.flameforge.albionmastery.mixin;
 import com.flameforge.albionmastery.mastery.MasteryExperienceHook;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.ForgeEventFactory;
+import net.neoforged.neoforge.event.EventHooks;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * 抓取生物掉落经验的<b>最终值</b>。
  *
- * <p>补的是什么：{@code ForgeEventFactory.getExperienceDrop} 内部会触发
+ * <p>补的是什么：{@code EventHooks.getExperienceDrop} 内部会触发
  * {@code LivingExperienceDropEvent}，然后把事件里的结果返回出去。注入在它的返回处，
  * 意味着所有监听器（经验倍率、掠夺扩展、自定义怪物之类）都已经改完了，
  * 拿到的必然是真正会落地的那个数。
@@ -23,13 +23,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *
  * <p>这里只读不写，不会影响玩家实际能捡到的经验球。
  *
- * <p>{@code require = 0}：万一 Forge 以后改了这个方法的签名，注入失败也不会让游戏起不来，
- * 会自动退回到 {@code KillRewardHandler} 里那条 LOWEST 监听的兜底路径。
- *
- * <p>目标是 Forge 自己的类与方法，名称不参与 Minecraft 的 SRG 映射，所以 {@code remap = false}。
+ * <p>方法里两个 {@code return}（事件被取消时返回 0、否则返回事件里的数），一次调用只走其中一个，
+ * 所以命中数正好是 2。目标版本固定，注入失败要在开发时就报出来，不写 {@code require = 0}；
+ * 多打上会把一次击杀的经验发两遍，上限也卡在 2。
  */
-@Mixin(value = ForgeEventFactory.class, remap = false)
-public abstract class ForgeEventFactoryMixin {
+@Mixin(EventHooks.class)
+public abstract class EventHooksMixin {
 
     /**
      * 在返回处抓取最终掉落经验。
@@ -39,7 +38,8 @@ public abstract class ForgeEventFactoryMixin {
      * @param experience      原始经验值
      * @param callback        回调，携带最终返回值
      */
-    @Inject(method = "getExperienceDrop", at = @At("RETURN"), require = 0)
+    @Inject(method = "getExperienceDrop(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/entity/player/Player;I)I",
+            at = @At("RETURN"), expect = 2, allow = 2)
     private static void albionmastery$captureFinalExperience(LivingEntity entity, Player attackingPlayer,
                                                              int experience,
                                                              CallbackInfoReturnable<Integer> callback) {

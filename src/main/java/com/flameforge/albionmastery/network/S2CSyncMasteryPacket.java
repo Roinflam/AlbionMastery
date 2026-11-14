@@ -1,5 +1,6 @@
 package com.flameforge.albionmastery.network;
 
+import com.flameforge.albionmastery.AMIds;
 import com.flameforge.albionmastery.client.ClientMasteryCache;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.mastery.MasteryData;
@@ -8,13 +9,11 @@ import com.flameforge.albionmastery.mastery.spec.SpecPoints;
 import com.flameforge.albionmastery.mastery.spec.Specialization;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.network.NetworkEvent;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.function.Supplier;
 
 /**
  * 全量同步包（S2C）。
@@ -22,7 +21,11 @@ import java.util.function.Supplier;
  * <p>玩家登录、重生、切维度时下发，内容包括服务端生效中的数值配置快照，
  * 以及该玩家三层专精（总体 / 类型 / 单件武器）的全部经验。
  */
-public class S2CSyncMasteryPacket {
+public class S2CSyncMasteryPacket implements CustomPacketPayload {
+
+    /** 负载 ID。 */
+    public static final CustomPacketPayload.Type<S2CSyncMasteryPacket> TYPE =
+            new CustomPacketPayload.Type<>(AMIds.of("sync_mastery"));
 
     /** 单个包允许携带的最大条目数，防止异常数据撑爆客户端内存。 */
     private static final int MAX_ENTRIES = 20000;
@@ -195,17 +198,14 @@ public class S2CSyncMasteryPacket {
     }
 
     /**
-     * 主线程处理：写入客户端缓存。
+     * 主线程处理：写入客户端缓存。只登记成服→客，只会在客户端被调用，专用服务端不会加载客户端类。
      *
+     * @param packet  网络包
      * @param context 网络上下文
      */
-    public void handle(Supplier<NetworkEvent.Context> context) {
-        NetworkEvent.Context ctx = context.get();
-        ctx.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                () -> () -> ClientMasteryCache.acceptFullSync(
-                        this.snapshot, this.weapons, this.types, this.overalls,
-                        this.specializations, this.studyMultiplier, this.progress)));
-        ctx.setPacketHandled(true);
+    public static void handle(S2CSyncMasteryPacket packet, IPayloadContext context) {
+        ClientMasteryCache.acceptFullSync(packet.snapshot, packet.weapons, packet.types, packet.overalls,
+                packet.specializations, packet.studyMultiplier, packet.progress);
     }
 
     private static void writeMap(FriendlyByteBuf buf, Map<String, Long> map) {
@@ -311,5 +311,10 @@ public class S2CSyncMasteryPacket {
             }
             return new SpecProgress(levels, breakthroughs, respec);
         }
+    }
+
+    @Override
+    public CustomPacketPayload.Type<S2CSyncMasteryPacket> type() {
+        return TYPE;
     }
 }

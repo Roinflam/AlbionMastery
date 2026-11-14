@@ -19,7 +19,7 @@ import net.minecraft.world.item.ItemStack;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
-import net.minecraftforge.event.TickEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import net.minecraft.resources.ResourceLocation;
@@ -27,18 +27,18 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.event.entity.living.MobEffectEvent;
-import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.entity.living.MobEffectEvent;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
 
 import javax.annotation.Nullable;
 import io.redspace.ironsspellbooks.api.magic.MagicData;
-import net.minecraftforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import java.util.ArrayList;
 import java.util.List;
 import io.redspace.ironsspellbooks.damage.SpellDamageSource;
-import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import com.flameforge.albionmastery.event.damage.LivingHurtEvent;
 import com.flameforge.albionmastery.mastery.spec.SpecMoveSpeed;
 import io.redspace.ironsspellbooks.api.events.SpellPreCastEvent;
 
@@ -70,7 +70,7 @@ import io.redspace.ironsspellbooks.api.events.SpellPreCastEvent;
  * 这几个事件在客户端也会触发（用于预测和显示），所以取数据走 {@code forWeapon}，两端各读各的。
  *
  * <p>这个类的方法签名里有铁魔法的事件类，没装铁魔法时不能碰它，所以不用
- * {@code @Mod.EventBusSubscriber} 自动注册，而是主类里判断装了才手动注册。
+ * {@code @EventBusSubscriber} 自动注册，而是主类里判断装了才手动注册。
  */
 public final class SpellCombatHandler {
 
@@ -165,7 +165,8 @@ public final class SpellCombatHandler {
      */
     @SubscribeEvent
     public static void onSpellCast(SpellOnCastEvent event) {
-        if (event.isCanceled() || event.getEntity() == null) {
+        // 这个事件不可取消，不用问 isCanceled
+        if (event.getEntity() == null) {
             return;
         }
         ResourceLocation spellId = ResourceLocation.tryParse(event.getSpellId());
@@ -273,8 +274,8 @@ public final class SpellCombatHandler {
      * @param event 服务端 tick 事件
      */
     @SubscribeEvent
-    public static void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || PENDING_CASTS.isEmpty() || event.getServer() == null) {
+    public static void onServerTick(ServerTickEvent.Post event) {
+        if (PENDING_CASTS.isEmpty() || event.getServer() == null) {
             return;
         }
         long now = event.getServer().overworld().getGameTime();
@@ -457,7 +458,7 @@ public final class SpellCombatHandler {
         if (spellId == null || !MasteryConfig.COMMON.spellEffectDurationSpells.get().contains(spellId.toString())) {
             return;
         }
-        ResourceLocation effectId = ForgeRegistries.MOB_EFFECTS.getKey(instance.getEffect());
+        ResourceLocation effectId = BuiltInRegistries.MOB_EFFECT.getKey(instance.getEffect().value());
         if (effectId == null || isCastStateEffect(effectId)
                 || MasteryConfig.COMMON.spellEffectDurationIgnoredEffects.get().contains(effectId.toString())) {
             return;

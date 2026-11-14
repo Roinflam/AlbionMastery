@@ -346,7 +346,8 @@ public final class IronsSpellsSupport {
      * @param out 输出
      */
     public static void catalog(List<WeaponCatalog.Entry> out) {
-        for (AbstractSpell spell : SpellRegistry.REGISTRY.get()) {
+        // 直接遍历注册表：按注册编号的顺序，和武器清单其余部分同一个口径
+        for (AbstractSpell spell : SpellRegistry.REGISTRY) {
             if (spell == null || spell == SpellRegistry.none() || !spell.isEnabled()) {
                 continue;
             }

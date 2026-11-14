@@ -23,8 +23,8 @@ import net.minecraft.world.InteractionHand;
  * 全部由它推出来。所以只要让这个计数器按特化的倍速走，画面、音效和结算就是同一套时间，天然对齐。
  *
  * <p>以前的做法是改 {@code getUseItemRemainingTicks()} 的返回值，那是错的：
- * Forge 版的 {@code updateUsingItem} 第一行就是
- * {@code useItemRemaining = ForgeEventFactory.onItemUseTick(this, stack, getUseItemRemainingTicks())}，
+ * NeoForge 版的 {@code updateUsingItem} 第一行就是
+ * {@code useItemRemaining = EventHooks.onItemUseTick(this, stack, getUseItemRemainingTicks())}，
  * 缩放过的返回值会被原样写回字段，下一 tick 再缩放一次，逐 tick 复利——
  * 倍率 1.2 拉到第 10 tick 时「已拉」是 23 而不是 12，慢速特化则永远拉不满。
  *
@@ -32,7 +32,7 @@ import net.minecraft.world.InteractionHand;
  * 看别人时本机没有他的专精数据，读服务端同步过来的属性（{@link SpecVisualAttributes#DRAW_SPEED}）。
  * 于是别人拉弓多快，你看到的就是多快。
  *
- * <p>只对玩家、只对弓弩生效。原版方法，名字会被混淆，不加 {@code remap = false}。
+ * <p>只对玩家、只对弓弩生效。两个注入器各命中一次；多打上会让倍速叠两遍，命中数上下限都卡死。
  */
 @Mixin(LivingEntity.class)
 public abstract class UseItemSpeedMixin {
@@ -56,7 +56,7 @@ public abstract class UseItemSpeedMixin {
      * @param stack 正在使用的物品
      * @param ci    回调
      */
-    @Inject(method = "updateUsingItem", at = @At("HEAD"), require = 0)
+    @Inject(method = "updateUsingItem(Lnet/minecraft/world/item/ItemStack;)V", at = @At("HEAD"), expect = 1, allow = 1)
     private void albionmastery$scaleDraw(ItemStack stack, CallbackInfo ci) {
         if (!((Object) this instanceof Player player) || !BowSupport.isBowOrCrossbow(stack)) {
             return;
@@ -78,7 +78,7 @@ public abstract class UseItemSpeedMixin {
         }
         // 下限留 1：归零之后原版就不再调 onUseTick 了，弩的上弦音效会哑掉；真正的归零交给原版那一下 --。
         // 零头按「实际扣掉的」还，被上下限夹掉的那部分留在零头里下次再扣，不然慢速特化第一次就白扣一 tick
-        int target = Mth.clamp(this.useItemRemaining - extra, 1, stack.getUseDuration());
+        int target = Mth.clamp(this.useItemRemaining - extra, 1, stack.getUseDuration(player));
         this.albionmastery$drawCarry -= this.useItemRemaining - target;
         this.useItemRemaining = target;
     }
@@ -92,7 +92,7 @@ public abstract class UseItemSpeedMixin {
      * @param hand 用的哪只手
      * @param ci   回调
      */
-    @Inject(method = "startUsingItem", at = @At("HEAD"), require = 0)
+    @Inject(method = "startUsingItem(Lnet/minecraft/world/InteractionHand;)V", at = @At("HEAD"), expect = 1, allow = 1)
     private void albionmastery$resetCarry(InteractionHand hand, CallbackInfo ci) {
         if (!this.isUsingItem()) {
             this.albionmastery$drawCarry = 0.0D;

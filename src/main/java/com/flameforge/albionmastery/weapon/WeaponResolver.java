@@ -10,14 +10,12 @@ import com.flameforge.albionmastery.weapon.compat.SlashBladeSupport;
 import com.flameforge.albionmastery.weapon.compat.VanillaMeleeSupport;
 import com.flameforge.albionmastery.weapon.compat.TaczSupport;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.fml.ModList;
+import net.neoforged.fml.ModList;
 
 import javax.annotation.Nullable;
 import java.util.List;
-import com.flameforge.albionmastery.weapon.compat.TinkersSupport;
-import com.flameforge.albionmastery.weapon.compat.SweetMagicSupport;
 import com.flameforge.albionmastery.weapon.compat.WeaponOverrides;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 /**
  * 物品堆 -&gt; 专精定位的统一入口（双端可用）。
@@ -46,12 +44,6 @@ public final class WeaponResolver {
     /** 新生魔艺的 modid。 */
     public static final String ARS_MOD_ID = "ars_nouveau";
 
-    /** 匠魂的模组 ID。 */
-    public static final String TCONSTRUCT_MOD_ID = "tconstruct";
-
-    /** 甜蜜魔法的模组 ID。 */
-    public static final String SWEETMAGIC_MOD_ID = "sweetmagic";
-
     /** 铁枪（Iron's Arms 'n Artifice）的模组 ID。 */
     public static final String IRONS_ARTIFICE_MOD_ID = "irons_artifice";
 
@@ -66,12 +58,6 @@ public final class WeaponResolver {
     private static Boolean taczLoaded;
 
     private static Boolean arsLoaded;
-
-    /** 匠魂装没装的缓存。 */
-    private static Boolean tinkersLoaded;
-
-    /** 甜蜜魔法装没装的缓存。 */
-    private static Boolean sweetMagicLoaded;
 
     /** 铁枪装没装的缓存。 */
     private static Boolean ironsArtificeLoaded;
@@ -89,30 +75,6 @@ public final class WeaponResolver {
             lrTacticalLoaded = ModList.get().isLoaded(LRTACTICAL_MOD_ID);
         }
         return lrTacticalLoaded;
-    }
-
-    /**
-     * 判断拔刀剑是否已安装。
-     *
-     * @return 已安装返回 true
-     */
-    public static boolean isSweetMagicLoaded() {
-        if (sweetMagicLoaded == null) {
-            sweetMagicLoaded = ModList.get().isLoaded(SWEETMAGIC_MOD_ID);
-        }
-        return sweetMagicLoaded;
-    }
-
-    /**
-     * 匠魂装没装。
-     *
-     * @return 装了返回 true
-     */
-    public static boolean isTinkersLoaded() {
-        if (tinkersLoaded == null) {
-            tinkersLoaded = ModList.get().isLoaded(TCONSTRUCT_MOD_ID);
-        }
-        return tinkersLoaded;
     }
 
     /**
@@ -206,9 +168,13 @@ public final class WeaponResolver {
             return List.of();
         }
         List<ResolvedWeapon> spells = List.of();
+        // 铁魔法认作法术容器的不再问新生魔艺
+        boolean ironsContainer = false;
         if (isIronsLoaded() && IronsSpellsSupport.isContainer(stack)) {
+            ironsContainer = true;
             spells = IronsSpellsSupport.resolveAll(stack);
-        } else if (isArsLoaded() && ArsNouveauSupport.isCaster(stack)) {
+        }
+        if (!ironsContainer && isArsLoaded() && ArsNouveauSupport.isCaster(stack)) {
             spells = ArsNouveauSupport.resolveAll(stack);
         }
         if (spells.isEmpty()) {
@@ -270,7 +236,7 @@ public final class WeaponResolver {
 
         // 排除表在这里统一拦一道：TACZ、拔刀剑、铁魔法这些是按 NBT 认身份的，
         // 各自的 support 里不查这张表，只在这儿拦才对所有来源都成立
-        if (WeaponOverrides.isExcluded(ForgeRegistries.ITEMS.getKey(stack.getItem()))) {
+        if (WeaponOverrides.isExcluded(BuiltInRegistries.ITEM.getKey(stack.getItem()))) {
             return null;
         }
 
@@ -298,22 +264,6 @@ public final class WeaponResolver {
 
         if (isSlashBladeLoaded()) {
             resolved = SlashBladeSupport.resolve(stack);
-            if (resolved != null) {
-                return resolved;
-            }
-        }
-
-        if (isSweetMagicLoaded()) {
-            resolved = SweetMagicSupport.resolve(stack);
-            if (resolved != null) {
-                return resolved;
-            }
-        }
-
-        // 匠魂排在拔刀剑之后、通用近战之前：匠魂拔刀的刀要先归拔刀剑，
-        // 而匠魂自己的剑、匕首、巨刃被它塞进了原版的 minecraft:swords 标签，不先认走就会被当成通用剑
-        if (isTinkersLoaded()) {
-            resolved = TinkersSupport.resolve(stack);
             if (resolved != null) {
                 return resolved;
             }

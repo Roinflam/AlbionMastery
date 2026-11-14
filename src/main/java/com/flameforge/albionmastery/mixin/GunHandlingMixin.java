@@ -20,10 +20,11 @@ import org.spongepowered.asm.mixin.injection.Slice;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * 散布、拉栓速度、免耗弹三项特化效果，都挂在 TACZ 的开火 / 拉栓数据入口 {@code ModernKineticGunScriptAPI} 上。
+ * 散布、拉栓速度、免耗弹、射击推力四项特化效果，都挂在 TACZ 的开火 / 拉栓数据入口 {@code ModernKineticGunScriptAPI} 上。
  *
  * <p>和 {@code GunAmmoAndReloadMixin}、{@code GunBulletSpeedMixin} 同一个目标类，分开写只是为了按效果归类，
- * 注入点互不重叠。全部 {@code require = 0}：TACZ 改了实现就是这一项不生效，不影响启动。
+ * 注入点互不重叠。全部 {@code require = 0}：TACZ 改了实现就是这一项不生效，不影响启动；
+ * 同时写了 {@code expect}，开着注入计数检查时命中数不够会报出来，不会悄悄失效。
  */
 @Mixin(value = ModernKineticGunScriptAPI.class, remap = false)
 public abstract class GunHandlingMixin {
@@ -54,7 +55,7 @@ public abstract class GunHandlingMixin {
                     target = "Lcom/tacz/guns/api/GunProperties;INACCURACY:Lcom/tacz/guns/api/GunProperty;",
                     opcode = Opcodes.GETSTATIC, ordinal = 0)),
             at = @At(value = "INVOKE", target = "Ljava/lang/Math;max(FF)F", ordinal = 0),
-            require = 0
+            require = 0, expect = 1
     )
     private float albionmastery$spread(float inaccuracy) {
         LivingEntity shooter = getShooter();
@@ -74,7 +75,7 @@ public abstract class GunHandlingMixin {
      * @param original 已经过去的毫秒数；0 表示没在拉栓
      * @return 缩放后的毫秒数
      */
-    @ModifyReturnValue(method = "getBoltTime", at = @At("RETURN"), require = 0)
+    @ModifyReturnValue(method = "getBoltTime()J", at = @At("RETURN"), require = 0, expect = 2)
     private long albionmastery$boltTime(long original) {
         if (original <= 0L) {
             return original;
@@ -84,6 +85,28 @@ public abstract class GunHandlingMixin {
             return original;
         }
         return Math.max(1L, Math.round(original / factor));
+    }
+
+    /**
+     * 射击推力：TACZ 1.2.0 开火时按枪械数据把射手往后推一把（{@code applyRecoilPush}，只在服务端，
+     * 推完把速度发给客户端）。力度乘后坐力特化的倍率，和镜头后坐用同一个数，
+     * 选了「后坐力降低」的玩家被推开的距离也跟着变小。
+     *
+     * @param strength 按姿态算好的推力
+     * @return 缩放后的推力
+     */
+    @ModifyExpressionValue(
+            method = "applyRecoilPush(Lcom/tacz/guns/resource/modifier/AttachmentCacheProperty;IFF)V",
+            at = @At(value = "INVOKE",
+                    target = "Lcom/tacz/guns/resource/pojo/data/gun/GunRecoilPushData;getFinalStrength(ZZZI)D"),
+            require = 0, expect = 1
+    )
+    private double albionmastery$recoilPush(double strength) {
+        double factor = SpecializationEffects.forStack(getShooter(), getItemStack()).recoil();
+        if (factor == 1.0D || factor < 0.0D) {
+            return strength;
+        }
+        return strength * factor;
     }
 
     /**
@@ -99,7 +122,7 @@ public abstract class GunHandlingMixin {
      *
      * @param cir 回调
      */
-    @Inject(method = "reduceAmmoOnce", at = @At("HEAD"), cancellable = true, require = 0)
+    @Inject(method = "reduceAmmoOnce()Z", at = @At("HEAD"), cancellable = true, require = 0, expect = 1)
     private void albionmastery$ammoSave(CallbackInfoReturnable<Boolean> cir) {
         LivingEntity shooter = getShooter();
         if (shooter == null || shooter.level().isClientSide()) {

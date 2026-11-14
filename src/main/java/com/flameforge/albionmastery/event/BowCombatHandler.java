@@ -11,7 +11,9 @@ import com.flameforge.albionmastery.mastery.spec.SpecializationEffects;
 import com.flameforge.albionmastery.weapon.ResolvedWeapon;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
+import com.flameforge.albionmastery.mixin.AbstractArrowInvoker;
 import com.flameforge.albionmastery.weapon.compat.BowSupport;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
@@ -22,20 +24,21 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ArrowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.EntityJoinLevelEvent;
-import net.minecraftforge.event.entity.living.LivingHurtEvent;
-import net.minecraftforge.event.entity.player.ArrowLooseEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
+import com.flameforge.albionmastery.event.damage.LivingHurtEvent;
+import net.neoforged.neoforge.event.entity.player.ArrowLooseEvent;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import javax.annotation.Nullable;
 
+import net.neoforged.fml.common.EventBusSubscriber;
 /**
  * 弓弩的专精效果。只用原版 / Forge 事件，不依赖任何模组。
  *
@@ -48,10 +51,31 @@ import javax.annotation.Nullable;
  *         {@code CrossbowDrawMixin} 里用同一个倍率处理。</li>
  * </ul>
  */
-@Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID)
+@EventBusSubscriber(modid = AlbionMastery.MOD_ID)
 public final class BowCombatHandler {
 
+    /** 箭的持久数据里记箭速倍率的键；没有这个键的箭不动伤害。 */
+    private static final String SPEED_SCALE_TAG = "albionmastery_speed_scale";
+
     private BowCombatHandler() {
+    }
+
+    /**
+     * 这支箭射出时被箭速特化乘了几倍，命中时伤害按它除回去。
+     *
+     * @param arrow 箭
+     * @return 倍率；没记过、或记的值不合法时返回 1
+     */
+    public static double speedScaleOf(AbstractArrow arrow) {
+        if (arrow.level().isClientSide()) {
+            return 1.0D;
+        }
+        CompoundTag data = arrow.getPersistentData();
+        if (!data.contains(SPEED_SCALE_TAG)) {
+            return 1.0D;
+        }
+        double scale = data.getDouble(SPEED_SCALE_TAG);
+        return scale > 0.0D ? scale : 1.0D;
     }
 
     /**
@@ -82,19 +106,25 @@ public final class BowCombatHandler {
             Vec3 motion = arrow.getDeltaMovement();
             arrow.setDeltaMovement(motion.scale(speed));
             // 原版箭的伤害 = 速度 × 基础伤害，箭速 ×1.3 等于顺带把伤害也 ×1.3，和特化卡上写的对不上。
-            // 这里把基础伤害按同一倍率除回去，箭速就只是箭速。三叉戟的伤害是固定值，不用补
+            // 这里只记下倍率，命中时在原版算伤害那一步按同一倍率除回去（AbstractArrowDamageMixin），箭速就只是箭速。
+            // 不能在这里直接除基础伤害：力量附魔现在是命中时才加的，射出时除不到它，力量那截会被箭速放大。
+            // 三叉戟的伤害是固定值，不用补
             if (!(arrow instanceof ThrownTrident)) {
-                arrow.setBaseDamage(arrow.getBaseDamage() / speed);
+                CompoundTag data = arrow.getPersistentData();
+                double previous = data.contains(SPEED_SCALE_TAG) ? data.getDouble(SPEED_SCALE_TAG) : 1.0D;
+                data.putDouble(SPEED_SCALE_TAG, previous * speed);
             }
         }
         if (!WeaponKeys.PROVIDER_BOW.equals(weapon.providerId())) {
             // 投出去的三叉戟只借用箭速这一项，穿透和省箭是弓弩的事
             return;
         }
-        // 穿透沿用枪械那一项：原版的穿透等级就是「还能再穿几个」，直接往上加
+        // 穿透沿用枪械那一项：原版的穿透等级就是「还能再穿几个」，直接往上加。
+        // 箭构造时已经按穿透附魔设好了，这里在它上面叠；原版的设值方法是私有的，走调用器
         int pierce = (int) Math.round(spec.pierce());
         if (pierce > 0) {
-            arrow.setPierceLevel((byte) Math.min(127, arrow.getPierceLevel() + pierce));
+            ((AbstractArrowInvoker) arrow).albionmastery$setPierceLevel(
+                    (byte) Math.min(127, arrow.getPierceLevel() + pierce));
         }
         if (arrow.pickup == AbstractArrow.Pickup.ALLOWED) {
             PendingShot shot = PENDING_SHOTS.get(player.getUUID());
@@ -202,8 +232,8 @@ public final class BowCombatHandler {
      * @param event 服务端 tick 事件
      */
     @SubscribeEvent
-    public static void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || PENDING_SHOTS.isEmpty()) {
+    public static void onServerTick(ServerTickEvent.Post event) {
+        if (PENDING_SHOTS.isEmpty()) {
             return;
         }
         for (PendingShot shot : PENDING_SHOTS.values()) {
@@ -241,7 +271,7 @@ public final class BowCombatHandler {
         }
         // 烟花火箭射出去本来就捡不回来，只有箭才需要标记
         if (load.ammo.getItem() instanceof ArrowItem) {
-            crossbow.getOrCreateTag().putBoolean(FREE_SHOT_TAG, true);
+            CustomData.update(DataComponents.CUSTOM_DATA, crossbow, tag -> tag.putBoolean(FREE_SHOT_TAG, true));
         }
     }
 
@@ -254,9 +284,10 @@ public final class BowCombatHandler {
     private static void consumeFreeCrossbowShot(ServerPlayer player, AbstractArrow arrow) {
         for (InteractionHand hand : InteractionHand.values()) {
             ItemStack stack = player.getItemInHand(hand);
-            CompoundTag tag = stack.getTag();
-            if (stack.getItem() instanceof CrossbowItem && tag != null && tag.getBoolean(FREE_SHOT_TAG)) {
-                tag.remove(FREE_SHOT_TAG);
+            if (stack.getItem() instanceof CrossbowItem
+                    && stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).contains(FREE_SHOT_TAG)) {
+                // 摘完标记数据空了会连组件一起去掉，弩不会因为留个空壳和别的弩比对不等
+                CustomData.update(DataComponents.CUSTOM_DATA, stack, tag -> tag.remove(FREE_SHOT_TAG));
                 arrow.pickup = AbstractArrow.Pickup.CREATIVE_ONLY;
                 return;
             }
@@ -275,7 +306,7 @@ public final class BowCombatHandler {
         int count = 0;
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
-            if (ItemStack.isSameItemSameTags(stack, ammo)) {
+            if (ItemStack.isSameItemSameComponents(stack, ammo)) {
                 count += stack.getCount();
             }
         }
@@ -290,6 +321,11 @@ public final class BowCombatHandler {
     @SubscribeEvent
     public static void onArrowLoose(ArrowLooseEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
+            return;
+        }
+        // 弩射击时 NeoForge 也发这个事件，但弩的箭是上弦时扣的，省箭在上弦那边核对（CrossbowDrawMixin）。
+        // 这里要是也记一笔，射出去的箭会被当成弓箭挂上，上弦时退过箭的标记就摘不掉，一支箭能捡两次
+        if (event.getBow().getItem() instanceof CrossbowItem) {
             return;
         }
         ResolvedWeapon weapon = BowSupport.resolve(event.getBow());
@@ -395,7 +431,16 @@ public final class BowCombatHandler {
         if (arrow instanceof ThrownTrident) {
             return WeaponResolver.resolve(player.getMainHandItem());
         }
-        // 弩不走拉弓：射击发生在右键那一下，那一刻弩还是上好弦的状态
+        // 弩不走拉弓：射击发生在右键那一下。原版现在先清空弩上的弹药再生成箭，生成时弩已经不是上弦状态了，
+        // 所以先看箭自己记的发射武器（原版构造箭时会存一份）
+        ItemStack fired = arrow.getWeaponItem();
+        if (fired != null && !fired.isEmpty()) {
+            ResolvedWeapon weapon = BowSupport.resolve(fired);
+            if (weapon != null) {
+                return weapon;
+            }
+        }
+        // 没记发射武器的模组弩：按上好弦的那把认
         for (InteractionHand hand : InteractionHand.values()) {
             ItemStack stack = player.getItemInHand(hand);
             if (stack.getItem() instanceof CrossbowItem && CrossbowItem.isCharged(stack)) {

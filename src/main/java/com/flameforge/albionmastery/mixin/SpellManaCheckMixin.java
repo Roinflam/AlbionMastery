@@ -19,9 +19,11 @@ import org.spongepowered.asm.mixin.injection.At;
 public abstract class SpellManaCheckMixin {
 
     @ModifyExpressionValue(
-            method = "canBeCastedBy",
+            method = "canBeCastedBy(ILio/redspace/ironsspellbooks/api/spells/CastSource;"
+                    + "Lio/redspace/ironsspellbooks/api/magic/MagicData;Lnet/minecraft/world/entity/player/Player;)"
+                    + "Lio/redspace/ironsspellbooks/api/spells/CastResult;",
             at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/api/spells/AbstractSpell;getManaCost(I)I"),
-            require = 0
+            require = 0, expect = 1
     )
     private int albionmastery$checkCost(int original, int spellLevel, CastSource source, MagicData magicData,
                                         Player player) {

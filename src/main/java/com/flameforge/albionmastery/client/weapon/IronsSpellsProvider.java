@@ -52,7 +52,7 @@ public final class IronsSpellsProvider implements IWeaponProvider {
         }
         Iterable<AbstractSpell> spells;
         try {
-            spells = SpellRegistry.REGISTRY.get();
+            spells = SpellRegistry.REGISTRY;
         } catch (Exception exception) {
             AlbionMastery.LOGGER.debug("读取铁魔法法术注册表失败", exception);
             return;
@@ -92,7 +92,7 @@ public final class IronsSpellsProvider implements IWeaponProvider {
         }
         ResourceLocation schoolId = IronsSpellsSupport.schoolIdOf(type);
         if (schoolId != null) {
-            SchoolType school = SchoolRegistry.REGISTRY.get().getValue(schoolId);
+            SchoolType school = SchoolRegistry.getSchool(schoolId);
             if (school != null && school.getDisplayName() != null) {
                 return school.getDisplayName();
             }

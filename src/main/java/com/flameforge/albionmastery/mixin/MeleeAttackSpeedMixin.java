@@ -2,7 +2,6 @@ package com.flameforge.albionmastery.mixin;
 
 import com.flameforge.albionmastery.config.SpecializationValues;
 import com.flameforge.albionmastery.mastery.spec.SpecializationEffects;
-import com.flameforge.albionmastery.weapon.WeaponKeys;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import me.xjqsh.lrtactical.capability.CombatProperties;
 import net.minecraft.world.entity.player.Player;
@@ -32,11 +31,20 @@ import org.spongepowered.asm.mixin.injection.At;
  * 写成 {@code ICustomItem} 一个调用点都对不上，再加上 {@code require = 0}，
  * 结果就是攻速特化悄无声息地不生效（lrtactical 0.4.1 实测如此）。
  *
- * <p>目标是第三方模组的类，不参与 SRG 映射，所以 {@code remap = false}；
- * 注入不上就是攻速特化不生效，用 {@code require = 0} 让模组照常启动。
+ * <p><b>{@code method} 必须写全描述符</b>：0.4.3 的 {@code preAttack} 有两个重载，先声明的
+ * 3 参版 {@code (MeleeAction, Vec3, Vec3)} 只是补上连段序号转调 4 参版，真正取冷却、延迟的是
+ * 4 参版 {@code (MeleeAction, int, Vec3, Vec3)}。只写方法名会选中 3 参版，三个注入器一个都打不上。
+ * 三处调用在 4 参版里各只有一次，所以 {@code expect = 1}。
+ *
+ * <p>注入不上就是攻速特化不生效，用 {@code require = 0} 让模组照常启动；lrtactical 没装时
+ * {@code AlbionMixinPlugin} 整个跳过这个 Mixin。
  */
-@Mixin(value = CombatProperties.class, remap = false)
+@Mixin(CombatProperties.class)
 public abstract class MeleeAttackSpeedMixin {
+
+    /** 注入目标：真正处理出手的 4 参 {@code preAttack}。 */
+    private static final String ALBIONMASTERY$PRE_ATTACK = "preAttack(Lme/xjqsh/lrtactical/api/melee/MeleeAction;I"
+            + "Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/Vec3;)Z";
 
     @Shadow
     @Final
@@ -49,12 +57,14 @@ public abstract class MeleeAttackSpeedMixin {
      * @return 应用特化之后的间隔，至少 1 tick
      */
     @ModifyExpressionValue(
-            method = "preAttack",
+            method = ALBIONMASTERY$PRE_ATTACK,
             at = @At(
                     value = "INVOKE",
                     target = "Lme/xjqsh/lrtactical/api/item/IMeleeWeapon;getAttackCoolDown"
+                            + "(Lnet/minecraft/world/item/ItemStack;Lme/xjqsh/lrtactical/api/melee/MeleeAction;I)I"
             ),
-            require = 0
+            require = 0,
+            expect = 1
     )
     private int albionmastery$scaleCoolDown(int original) {
         return scale(original);
@@ -67,14 +77,35 @@ public abstract class MeleeAttackSpeedMixin {
      * @return 应用特化之后的延迟，至少 1 tick
      */
     @ModifyExpressionValue(
-            method = "preAttack",
+            method = ALBIONMASTERY$PRE_ATTACK,
             at = @At(
                     value = "INVOKE",
                     target = "Lme/xjqsh/lrtactical/api/item/IMeleeWeapon;getAttackDelay"
+                            + "(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/item/ItemStack;"
+                            + "Lme/xjqsh/lrtactical/api/melee/MeleeAction;I)I"
             ),
-            require = 0
+            require = 0,
+            expect = 1
     )
     private int albionmastery$scaleDelay(int original) {
+        return scale(original);
+    }
+
+    /**
+     * 突进延迟：有些刀的配置里带一段向前的突进，按原本的 tick 偏移触发。
+     * 挥砍变快了突进还在老位置，就会出现「刀已经收了人才冲出去」。
+     *
+     * @param original 原延迟
+     * @return 缩放后的延迟
+     */
+    @ModifyExpressionValue(
+            method = ALBIONMASTERY$PRE_ATTACK,
+            at = @At(value = "INVOKE",
+                    target = "Lme/xjqsh/lrtactical/item/melee/CombatData$MeleeMovement;getDelay()I"),
+            require = 0,
+            expect = 1
+    )
+    private int albionmastery$scaleMoveDelay(int original) {
         return scale(original);
     }
 
@@ -84,23 +115,6 @@ public abstract class MeleeAttackSpeedMixin {
      * @param original 原始 tick 数
      * @return 缩放后的 tick 数，至少 1
      */
-    /**
-     * 突进延迟：有些刀的配置里带一段向前的突进，按原本的 tick 偏移触发。
-     * 挥砍变快了突进还在老位置，就会出现「刀已经收了人才冲出去」。
-     *
-     * @param original 原延迟
-     * @return 缩放后的延迟
-     */
-    @ModifyExpressionValue(
-            method = "preAttack",
-            at = @At(value = "INVOKE",
-                    target = "Lme/xjqsh/lrtactical/item/melee/CombatData$MeleeMovement;getDelay()I"),
-            require = 0
-    )
-    private int albionmastery$scaleMoveDelay(int original) {
-        return scale(original);
-    }
-
     private int scale(int original) {
         // 用主手那把：preAttack 本身不带物品，而近战一定是主手挥出去的
         SpecializationValues values = SpecializationEffects.forStack(

@@ -28,9 +28,9 @@ public abstract class FireballSpellRangeMixin {
      * @param caster 施法者，可能为空
      * @return 不受专精额外放大的强度值
      */
-    @Redirect(method = {"getRadius"},
+    @Redirect(method = {"getRadius(ILnet/minecraft/world/entity/LivingEntity;)I"},
             at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/spells/fire/FireballSpell;getSpellPower(ILnet/minecraft/world/entity/Entity;)F"),
-            require = 1, expect = 1)
+            require = 0, expect = 1)
     private float albionmastery$rangePower(@Coerce Object spell, int spellLevel, Entity caster) {
         return SpellRangeProtection.spellPower((AbstractSpell) spell, spellLevel, caster);
     }

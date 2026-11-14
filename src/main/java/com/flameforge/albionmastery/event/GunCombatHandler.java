@@ -25,16 +25,17 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.LogicalSide;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.LogicalSide;
 
 import java.util.Optional;
-import net.minecraftforge.entity.PartEntity;
+import net.neoforged.neoforge.entity.PartEntity;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.tags.DamageTypeTags;
-import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import com.flameforge.albionmastery.event.damage.LivingHurtEvent;
 
+import net.neoforged.fml.common.EventBusSubscriber;
 /**
  * TACZ 枪械战斗事件处理。
  *
@@ -47,7 +48,7 @@ import net.minecraftforge.event.entity.living.LivingHurtEvent;
  * <p>击杀奖励不在这里发，统一由 {@link KillRewardHandler} 按生物实际掉落的经验值处理。
  *
  * <p>方法签名里有 TACZ 的事件类，没装 TACZ 时不能让事件总线去反射它，所以不用
- * {@code @Mod.EventBusSubscriber}，由主类判断装了才手动注册。击杀补弹也放在这里，同样的原因。
+ * {@code @EventBusSubscriber}，由主类判断装了才手动注册。击杀补弹也放在这里，同样的原因。
  */
 public final class GunCombatHandler {
 

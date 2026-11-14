@@ -8,18 +8,19 @@ import com.hollingsworth.arsnouveau.api.event.EffectResolveEvent;
 import com.hollingsworth.arsnouveau.api.event.SpellCostCalcEvent;
 import com.hollingsworth.arsnouveau.api.event.SpellDamageEvent;
 import com.hollingsworth.arsnouveau.api.spell.Spell;
+import com.hollingsworth.arsnouveau.api.spell.SpellResolver;
 import com.hollingsworth.arsnouveau.common.entity.EntityProjectileSpell;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.event.entity.EntityJoinLevelEvent;
-import net.minecraftforge.event.entity.living.LivingHealEvent;
-import net.minecraftforge.event.entity.living.MobEffectEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
+import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
+import net.neoforged.neoforge.event.entity.living.MobEffectEvent;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
 import com.flameforge.albionmastery.mastery.spec.DamageAttribution;
-import net.minecraftforge.event.TickEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 /**
  * 新生魔艺的专精效果。
@@ -78,11 +79,9 @@ public final class ArsCombatHandler {
      * @param event 服务端 tick 事件
      */
     @SubscribeEvent
-    public static void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase == TickEvent.Phase.END) {
-            resolvingCaster = null;
-            resolvingStrength = 1.0D;
-        }
+    public static void onServerTick(ServerTickEvent.Post event) {
+        resolvingCaster = null;
+        resolvingStrength = 1.0D;
     }
 
     /**
@@ -176,11 +175,6 @@ public final class ArsCombatHandler {
     }
 
     /**
-     * 法力消耗按特化倍率和专精折扣缩放。
-     *
-     * @param event 法力计算事件
-     */
-    /**
      * 魔艺投射物出生：按形态 / 主效果特化缩放飞行速度、增加穿透。
      *
      * <p>和弓箭同一个做法：投射物在 {@code addFreshEntity} 之前已经 {@code shoot} 过、穿透也按增幅符文算好了，
@@ -194,10 +188,16 @@ public final class ArsCombatHandler {
                 || !(event.getEntity() instanceof EntityProjectileSpell projectile)) {
             return;
         }
-        if (!(projectile.getOwner() instanceof ServerPlayer player) || projectile.spellResolver == null) {
+        // 结算器从 resolver() 取：公有字段 spellResolver 已标记待删除，同一个对象由 setResolver 同时写进同步数据。
+        // 同步数据的默认值是一个空法术的结算器，不会是 null，空法术算出来是中性值，不改速度、不加穿透
+        if (!(projectile.getOwner() instanceof ServerPlayer player)) {
             return;
         }
-        SpecializationValues spec = ArsNouveauSupport.projectileSpec(player, projectile.spellResolver.spell);
+        SpellResolver resolver = projectile.resolver();
+        if (resolver == null) {
+            return;
+        }
+        SpecializationValues spec = ArsNouveauSupport.projectileSpec(player, resolver.spell);
         if (spec.bulletSpeed() != 1.0D) {
             Vec3 motion = projectile.getDeltaMovement();
             projectile.setDeltaMovement(motion.scale(spec.bulletSpeed()));
@@ -208,6 +208,15 @@ public final class ArsCombatHandler {
         }
     }
 
+    /**
+     * 法力消耗按特化倍率和专精折扣缩放。
+     *
+     * <p>魔艺判定够不够法力时发 {@code SpellCostCalcEvent.Pre}，真正扣法力时发 {@code SpellCostCalcEvent.Post}，
+     * 两次各从同一个原价算起。这里监听基类，两次都收到、都按同一个倍率折算，不会叠乘。
+     * 不能只接 {@code Post}：那样判定阶段仍按原价，折扣大时会出现「够折后价却放不出」。
+     *
+     * @param event 法力计算事件
+     */
     @SubscribeEvent
     public static void onSpellCost(SpellCostCalcEvent event) {
         if (event.context == null || event.currentCost <= 0) {

@@ -48,7 +48,8 @@ public abstract class SpellCastAnimMixin {
      * @param spellLevel      法术等级
      * @param ci              回调
      */
-    @Inject(method = "handleClientBoundOnCastStarted", at = @At("RETURN"), require = 0)
+    @Inject(method = "handleClientBoundOnCastStarted(Ljava/util/UUID;Ljava/lang/String;I)V", at = @At("RETURN"),
+            require = 0, expect = 1)
     private static void albionmastery$castSpeed(UUID castingEntityId, String spellId, int spellLevel,
                                                 CallbackInfo ci) {
         AbstractClientPlayer player = albionmastery$playerOf(castingEntityId);
@@ -72,7 +73,8 @@ public abstract class SpellCastAnimMixin {
      * @param cancelled       是不是被打断
      * @param ci              回调
      */
-    @Inject(method = "handleClientBoundOnCastFinished", at = @At("RETURN"), require = 0)
+    @Inject(method = "handleClientBoundOnCastFinished(Ljava/util/UUID;Ljava/lang/String;Z)V", at = @At("RETURN"),
+            require = 0, expect = 1)
     private static void albionmastery$castDone(UUID castingEntityId, String spellId, boolean cancelled,
                                                CallbackInfo ci) {
         CastSpeedSync.cancel(castingEntityId);

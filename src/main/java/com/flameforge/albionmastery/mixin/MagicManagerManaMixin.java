@@ -16,9 +16,9 @@ import org.spongepowered.asm.mixin.injection.At;
 public abstract class MagicManagerManaMixin {
 
     @WrapOperation(
-            method = "lambda$tick$0",
+            method = "lambda$tick$0(ZLnet/minecraft/world/entity/player/Player;)V",
             at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/api/spells/AbstractSpell;getManaCost(I)I"),
-            require = 0
+            require = 0, expect = 1
     )
     private int albionmastery$channelCost(AbstractSpell spell, int level, Operation<Integer> original,
                                           boolean flag, Player player) {

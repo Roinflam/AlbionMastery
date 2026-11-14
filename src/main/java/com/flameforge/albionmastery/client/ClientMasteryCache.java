@@ -1,5 +1,6 @@
 package com.flameforge.albionmastery.client;
 
+import com.flameforge.albionmastery.AlbionMastery;
 import com.flameforge.albionmastery.client.weapon.ClientWeaponRegistry;
 import com.flameforge.albionmastery.client.weapon.WeaponEntry;
 import com.flameforge.albionmastery.client.weapon.WeaponSource;
@@ -125,6 +126,8 @@ public final class ClientMasteryCache {
         DATA.setStudyMultiplier(studyMultiplier);
         DATA.recomputeLevels(newSnapshot.weaponCurve(), newSnapshot.typeCurve(), newSnapshot.overallCurve());
         DATA.clearDirty();
+        AlbionMastery.LOGGER.info("收到专精全量同步：武器 {} 条、类型 {} 条、总体 {} 条、特化 {} 条",
+                weapons.size(), types.size(), overalls.size(), specializations.size());
         synced = true;
         if (notify) {
             notifyChanges(before);

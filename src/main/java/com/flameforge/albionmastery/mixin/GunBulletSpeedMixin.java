@@ -45,7 +45,7 @@ public abstract class GunBulletSpeedMixin {
             at = @At(value = "INVOKE", ordinal = 0,
                     target = "Lcom/tacz/guns/resource/modifier/AttachmentCacheProperty;getCache"
                             + "(Lcom/tacz/guns/api/GunProperty;)Ljava/lang/Object;"),
-            require = 0
+            require = 0, expect = 1
     )
     private Object albionmastery$bulletSpeed(Object original) {
         if (!(original instanceof Float speed)) {

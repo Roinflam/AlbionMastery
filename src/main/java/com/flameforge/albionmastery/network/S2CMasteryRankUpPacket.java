@@ -1,13 +1,11 @@
 package com.flameforge.albionmastery.network;
 
+import com.flameforge.albionmastery.AMIds;
 import com.flameforge.albionmastery.client.rank.RankCeremony;
 import com.flameforge.albionmastery.mastery.rank.MasteryRank;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.network.NetworkEvent;
-
-import java.util.function.Supplier;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
  * 段位晋升（S2C）：让客户端在屏幕正上方播晋升动画。
@@ -16,7 +14,11 @@ import java.util.function.Supplier;
  * 段位经验本身不在包里：客户端从自己的专精缓存按快照里的每级段位经验现算，
  * 这个包总是紧跟在同步包后面发，缓存已经是新的了。
  */
-public class S2CMasteryRankUpPacket {
+public class S2CMasteryRankUpPacket implements CustomPacketPayload {
+
+    /** 负载 ID。 */
+    public static final CustomPacketPayload.Type<S2CMasteryRankUpPacket> TYPE =
+            new CustomPacketPayload.Type<>(AMIds.of("rank_up"));
 
     private final int oldRank;
     private final int newRank;
@@ -58,14 +60,17 @@ public class S2CMasteryRankUpPacket {
     }
 
     /**
-     * 主线程处理：交给客户端排队播放。
+     * 主线程处理：交给客户端排队播放。只会在客户端被调用。
      *
+     * @param packet  网络包
      * @param context 网络上下文
      */
-    public void handle(Supplier<NetworkEvent.Context> context) {
-        NetworkEvent.Context ctx = context.get();
-        ctx.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                () -> () -> RankCeremony.enqueue(this.oldRank, this.newRank, this.initial)));
-        ctx.setPacketHandled(true);
+    public static void handle(S2CMasteryRankUpPacket packet, IPayloadContext context) {
+        RankCeremony.enqueue(packet.oldRank, packet.newRank, packet.initial);
+    }
+
+    @Override
+    public CustomPacketPayload.Type<S2CMasteryRankUpPacket> type() {
+        return TYPE;
     }
 }

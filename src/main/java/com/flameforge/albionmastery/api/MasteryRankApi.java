@@ -12,7 +12,7 @@ import javax.annotation.Nullable;
  * 段位的对外接口，给任务模组、KubeJS 脚本、其它模组读玩家段位用。
  *
  * <p>只在服务端用：段位以服务端的专精数据为准，客户端没有别人的数据。
- * 段位变化时会在 {@code MinecraftForge.EVENT_BUS} 上发 {@link MasteryRankChangedEvent}。
+ * 段位变化时会在 {@code NeoForge.EVENT_BUS} 上发 {@link MasteryRankChangedEvent}。
  *
  * <p>门槛与星际战甲一致，见 {@link MasteryRank}。
  */

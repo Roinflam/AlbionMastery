@@ -8,7 +8,6 @@ import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import com.flameforge.albionmastery.AlbionMastery;
@@ -16,6 +15,8 @@ import net.minecraft.tags.ItemTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 
+import net.minecraft.core.registries.BuiltInRegistries;
+import com.flameforge.albionmastery.AMIds;
 /**
  * 通用弓弩：所有继承原版 {@code BowItem} / {@code CrossbowItem} 的物品，不管来自哪个模组。
  *
@@ -70,7 +71,7 @@ public final class BowSupport {
         if (stack.isEmpty()) {
             return null;
         }
-        ResourceLocation overrideId = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        ResourceLocation overrideId = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (WeaponOverrides.isExcluded(overrideId)) {
             return null;
         }
@@ -106,7 +107,7 @@ public final class BowSupport {
      * @return 标签键
      */
     private static TagKey<Item> tag(String namespace, String path) {
-        return ItemTags.create(new ResourceLocation(namespace, path));
+        return ItemTags.create(AMIds.of(namespace, path));
     }
 
     /**
@@ -120,7 +121,7 @@ public final class BowSupport {
         if (!isBowOrCrossbow(stack)) {
             return null;
         }
-        ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (id == null) {
             return null;
         }

@@ -3,9 +3,11 @@ package com.flameforge.albionmastery.mixin;
 import com.flameforge.albionmastery.client.PlayerAnimSpeed;
 import com.flameforge.albionmastery.mastery.spec.SpecVisualAttributes;
 import me.xjqsh.lrtactical.compat.player_animator.PlayerAnimatorIntegration;
+import me.xjqsh.lrtactical.compat.player_animator.ThirdPersonAnimationConfig;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.resources.ResourceLocation;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -19,9 +21,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <p>待机动作恢复原速：倍速修饰符是挂在整层上的，挥砍完不还原，站着不动的姿势也会跟着变速。
  *
- * <p>目标是近战附属的类，{@code remap = false}；它或 Player Animator 没装时整个 Mixin 不应用。
+ * <p>lrtactical 0.4.3 把层枚举从 {@code PlayerAnimatorIntegration} 挪进了
+ * {@code ThirdPersonAnimationConfig}，旋转层的常量也从 {@code ROTATION_ANIMATION} 改名为
+ * {@code ROTATION_LAYER}，两个方法的描述符跟着变了，这里写全，免得同名方法以后再加重载时选错。
+ * 每个方法只注入一个 {@code RETURN} 处理器（攻击动作 2 个返回点、待机动作 3 个，都会调到同一个处理器），
+ * 按注入器计数 {@code expect = 1}。
+ *
+ * <p>它或 Player Animator 没装时整个 Mixin 不应用。
  */
-@Mixin(value = PlayerAnimatorIntegration.class, remap = false)
+@Mixin(PlayerAnimatorIntegration.class)
 public abstract class MeleeThirdPersonAnimMixin {
 
     /**
@@ -34,10 +42,13 @@ public abstract class MeleeThirdPersonAnimMixin {
      * @param priority    优先级
      * @param ci          回调
      */
-    @Inject(method = "playAttackAnimation", at = @At("RETURN"), require = 0)
+    @Inject(method = "playAttackAnimation(Lnet/minecraft/client/player/AbstractClientPlayer;"
+            + "Lnet/minecraft/resources/ResourceLocation;Ljava/lang/String;"
+            + "Lme/xjqsh/lrtactical/compat/player_animator/ThirdPersonAnimationConfig$AnimationLayer;I)V",
+            at = @At("RETURN"), require = 0, expect = 1)
     private static void albionmastery$attackSpeed(AbstractClientPlayer player, ResourceLocation animationId,
                                                   String name,
-                                                  PlayerAnimatorIntegration.AnimationLayer layer,
+                                                  ThirdPersonAnimationConfig.AnimationLayer layer,
                                                   int priority, CallbackInfo ci) {
         PlayerAnimSpeed.apply(player, albionmastery$layerId(layer),
                 SpecVisualAttributes.of(player, SpecVisualAttributes.MELEE_SPEED));
@@ -53,10 +64,13 @@ public abstract class MeleeThirdPersonAnimMixin {
      * @param priority    优先级
      * @param ci          回调
      */
-    @Inject(method = "playIdleAnimation", at = @At("RETURN"), require = 0)
+    @Inject(method = "playIdleAnimation(Lnet/minecraft/client/player/AbstractClientPlayer;"
+            + "Lnet/minecraft/resources/ResourceLocation;Ljava/lang/String;"
+            + "Lme/xjqsh/lrtactical/compat/player_animator/ThirdPersonAnimationConfig$AnimationLayer;I)V",
+            at = @At("RETURN"), require = 0, expect = 1)
     private static void albionmastery$idleSpeed(AbstractClientPlayer player, ResourceLocation animationId,
                                                 String name,
-                                                PlayerAnimatorIntegration.AnimationLayer layer,
+                                                ThirdPersonAnimationConfig.AnimationLayer layer,
                                                 int priority, CallbackInfo ci) {
         PlayerAnimSpeed.apply(player, albionmastery$layerId(layer), 1.0D);
     }
@@ -69,12 +83,13 @@ public abstract class MeleeThirdPersonAnimMixin {
      * @param layer 层枚举
      * @return 层 ID
      */
-    private static ResourceLocation albionmastery$layerId(PlayerAnimatorIntegration.AnimationLayer layer) {
-        if (layer == PlayerAnimatorIntegration.AnimationLayer.LOWER) {
+    @Unique
+    private static ResourceLocation albionmastery$layerId(ThirdPersonAnimationConfig.AnimationLayer layer) {
+        if (layer == ThirdPersonAnimationConfig.AnimationLayer.LOWER) {
             return PlayerAnimatorIntegration.LOWER_LAYER;
         }
-        if (layer == PlayerAnimatorIntegration.AnimationLayer.ROTATION) {
-            return PlayerAnimatorIntegration.ROTATION_ANIMATION;
+        if (layer == ThirdPersonAnimationConfig.AnimationLayer.ROTATION) {
+            return PlayerAnimatorIntegration.ROTATION_LAYER;
         }
         return PlayerAnimatorIntegration.UPPER_LAYER;
     }

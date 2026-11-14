@@ -14,8 +14,8 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.fml.DistExecutor;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.fml.loading.FMLEnvironment;
 
 import javax.annotation.Nullable;
 
@@ -29,7 +29,7 @@ import javax.annotation.Nullable;
  * 换弹动画、攻速预判全都按原始数值跑，服务端却按特化后的数值算，看起来就像「特化没生效」。
  *
  * <p>所以这里按端分流：逻辑端走 Capability，客户端走同步缓存。
- * 客户端那条路径用 {@link DistExecutor} 隔开，专用服务端不会加载到任何客户端类。
+ * 客户端那条路径只在 {@code FMLEnvironment.dist} 是客户端时才走到，专用服务端不会加载到任何客户端类。
  */
 public final class SpecializationEffects {
 
@@ -154,8 +154,9 @@ public final class SpecializationEffects {
      * @return 是本机玩家返回 true
      */
     private static boolean isLocalPlayer(Player player) {
-        return Boolean.TRUE.equals(DistExecutor.unsafeCallWhenOn(Dist.CLIENT,
-                () -> () -> com.flameforge.albionmastery.client.ClientMasteryCache.isLocalPlayer(player)));
+        // 客户端类只出现在 dist 判断保护的那一支里，专用服务端走不到，也就不会去加载它
+        return FMLEnvironment.dist == Dist.CLIENT
+                && com.flameforge.albionmastery.client.ClientMasteryCache.isLocalPlayer(player);
     }
 
     /**
@@ -165,8 +166,9 @@ public final class SpecializationEffects {
      */
     @Nullable
     private static MasteryData clientData() {
-        return DistExecutor.unsafeCallWhenOn(Dist.CLIENT,
-                () -> () -> com.flameforge.albionmastery.client.ClientMasteryCache.data());
+        return FMLEnvironment.dist == Dist.CLIENT
+                ? com.flameforge.albionmastery.client.ClientMasteryCache.data()
+                : null;
     }
 
     /**
@@ -175,8 +177,9 @@ public final class SpecializationEffects {
      * @return 服务端下发的快照；拿不到时退回默认值
      */
     private static MasteryConfig.Snapshot clientSnapshot() {
-        MasteryConfig.Snapshot snapshot = DistExecutor.unsafeCallWhenOn(Dist.CLIENT,
-                () -> () -> com.flameforge.albionmastery.client.ClientMasteryCache.snapshot());
+        MasteryConfig.Snapshot snapshot = FMLEnvironment.dist == Dist.CLIENT
+                ? com.flameforge.albionmastery.client.ClientMasteryCache.snapshot()
+                : null;
         return snapshot == null ? MasteryConfig.Snapshot.createDefault() : snapshot;
     }
 

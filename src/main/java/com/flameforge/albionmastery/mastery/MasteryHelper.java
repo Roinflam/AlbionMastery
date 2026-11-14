@@ -23,14 +23,14 @@ public final class MasteryHelper {
      * 取出玩家的专精数据。
      *
      * @param player 玩家，可为 null
-     * @return 专精数据；Capability 不可用时返回 null
+     * @return 专精数据；只有 player 为 null 时返回 null（第一次取时自动建一份空数据）
      */
     @Nullable
     public static MasteryData get(@Nullable Player player) {
         if (player == null) {
             return null;
         }
-        return player.getCapability(MasteryCapability.MASTERY).orElse(null);
+        return player.getData(MasteryCapability.MASTERY);
     }
 
     /**

@@ -22,7 +22,7 @@ import org.spongepowered.asm.mixin.injection.ModifyArg;
  * {@code (GunRecoil, float)}，下标 0 对不上类型，直接注入失败、TACZ 加载不起来。先插这边只在调用前改参数，
  * 原调用还在，对方再 Redirect 也照样能换掉，两边都生效。
  */
-@Mixin(value = CameraSetupEvent.class, remap = false, priority = 500)
+@Mixin(value = CameraSetupEvent.class, priority = 500)
 public abstract class GunRecoilMixin {
 
     /**
@@ -32,11 +32,12 @@ public abstract class GunRecoilMixin {
      * @return 乘上特化后座倍率
      */
     @ModifyArg(
-            method = "initialCameraRecoil",
+            method = "initialCameraRecoil(Lcom/tacz/guns/api/event/common/GunFireEvent;)V",
             at = @At(value = "INVOKE", target = "Lcom/tacz/guns/resource/pojo/data/gun/GunRecoil;genPitchSplineFunction(F)"
                     + "Lorg/apache/commons/math3/analysis/polynomials/PolynomialSplineFunction;"),
             index = 0,
-            require = 0
+            require = 0,
+            expect = 1
     )
     private static float albionmastery$pitchRecoil(float modifier) {
         return (float) (modifier * albionmastery$recoilFactor());
@@ -49,11 +50,12 @@ public abstract class GunRecoilMixin {
      * @return 乘上特化后座倍率
      */
     @ModifyArg(
-            method = "initialCameraRecoil",
+            method = "initialCameraRecoil(Lcom/tacz/guns/api/event/common/GunFireEvent;)V",
             at = @At(value = "INVOKE", target = "Lcom/tacz/guns/resource/pojo/data/gun/GunRecoil;genYawSplineFunction(F)"
                     + "Lorg/apache/commons/math3/analysis/polynomials/PolynomialSplineFunction;"),
             index = 0,
-            require = 0
+            require = 0,
+            expect = 1
     )
     private static float albionmastery$yawRecoil(float modifier) {
         return (float) (modifier * albionmastery$recoilFactor());

@@ -8,12 +8,12 @@ import com.flameforge.albionmastery.weapon.compat.IronsSpellsSupport;
 import com.flameforge.albionmastery.weapon.compat.LrTacticalSupport;
 import com.flameforge.albionmastery.weapon.compat.SlashBladeSupport;
 import com.flameforge.albionmastery.weapon.compat.TaczSupport;
-import net.minecraft.resources.ResourceKey;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -22,7 +22,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
-import com.flameforge.albionmastery.weapon.compat.TinkersSupport;
 
 /**
  * 服务端这边的武器清单：已安装的枪包、刀包、拔刀剑、法术、符文和原版剑弓，一件一条。
@@ -178,9 +177,10 @@ public final class WeaponCatalog {
      * 但解析器会先把它们认走，不会混进来。
      */
     private static void collectItems(List<Entry> out, boolean split) {
-        for (Map.Entry<ResourceKey<Item>, Item> registryEntry
-                : ForgeRegistries.ITEMS.getEntries()) {
-            Item item = registryEntry.getValue();
+        // 按注册编号顺序遍历：遍历序号就是专精界面里的武器排列，必须每次启动都一样。
+        // 不用 entrySet()，那是 HashMap 的视图，顺序每次启动都可能不同
+        for (Holder.Reference<Item> holder : (Iterable<Holder.Reference<Item>>) BuiltInRegistries.ITEM.holders()::iterator) {
+            Item item = holder.value();
             ItemStack stack = new ItemStack(item);
             if (stack.isEmpty()) {
                 continue;
@@ -190,18 +190,14 @@ public final class WeaponCatalog {
                 continue;
             }
             String provider = resolved.providerId();
-            if (!WeaponKeys.PROVIDER_VANILLA_MELEE.equals(provider) && !WeaponKeys.PROVIDER_BOW.equals(provider)
-                    && !WeaponKeys.PROVIDER_TCONSTRUCT.equals(provider)
-                    && !WeaponKeys.PROVIDER_SWEETMAGIC.equals(provider)) {
+            if (!WeaponKeys.PROVIDER_VANILLA_MELEE.equals(provider) && !WeaponKeys.PROVIDER_BOW.equals(provider)) {
                 continue;
             }
-            ResourceLocation id = registryEntry.getKey().location();
+            ResourceLocation id = holder.key().location();
             if (!id.equals(resolved.weaponId())) {
                 continue;
             }
-            boolean tinkers = WeaponKeys.PROVIDER_TCONSTRUCT.equals(provider);
-            out.add(new Entry(resolved, () -> List.of(
-                    tinkers ? TinkersSupport.displayStack(item) : new ItemStack(item))));
+            out.add(new Entry(resolved, () -> List.of(new ItemStack(item))));
         }
     }
 }

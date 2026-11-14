@@ -4,15 +4,14 @@ import com.flameforge.albionmastery.weapon.ResolvedWeapon;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
 import com.flameforge.albionmastery.weapon.compat.IronsArtificeSupport;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 铁枪的客户端来源：中圈是手枪 / 长枪，外圈是每一把枪。
@@ -44,13 +43,14 @@ public final class IronsArtificeProvider implements IWeaponProvider {
     @Override
     public void collect(List<WeaponEntry> out) {
         int sort = 0;
-        for (Map.Entry<ResourceKey<Item>, Item> entry : ForgeRegistries.ITEMS.getEntries()) {
-            ItemStack stack = new ItemStack(entry.getValue());
+        // 按注册编号顺序遍历：遍历序号就是界面上的排列，每次启动必须一样，不能用哈希表视图那种顺序不稳的遍历
+        for (Holder.Reference<Item> holder : (Iterable<Holder.Reference<Item>>) BuiltInRegistries.ITEM.holders()::iterator) {
+            ItemStack stack = new ItemStack(holder.value());
             ResolvedWeapon resolved = IronsArtificeSupport.resolve(stack);
             if (resolved == null) {
                 continue;
             }
-            ResourceLocation id = entry.getKey().location();
+            ResourceLocation id = holder.key().location();
             out.add(new WeaponEntry(
                     resolved.weaponKey(),
                     resolved.typeKey(),

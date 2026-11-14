@@ -45,7 +45,8 @@ public abstract class AbstractSpellPowerMixin {
      * @param caster       施法者，可能为 null
      * @param callbackInfo 携带原始强度的回调
      */
-    @Inject(method = "getSpellPower", at = @At("RETURN"), cancellable = true, require = 0)
+    @Inject(method = "getSpellPower(ILnet/minecraft/world/entity/Entity;)F", at = @At("RETURN"),
+            cancellable = true, require = 0, expect = 1)
     private void albionmastery$applyMastery(int spellLevel, Entity caster,
                                             CallbackInfoReturnable<Float> callbackInfo) {
         albionmastery$scale(caster, callbackInfo);
@@ -57,7 +58,9 @@ public abstract class AbstractSpellPowerMixin {
      * @param caster       施法者，可能为 null
      * @param callbackInfo 携带原始倍率的回调
      */
-    @Inject(method = "getEntityPowerMultiplier", at = @At("RETURN"), cancellable = true, require = 0)
+    // 施法者为 null 时提前返回配置倍率，共 2 个返回点，每个各算一次命中
+    @Inject(method = "getEntityPowerMultiplier(Lnet/minecraft/world/entity/LivingEntity;)F", at = @At("RETURN"),
+            cancellable = true, require = 0, expect = 2)
     private void albionmastery$applyMasteryToEntityMultiplier(LivingEntity caster,
                                                               CallbackInfoReturnable<Float> callbackInfo) {
         albionmastery$scale(caster, callbackInfo);

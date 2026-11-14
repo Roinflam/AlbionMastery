@@ -45,7 +45,7 @@ public abstract class GunPierceMixin {
                     + "Lcom/tacz/guns/resource/pojo/data/gun/GunData;"
                     + "Lcom/tacz/guns/resource/pojo/data/gun/BulletData;)V",
             at = @At("TAIL"),
-            require = 0
+            require = 0, expect = 1
     )
     private void albionmastery$pierce(EntityType<? extends Projectile> type, Level level, LivingEntity shooter,
                                       ItemStack gunItem, ResourceLocation ammoId, ResourceLocation gunId,

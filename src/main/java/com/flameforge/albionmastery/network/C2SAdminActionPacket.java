@@ -1,5 +1,6 @@
 package com.flameforge.albionmastery.network;
 
+import com.flameforge.albionmastery.AMIds;
 import com.flameforge.albionmastery.mastery.MasteryAdmin;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
@@ -13,9 +14,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.network.NetworkEvent;
-
-import java.util.function.Supplier;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
  * 罗盘里管理按钮发来的操作（C2S），只作用于发包的人自己。
@@ -23,7 +23,11 @@ import java.util.function.Supplier;
  * <p>按钮只在客户端认为自己有权限时才画出来，但那只是界面；
  * 服务端每个包都重新判一次权限等级，没权限的包直接丢掉。
  */
-public class C2SAdminActionPacket {
+public class C2SAdminActionPacket implements CustomPacketPayload {
+
+    /** 负载 ID。 */
+    public static final CustomPacketPayload.Type<C2SAdminActionPacket> TYPE =
+            new CustomPacketPayload.Type<>(AMIds.of("admin_action"));
 
     /** 需要的权限等级，和指令一致。 */
     public static final int PERMISSION_LEVEL = 2;
@@ -93,32 +97,28 @@ public class C2SAdminActionPacket {
     }
 
     /**
-     * 服务端处理。
+     * 服务端处理（主线程）。
      *
+     * @param packet  网络包
      * @param context 网络上下文
      */
-    public void handle(Supplier<NetworkEvent.Context> context) {
-        NetworkEvent.Context ctx = context.get();
-        ctx.enqueueWork(() -> {
-            ServerPlayer player = ctx.getSender();
-            if (player == null) {
-                return;
-            }
-            if (!player.hasPermissions(PERMISSION_LEVEL)) {
-                player.displayClientMessage(Component.translatable("msg.albionmastery.admin.no_permission")
-                        .withStyle(ChatFormatting.RED), true);
-                return;
-            }
-            MasteryData data = MasteryHelper.get(player);
-            if (data == null) {
-                return;
-            }
-            Component feedback = apply(player, data);
-            if (feedback != null) {
-                player.displayClientMessage(feedback, true);
-            }
-        });
-        ctx.setPacketHandled(true);
+    public static void handle(C2SAdminActionPacket packet, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        if (!player.hasPermissions(PERMISSION_LEVEL)) {
+            player.displayClientMessage(Component.translatable("msg.albionmastery.admin.no_permission")
+                    .withStyle(ChatFormatting.RED), true);
+            return;
+        }
+        MasteryData data = MasteryHelper.get(player);
+        if (data == null) {
+            return;
+        }
+        Component feedback = packet.apply(player, data);
+        if (feedback != null) {
+            player.displayClientMessage(feedback, true);
+        }
     }
 
     /**
@@ -203,5 +203,10 @@ public class C2SAdminActionPacket {
 
     private static void ding(ServerPlayer player) {
         player.playNotifySound(SoundEvents.EXPERIENCE_ORB_PICKUP, SoundSource.PLAYERS, 0.5F, 1.3F);
+    }
+
+    @Override
+    public CustomPacketPayload.Type<C2SAdminActionPacket> type() {
+        return TYPE;
     }
 }

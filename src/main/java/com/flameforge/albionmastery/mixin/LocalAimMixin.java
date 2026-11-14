@@ -18,7 +18,7 @@ import org.spongepowered.asm.mixin.injection.At;
  *
  * <p>纯客户端类，只放在 mixins.json 的 client 段。
  */
-@Mixin(value = LocalPlayerAim.class, remap = false)
+@Mixin(LocalPlayerAim.class)
 public abstract class LocalAimMixin {
 
     @Shadow
@@ -32,9 +32,10 @@ public abstract class LocalAimMixin {
      * @return 缩放后的开镜耗时
      */
     @ModifyExpressionValue(
-            method = "getAlphaProgress",
+            method = "getAlphaProgress(Lcom/tacz/guns/resource/pojo/data/gun/GunData;)F",
             at = @At(value = "INVOKE", target = "Ljava/lang/Math;max(FF)F"),
-            require = 0
+            require = 0,
+            expect = 1
     )
     private float albionmastery$adsTime(float aimTime) {
         double factor = SpecializationEffects.forStack(this.player, this.player.getMainHandItem()).adsTime();

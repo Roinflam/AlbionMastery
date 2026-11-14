@@ -21,17 +21,16 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.living.LivingDamageEvent;
-import net.minecraftforge.event.entity.living.LivingDeathEvent;
-import net.minecraftforge.event.entity.living.LivingHurtEvent;
-import net.minecraftforge.event.entity.living.LivingKnockBackEvent;
-import net.minecraftforge.event.entity.living.LivingEquipmentChangeEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.event.server.ServerStoppingEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import com.flameforge.albionmastery.event.damage.LivingDamageEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
+import com.flameforge.albionmastery.event.damage.LivingHurtEvent;
+import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
+import net.neoforged.neoforge.event.entity.living.LivingEquipmentChangeEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
 
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -40,6 +39,7 @@ import javax.annotation.Nullable;
 import com.flameforge.albionmastery.mastery.spec.MeleeSwingTracker;
 
 
+import net.neoforged.fml.common.EventBusSubscriber;
 /**
  * 特化里那些<b>不是「乘在伤害上」</b>的效果，集中放在这里：
  * <ul>
@@ -53,12 +53,12 @@ import com.flameforge.albionmastery.mastery.spec.MeleeSwingTracker;
  * <p>伤害倍率类的效果（暴击、连击、各种条件倍率）留在各来源自己的战斗处理器里，
  * 因为那些必须在伤害结算<b>之前</b>改数，而这里的几个都是结算<b>之后</b>才有意义的。
  * 击杀补弹要碰 TACZ 的类，放在 {@code GunCombatHandler} 里随 TACZ 一起按需注册。
- * 这个类只用原版 / Forge 的事件，不依赖任何可选模组，可以无条件自动注册。
+ * 这个类只用原版 / NeoForge 的事件，不依赖任何可选模组，可以无条件自动注册。
  *
  * <p>全部只在服务端生效：吸血改的是血量、补弹改的是物品 NBT、移速改的是属性，
  * 这三样都会自动同步到客户端，客户端不需要再算一遍。
  */
-@Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID)
+@EventBusSubscriber(modid = AlbionMastery.MOD_ID)
 public final class SpecializationCombatHandler {
 
     private SpecializationCombatHandler() {
@@ -174,7 +174,7 @@ public final class SpecializationCombatHandler {
         }
         RandomSource random = player.getRandom();
         if (values.igniteChance() > 0.0D && random.nextDouble() < values.igniteChance()) {
-            target.setSecondsOnFire(IGNITE_SECONDS);
+            target.igniteForSeconds(IGNITE_SECONDS);
         }
         if (values.slowChance() > 0.0D && random.nextDouble() < values.slowChance()) {
             target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, SLOW_TICKS, 1), player);
@@ -214,7 +214,7 @@ public final class SpecializationCombatHandler {
     /**
      * 主手物品变了就重算移速修饰符。
      *
-     * <p>这个事件在主手物品的 NBT 有任何变化时都会触发（枪械开一枪弹药数变了也算），
+     * <p>这个事件在主手物品的数据有任何变化时都会触发（枪械开一枪弹药数变了也算），
      * 所以重算那边做了「值没变就不动属性」的判断，这里不用再节流。
      *
      * @param event 装备变化事件
@@ -235,8 +235,8 @@ public final class SpecializationCombatHandler {
      * @param event 服务端 tick 事件
      */
     @SubscribeEvent
-    public static void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || event.getServer() == null) {
+    public static void onServerTick(ServerTickEvent.Post event) {
+        if (event.getServer() == null) {
             return;
         }
         long gameTime = event.getServer().overworld().getGameTime();

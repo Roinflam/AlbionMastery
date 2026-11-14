@@ -27,9 +27,9 @@ public abstract class BloodStepSpellRangeMixin {
      * @param caster 施法者，可能为空
      * @return 不受专精额外放大的强度值
      */
-    @Redirect(method = {"getDistance"},
+    @Redirect(method = {"getDistance(ILnet/minecraft/world/entity/LivingEntity;)F"},
             at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/spells/blood/BloodStepSpell;getEntityPowerMultiplier(Lnet/minecraft/world/entity/LivingEntity;)F"),
-            require = 1, expect = 1)
+            require = 0, expect = 1)
     private float albionmastery$rangePower(@Coerce Object spell, LivingEntity caster) {
         return SpellRangeProtection.entityPower((AbstractSpell) spell, caster);
     }

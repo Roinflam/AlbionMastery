@@ -22,7 +22,7 @@ import org.spongepowered.asm.mixin.injection.At;
  *     <li>点射间隔：动画里用来控制点射节奏。</li>
  * </ul>
  */
-@Mixin(value = GunAnimationStateContext.class, remap = false)
+@Mixin(GunAnimationStateContext.class)
 public abstract class GunAnimationContextMixin {
 
     @Shadow
@@ -35,12 +35,14 @@ public abstract class GunAnimationContextMixin {
      * @return 按本地玩家特化缩放后的容量，和服务端、HUD 同一个算法
      */
     @ModifyExpressionValue(
-            method = "lambda$getMaxAmmoCount$6",
+            method = "lambda$getMaxAmmoCount$6(Lcom/tacz/guns/api/item/IGun;"
+                    + "Lcom/tacz/guns/client/resource/GunDisplayInstance;)Ljava/lang/Integer;",
             at = @At(value = "INVOKE",
                     target = "Lcom/tacz/guns/util/AttachmentDataUtils;getAmmoCountWithAttachment"
                             + "(Lnet/minecraft/world/item/ItemStack;"
                             + "Lcom/tacz/guns/resource/pojo/data/gun/GunData;)I"),
-            require = 0
+            require = 0,
+            expect = 1
     )
     private int albionmastery$maxAmmo(int original) {
         if (this.currentGunItem == null || Minecraft.getInstance().player == null) {
@@ -62,10 +64,11 @@ public abstract class GunAnimationContextMixin {
      * @return 缩放后的间隔
      */
     @ModifyExpressionValue(
-            method = "lambda$getShootInterval$2",
+            method = "lambda$getShootInterval$2(Lnet/minecraft/world/entity/Entity;)Ljava/lang/Long;",
             at = @At(value = "INVOKE",
                     target = "Lcom/tacz/guns/resource/pojo/data/gun/BurstData;getMinInterval()D"),
-            require = 0
+            require = 0,
+            expect = 1
     )
     private double albionmastery$burstInterval(double interval, Entity entity) {
         return entity instanceof LivingEntity living ? GunRateScaling.scaleSeconds(living, interval) : interval;

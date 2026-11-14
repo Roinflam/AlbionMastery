@@ -39,9 +39,9 @@ public abstract class GunAimMixin {
      * @return 缩放后的开镜耗时
      */
     @ModifyExpressionValue(
-            method = "tickAimingProgress",
+            method = "tickAimingProgress()V",
             at = @At(value = "INVOKE", target = "Ljava/lang/Math;max(FF)F"),
-            require = 0
+            require = 0, expect = 1
     )
     private float albionmastery$adsTime(float aimTime) {
         double factor = SpecializationEffects.forStack(this.shooter, this.shooter.getMainHandItem()).adsTime();
@@ -55,9 +55,9 @@ public abstract class GunAimMixin {
      * @return 缩放后的冲刺时间
      */
     @ModifyExpressionValue(
-            method = "lambda$tickSprint$1",
+            method = "lambda$tickSprint$1(Lcom/tacz/guns/resource/index/CommonGunIndex;)V",
             at = @At(value = "INVOKE", target = "Lcom/tacz/guns/resource/pojo/data/gun/GunData;getSprintTime()F"),
-            require = 0
+            require = 0, expect = 1
     )
     private float albionmastery$sprintTime(float sprintTime) {
         double factor = SpecializationEffects.forStack(this.shooter, this.shooter.getMainHandItem()).sprintTime();

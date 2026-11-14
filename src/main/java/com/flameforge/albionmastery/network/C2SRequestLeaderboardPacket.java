@@ -1,5 +1,6 @@
 package com.flameforge.albionmastery.network;
 
+import com.flameforge.albionmastery.AMIds;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.leaderboard.LeaderboardPeriod;
 import com.flameforge.albionmastery.leaderboard.LeaderboardSort;
@@ -7,9 +8,8 @@ import com.flameforge.albionmastery.leaderboard.MasteryLeaderboard;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.NetworkEvent;
-
-import java.util.function.Supplier;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
  * 客户端请求排行榜（C2S）。
@@ -17,7 +17,11 @@ import java.util.function.Supplier;
  * <p>带时间范围和排序方式两个序号，外加一个可选的搜索词。返回多少行、多久能请求一次全由服务端配置说了算，
  * 客户端发得再勤也只会被限流丢掉。
  */
-public class C2SRequestLeaderboardPacket {
+public class C2SRequestLeaderboardPacket implements CustomPacketPayload {
+
+    /** 负载 ID。 */
+    public static final CustomPacketPayload.Type<C2SRequestLeaderboardPacket> TYPE =
+            new CustomPacketPayload.Type<>(AMIds.of("request_leaderboard"));
 
     /** 搜索词最长多少个字符：玩家名最多 16 个，完整的 UUID 是 36 个。 */
     public static final int MAX_QUERY = 36;
@@ -83,44 +87,45 @@ public class C2SRequestLeaderboardPacket {
     /**
      * 服务端处理：限流、建榜、回包。
      *
+     * @param packet  网络包
      * @param context 网络上下文
      */
-    public void handle(Supplier<NetworkEvent.Context> context) {
-        NetworkEvent.Context ctx = context.get();
-        ctx.enqueueWork(() -> {
-            ServerPlayer player = ctx.getSender();
-            if (player == null) {
-                return;
-            }
-            MinecraftServer server = player.serverLevel().getServer();
-            if (!MasteryConfig.COMMON.leaderboardEnable.get()) {
-                NetworkHandler.sendTo(player, S2CLeaderboardPacket.disabled());
-                return;
-            }
-            LeaderboardPeriod period = LeaderboardPeriod.byOrdinal(this.periodOrdinal);
-            LeaderboardSort sort = LeaderboardSort.byOrdinal(this.sortOrdinal);
-            // 日 / 周 / 月榜只有专用服务端才开：单人和开局域网的世界一天开几次、开多久都说不准，
-            // 「今天涨了多少」没什么意义。客户端会按回包里的标记把那排按钮藏起来
-            boolean periodsEnabled = server.isDedicatedServer();
-            if (!periodsEnabled) {
-                period = LeaderboardPeriod.ALL;
-            }
-            // 段位只在总榜有意义（增量榜里的等级之和是差值，换算成段位会误导），客户端不会这么请求，这里只是兜底
-            if (!sort.supports(period)) {
-                sort = LeaderboardSort.defaultFor(period);
-            }
-            MasteryLeaderboard board = MasteryLeaderboard.get(server);
-            long cooldownMs = MasteryConfig.COMMON.leaderboardRequestCooldownSeconds.get() * 1000L;
-            if (!board.tryAcquireRequest(player.getUUID(), MasteryLeaderboard.REQUEST_LIST, cooldownMs)) {
-                NetworkHandler.sendTo(player, S2CLeaderboardPacket.tooFast());
-                return;
-            }
-            // 先把请求者自己刷一遍：他刚打完的那波经验还没到定时刷新，不然看到的是几十秒前的自己
-            board.update(player);
-            MasteryLeaderboard.Result result = board.query(server, period, sort,
-                    MasteryConfig.COMMON.leaderboardTopCount.get(), player.getUUID(), this.query);
-            NetworkHandler.sendTo(player, S2CLeaderboardPacket.ok(result, periodsEnabled));
-        });
-        ctx.setPacketHandled(true);
+    public static void handle(C2SRequestLeaderboardPacket packet, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        MinecraftServer server = player.serverLevel().getServer();
+        if (!MasteryConfig.COMMON.leaderboardEnable.get()) {
+            NetworkHandler.sendTo(player, S2CLeaderboardPacket.disabled());
+            return;
+        }
+        LeaderboardPeriod period = LeaderboardPeriod.byOrdinal(packet.periodOrdinal);
+        LeaderboardSort sort = LeaderboardSort.byOrdinal(packet.sortOrdinal);
+        // 日 / 周 / 月榜只有专用服务端才开：单人和开局域网的世界一天开几次、开多久都说不准，
+        // 「今天涨了多少」没什么意义。客户端会按回包里的标记把那排按钮藏起来
+        boolean periodsEnabled = server.isDedicatedServer();
+        if (!periodsEnabled) {
+            period = LeaderboardPeriod.ALL;
+        }
+        // 段位只在总榜有意义（增量榜里的等级之和是差值，换算成段位会误导），客户端不会这么请求，这里只是兜底
+        if (!sort.supports(period)) {
+            sort = LeaderboardSort.defaultFor(period);
+        }
+        MasteryLeaderboard board = MasteryLeaderboard.get(server);
+        long cooldownMs = MasteryConfig.COMMON.leaderboardRequestCooldownSeconds.get() * 1000L;
+        if (!board.tryAcquireRequest(player.getUUID(), MasteryLeaderboard.REQUEST_LIST, cooldownMs)) {
+            NetworkHandler.sendTo(player, S2CLeaderboardPacket.tooFast());
+            return;
+        }
+        // 先把请求者自己刷一遍：他刚打完的那波经验还没到定时刷新，不然看到的是几十秒前的自己
+        board.update(player);
+        MasteryLeaderboard.Result result = board.query(server, period, sort,
+                MasteryConfig.COMMON.leaderboardTopCount.get(), player.getUUID(), packet.query);
+        NetworkHandler.sendTo(player, S2CLeaderboardPacket.ok(result, periodsEnabled));
+    }
+
+    @Override
+    public CustomPacketPayload.Type<C2SRequestLeaderboardPacket> type() {
+        return TYPE;
     }
 }

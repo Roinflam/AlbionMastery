@@ -18,7 +18,8 @@ import net.minecraft.world.item.CrossbowItem;
  * {@code releaseUsing} 里算出来的「已经拉了多少 tick」就是缩放过的，够不够上弦、什么时候能松手，
  * 和玩家看到的拉弦画面是同一套时间。这里再乘一次就是双份。
  *
- * <p>原版方法，名字会被混淆，不能加 {@code remap = false}。
+ * <p>{@code releaseUsing} 只有一个 {@code return}，开头、结尾各命中一次。没写上限：多打上只是重复记、重复核对，
+ * 结尾第二次进来时记录已经清掉了，不会多退箭。
  */
 @Mixin(CrossbowItem.class)
 public abstract class CrossbowDrawMixin {
@@ -32,7 +33,8 @@ public abstract class CrossbowDrawMixin {
      * @param timeLeft 剩余使用时长
      * @param ci       回调
      */
-    @Inject(method = "releaseUsing", at = @At("HEAD"), require = 0)
+    @Inject(method = "releaseUsing(Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/LivingEntity;I)V",
+            at = @At("HEAD"), expect = 1)
     private void albionmastery$beforeLoad(ItemStack stack, Level level, LivingEntity entity, int timeLeft,
                                           CallbackInfo ci) {
         if (!level.isClientSide() && entity instanceof ServerPlayer player) {
@@ -49,7 +51,8 @@ public abstract class CrossbowDrawMixin {
      * @param timeLeft 剩余使用时长
      * @param ci       回调
      */
-    @Inject(method = "releaseUsing", at = @At("RETURN"), require = 0)
+    @Inject(method = "releaseUsing(Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/LivingEntity;I)V",
+            at = @At("RETURN"), expect = 1)
     private void albionmastery$afterLoad(ItemStack stack, Level level, LivingEntity entity, int timeLeft,
                                          CallbackInfo ci) {
         if (!level.isClientSide() && entity instanceof ServerPlayer player) {

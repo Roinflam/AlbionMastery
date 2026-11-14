@@ -2,10 +2,10 @@ package com.flameforge.albionmastery.api;
 
 import com.flameforge.albionmastery.mastery.rank.MasteryRank;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 
 /**
- * 玩家的段位经验变了（只在服务端、{@code MinecraftForge.EVENT_BUS} 上发）。
+ * 玩家的段位经验变了（只在服务端、{@code NeoForge.EVENT_BUS} 上发）。
  *
  * <p>段位经验只在武器升级（或被管理员改等级、服主改曲线）时变化，所以这个事件很稀疏，
  * 监听方可以放心地在里面做查询任务、发奖励之类的事。段位没变、只是段位经验变了也会发，

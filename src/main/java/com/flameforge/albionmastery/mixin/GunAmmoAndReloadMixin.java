@@ -42,22 +42,21 @@ public abstract class GunAmmoAndReloadMixin {
     /**
      * 弹匣容量：拦下这个类里每一次取「配件加成后的弹匣容量」的结果。
      *
-     * <p>四个方法都要拦，少一个就会前后对不上——比如只改上限不改「还需装几发」，
-     * 换弹会在装满原始容量之后就停下来。
+     * <p>三个方法都要拦，少一个就会前后对不上——比如只改上限不改「还需装几发」，
+     * 换弹会在装满原始容量之后就停下来。{@code removeAmmoFromMagazine} 不读容量，不用拦。
      *
      * @param original 原始容量
      * @return 应用特化之后的容量，至少 1
      */
     @ModifyExpressionValue(
-            method = {"getNeededAmmoAmount", "getMaxAmmoCount",
-                    "putAmmoInMagazine", "removeAmmoFromMagazine"},
+            method = {"getNeededAmmoAmount()I", "getMaxAmmoCount()I", "putAmmoInMagazine(I)I"},
             at = @At(
                     value = "INVOKE",
                     target = "Lcom/tacz/guns/util/AttachmentDataUtils;getAmmoCountWithAttachment"
                             + "(Lnet/minecraft/world/item/ItemStack;"
                             + "Lcom/tacz/guns/resource/pojo/data/gun/GunData;)I"
             ),
-            require = 0
+            require = 0, expect = 3
     )
     private int albionmastery$applyMagazineSpec(int original) {
         SpecializationValues values = SpecializationEffects.forStack(getShooter(), getItemStack());
@@ -84,7 +83,7 @@ public abstract class GunAmmoAndReloadMixin {
      * @param original 已经过去的毫秒数；0 表示当前没在换弹
      * @return 按特化缩放之后的毫秒数
      */
-    @ModifyReturnValue(method = "getReloadTime", at = @At("RETURN"), require = 0)
+    @ModifyReturnValue(method = "getReloadTime()J", at = @At("RETURN"), require = 0, expect = 2)
     private long albionmastery$applyReloadSpec(long original) {
         // 0 是「没在换弹」的信号，不能碰
         if (original <= 0L) {

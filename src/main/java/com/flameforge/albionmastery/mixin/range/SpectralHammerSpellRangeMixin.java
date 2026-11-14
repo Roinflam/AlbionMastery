@@ -28,9 +28,10 @@ public abstract class SpectralHammerSpellRangeMixin {
      * @param caster 施法者，可能为空
      * @return 不受专精额外放大的强度值
      */
-    @Redirect(method = {"getDepth", "getRadius"},
+    @Redirect(method = {"getDepth(ILnet/minecraft/world/entity/LivingEntity;)I",
+                    "getRadius(ILnet/minecraft/world/entity/LivingEntity;)I"},
             at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/spells/evocation/SpectralHammerSpell;getSpellPower(ILnet/minecraft/world/entity/Entity;)F"),
-            require = 2, expect = 2)
+            require = 0, expect = 2)
     private float albionmastery$rangePower(@Coerce Object spell, int spellLevel, Entity caster) {
         return SpellRangeProtection.spellPower((AbstractSpell) spell, spellLevel, caster);
     }

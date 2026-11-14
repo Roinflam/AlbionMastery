@@ -16,12 +16,12 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.event.entity.living.LivingHurtEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import com.flameforge.albionmastery.event.damage.LivingHurtEvent;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
 import com.flameforge.albionmastery.mastery.spec.DamageAttribution;
 
+import net.neoforged.fml.common.EventBusSubscriber;
 /**
  * 近战伤害处理。
  *
@@ -31,7 +31,7 @@ import com.flameforge.albionmastery.mastery.spec.DamageAttribution;
  * 后者附加附魔与暴击加成后调用 {@code entity.hurt(source, amount)}。
  *
  * <p>它没有暴露任何服务端伤害事件（{@code MeleePreAttackEvent} 是纯客户端的，
- * 只带 {@code AbstractClientPlayer}），所以这里挂 Forge 的 {@link LivingHurtEvent}，
+ * 只带 {@code AbstractClientPlayer}），所以这里挂本模组重发的受伤阶段事件 {@link LivingHurtEvent}，
  * 靠「伤害的直接来源就是玩家本人」来锁定近战命中——弹丸、投掷物、爆炸的
  * {@code getDirectEntity()} 都不是玩家，因此枪械弹丸伤害不会被这里重复放大
  * （那部分由 {@link GunCombatHandler} 负责）。
@@ -41,7 +41,7 @@ import com.flameforge.albionmastery.mastery.spec.DamageAttribution;
  *
  * <p>击杀奖励不在这里发，统一由 {@link KillRewardHandler} 按生物实际掉落的经验值处理。
  */
-@Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID)
+@EventBusSubscriber(modid = AlbionMastery.MOD_ID)
 public final class MeleeCombatHandler {
 
     private MeleeCombatHandler() {

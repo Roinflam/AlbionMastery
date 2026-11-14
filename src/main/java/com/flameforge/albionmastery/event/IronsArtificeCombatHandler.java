@@ -26,10 +26,10 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.event.entity.living.LivingDeathEvent;
-import net.minecraftforge.event.entity.living.LivingHurtEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
+import com.flameforge.albionmastery.event.damage.LivingHurtEvent;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
 
 /**
  * 铁枪（Iron's Arms 'n Artifice）的战斗事件处理。
@@ -42,7 +42,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
  *     服务端不会把客户端「开快了」的那一枪丢掉。修饰是叠在铁枪的组件表上的，和改装件、帽子的修饰互不干扰。</li>
  *     <li>命中经验和伤害加成挂原版的受伤事件：子弹实体带着是哪把枪。改装件的爆炸、闪电、魂火
  *     直接来源也是子弹，只加伤害、不给命中经验。</li>
- *     <li>击杀补弹挂死亡事件，直接改枪上的弹匣 NBT。</li>
+ *     <li>击杀补弹挂死亡事件，直接改枪上的弹匣组件，改完由原版物品同步发给客户端。</li>
  * </ul>
  * 只认「射手是玩家」：厄械师、快枪手和被塞了枪的骷髅打出来的子弹一概不碰。
  *

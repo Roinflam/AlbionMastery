@@ -8,12 +8,16 @@ import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
-import net.minecraftforge.client.ConfigScreenHandler;
-import net.minecraftforge.common.ForgeConfigSpec;
-import net.minecraftforge.fml.ModLoadingContext;
+import net.minecraft.network.chat.FormattedText;
+import net.minecraft.network.chat.Style;
+import net.neoforged.fml.ModContainer;
+import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -27,7 +31,7 @@ import java.util.Set;
 /**
  * 模组列表里「配置」按钮打开的 Cloth Config 界面。
  *
- * <p>配置项有几百个（每个特化一组数值），不逐项手写：直接遍历两份 {@link ForgeConfigSpec}，
+ * <p>配置项有几百个（每个特化一组数值），不逐项手写：直接遍历两份 {@link ModConfigSpec}，
  * 每个二级小节一页，更深的小节折叠成子分类；输入框按值的类型挑，上下限、默认值、注释都从配置定义里读，
  * 以后配置里加了项，这里自动多出来，不用跟着改。
  *
@@ -35,7 +39,7 @@ import java.util.Set;
  * 特化里的数值用专精卡片上的维度名、来源倍率用来源名，这几样语言文件里本来就有。都没有就显示键名。
  * 提示文本优先 {@code config.albionmastery.<路径>.tooltip}，没有就用配置文件里的注释。
  *
- * <p>COMMON 配置改的是本机的文件：单人世界保存后由 Forge 的文件监视触发重载，立即生效；
+ * <p>COMMON 配置改的是本机的文件：单人世界点完成保存时当场触发重载，立即生效；
  * 连着别人的服务器时，服务器按它自己的配置算，这里改了不影响服务器，每页开头有一行说明。
  */
 public final class MasteryConfigScreen {
@@ -53,11 +57,13 @@ public final class MasteryConfigScreen {
     }
 
     /**
-     * 在模组列表里挂上配置按钮，只在客户端调用。
+     * 在模组列表里挂上配置按钮，只在客户端调用（本类引用 Cloth Config 和客户端类，专用服务端不加载）。
+     *
+     * @param container 本模组的容器
      */
-    public static void register() {
-        ModLoadingContext.get().registerExtensionPoint(ConfigScreenHandler.ConfigScreenFactory.class,
-                () -> new ConfigScreenHandler.ConfigScreenFactory((minecraft, parent) -> create(parent)));
+    public static void register(ModContainer container) {
+        container.registerExtensionPoint(IConfigScreenFactory.class,
+                (IConfigScreenFactory) (mod, parent) -> create(parent));
     }
 
     /**
@@ -69,6 +75,8 @@ public final class MasteryConfigScreen {
                 .setParentScreen(parent)
                 .setTitle(Component.translatable(PREFIX + "title"))
                 .setSavingRunnable(() -> {
+                    // save() 写完文件就在当前线程上发配置重载事件，主类的重载处理会马上跑一遍（可重入，多跑无副作用）；
+                    // 文件监视线程之后多半还会再发一次
                     MasteryConfig.CLIENT_SPEC.save();
                     MasteryConfig.COMMON_SPEC.save();
                 });
@@ -117,10 +125,10 @@ public final class MasteryConfigScreen {
         private final ConfigBuilder builder;
         private final ConfigEntryBuilder entries;
         private final Labels labels;
-        private final ForgeConfigSpec spec;
+        private final ModConfigSpec spec;
         private final boolean common;
 
-        Walker(ConfigBuilder builder, Labels labels, ForgeConfigSpec spec, boolean common) {
+        Walker(ConfigBuilder builder, Labels labels, ModConfigSpec spec, boolean common) {
             this.builder = builder;
             this.entries = builder.entryBuilder();
             this.labels = labels;
@@ -236,23 +244,23 @@ public final class MasteryConfigScreen {
         @SuppressWarnings({"unchecked", "rawtypes"})
         private AbstractConfigListEntry valueEntry(List<String> path, Object node) {
             String key = String.join(".", path);
-            if (HIDDEN.contains(key) || !(node instanceof ForgeConfigSpec.ConfigValue<?> value)) {
+            if (HIDDEN.contains(key) || !(node instanceof ModConfigSpec.ConfigValue<?> value)) {
                 return null;
             }
-            ForgeConfigSpec.ValueSpec valueSpec = this.spec.getSpec().get(path);
+            ModConfigSpec.ValueSpec valueSpec = this.spec.getSpec().get(path);
             if (valueSpec == null) {
                 return null;
             }
             Component name = valueName(key, path, value);
             Component[] tooltip = valueTooltip(key, valueSpec, value);
-            ForgeConfigSpec.Range<?> range = valueSpec.getRange();
+            ModConfigSpec.Range<?> range = valueSpec.getRange();
 
-            if (value instanceof ForgeConfigSpec.BooleanValue v) {
+            if (value instanceof ModConfigSpec.BooleanValue v) {
                 return this.entries.startBooleanToggle(name, v.get())
                         .setDefaultValue((Boolean) valueSpec.getDefault())
                         .setTooltip(tooltip).setSaveConsumer(v::set).build();
             }
-            if (value instanceof ForgeConfigSpec.IntValue v) {
+            if (value instanceof ModConfigSpec.IntValue v) {
                 var field = this.entries.startIntField(name, v.get())
                         .setDefaultValue((Integer) valueSpec.getDefault())
                         .setTooltip(tooltip).setSaveConsumer(v::set);
@@ -261,7 +269,7 @@ public final class MasteryConfigScreen {
                 }
                 return field.build();
             }
-            if (value instanceof ForgeConfigSpec.LongValue v) {
+            if (value instanceof ModConfigSpec.LongValue v) {
                 var field = this.entries.startLongField(name, v.get())
                         .setDefaultValue((Long) valueSpec.getDefault())
                         .setTooltip(tooltip).setSaveConsumer(v::set);
@@ -270,7 +278,7 @@ public final class MasteryConfigScreen {
                 }
                 return field.build();
             }
-            if (value instanceof ForgeConfigSpec.DoubleValue v) {
+            if (value instanceof ModConfigSpec.DoubleValue v) {
                 var field = this.entries.startDoubleField(name, v.get())
                         .setDefaultValue((Double) valueSpec.getDefault())
                         .setTooltip(tooltip).setSaveConsumer(v::set);
@@ -279,12 +287,12 @@ public final class MasteryConfigScreen {
                 }
                 return field.build();
             }
-            if (value instanceof ForgeConfigSpec.EnumValue v) {
+            if (value instanceof ModConfigSpec.EnumValue v) {
                 return enumEntry(name, tooltip, v, valueSpec);
             }
             Object current = value.get();
             if (current instanceof String text) {
-                ForgeConfigSpec.ConfigValue<String> v = (ForgeConfigSpec.ConfigValue<String>) value;
+                ModConfigSpec.ConfigValue<String> v = (ModConfigSpec.ConfigValue<String>) value;
                 return this.entries.startStrField(name, text)
                         .setDefaultValue((String) valueSpec.getDefault())
                         .setTooltip(tooltip)
@@ -292,7 +300,7 @@ public final class MasteryConfigScreen {
                         .setSaveConsumer(v::set).build();
             }
             if (current instanceof List<?> list && list.stream().allMatch(e -> e instanceof String)) {
-                ForgeConfigSpec.ConfigValue<List<String>> v = (ForgeConfigSpec.ConfigValue<List<String>>) value;
+                ModConfigSpec.ConfigValue<List<String>> v = (ModConfigSpec.ConfigValue<List<String>>) value;
                 return this.entries.startStrList(name, new ArrayList<>((List<String>) list))
                         .setDefaultValue(new ArrayList<>((List<String>) valueSpec.getDefault()))
                         .setTooltip(tooltip)
@@ -304,8 +312,8 @@ public final class MasteryConfigScreen {
         }
 
         private <E extends Enum<E>> AbstractConfigListEntry enumEntry(Component name, Component[] tooltip,
-                                                                      ForgeConfigSpec.EnumValue<E> value,
-                                                                      ForgeConfigSpec.ValueSpec valueSpec) {
+                                                                      ModConfigSpec.EnumValue<E> value,
+                                                                      ModConfigSpec.ValueSpec valueSpec) {
             E current = value.get();
             @SuppressWarnings("unchecked")
             E fallback = (E) valueSpec.getDefault();
@@ -316,7 +324,7 @@ public final class MasteryConfigScreen {
                     .build();
         }
 
-        private Component valueName(String key, List<String> path, ForgeConfigSpec.ConfigValue<?> value) {
+        private Component valueName(String key, List<String> path, ModConfigSpec.ConfigValue<?> value) {
             if (I18n.exists(PREFIX + key)) {
                 return Component.translatable(PREFIX + key);
             }
@@ -324,7 +332,7 @@ public final class MasteryConfigScreen {
             return known != null ? known : Component.literal(path.get(path.size() - 1));
         }
 
-        private Component[] valueTooltip(String key, ForgeConfigSpec.ValueSpec valueSpec, Object value) {
+        private Component[] valueTooltip(String key, ModConfigSpec.ValueSpec valueSpec, Object value) {
             if (I18n.exists(PREFIX + key + ".tooltip")) {
                 return split(I18n.get(PREFIX + key + ".tooltip"));
             }
@@ -345,13 +353,25 @@ public final class MasteryConfigScreen {
         }
     }
 
-    private static Optional<Component> invalid(ForgeConfigSpec.ValueSpec valueSpec, Object candidate) {
+    private static Optional<Component> invalid(ModConfigSpec.ValueSpec valueSpec, Object candidate) {
         return valueSpec.test(candidate) ? Optional.empty()
                 : Optional.of(Component.translatable(PREFIX + "invalid"));
     }
 
+    /**
+     * 说明按换行拆开，每行再按当前窗口宽度折行。Cloth 的悬停框不会自己折行，
+     * 窄窗口（如 854×480）下长说明会超出屏幕右边。中文没有空格，按字折；英文按词折。
+     */
     private static Component[] split(String text) {
-        return text.lines().map(Component::literal).toArray(Component[]::new);
+        Minecraft minecraft = Minecraft.getInstance();
+        Font font = minecraft.font;
+        int width = Math.max(120, Math.min(360, minecraft.getWindow().getGuiScaledWidth() - 40));
+        return text.lines()
+                .flatMap(line -> line.isEmpty() ? java.util.stream.Stream.of(line)
+                        : font.getSplitter().splitLines(line, width, Style.EMPTY).stream()
+                                .map(FormattedText::getString))
+                .map(Component::literal)
+                .toArray(Component[]::new);
     }
 
     private static List<String> append(List<String> path, String child) {

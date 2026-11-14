@@ -39,7 +39,10 @@ public abstract class GunFireRateMixin {
      * @param gunStack 枪
      * @return 缩放后的间隔
      */
-    @ModifyReturnValue(method = "getShootInterval", at = @At("RETURN"), require = 0)
+    @ModifyReturnValue(
+            method = "getShootInterval(Lnet/minecraft/world/entity/LivingEntity;"
+                    + "Lcom/tacz/guns/api/item/gun/FireMode;Lnet/minecraft/world/item/ItemStack;)J",
+            at = @At("RETURN"), require = 0, expect = 1)
     private long albionmastery$fireRate(long original, LivingEntity shooter, FireMode fireMode, ItemStack gunStack) {
         if (original <= 0L) {
             return original;

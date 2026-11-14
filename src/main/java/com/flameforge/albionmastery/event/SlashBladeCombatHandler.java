@@ -17,12 +17,11 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.event.entity.living.LivingExperienceDropEvent;
-import net.minecraftforge.event.entity.living.LivingHurtEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.neoforged.neoforge.event.entity.living.LivingExperienceDropEvent;
+import com.flameforge.albionmastery.event.damage.LivingHurtEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -31,33 +30,26 @@ import net.minecraft.world.damagesource.DamageSource;
 import com.flameforge.albionmastery.mastery.spec.DamageAttribution;
 import mods.flammpfeil.slashblade.entity.EntityDrive;
 import mods.flammpfeil.slashblade.entity.EntityJudgementCut;
-import net.minecraftforge.event.TickEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.phys.Vec3;
 import mods.flammpfeil.slashblade.util.NBTHelper;
 import mods.flammpfeil.slashblade.slasharts.SlashArts;
 import mods.flammpfeil.slashblade.registry.ComboStateRegistry;
-import net.minecraftforge.event.entity.EntityJoinLevelEvent;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 
 /**
  * 拔刀剑战斗事件处理。
  *
- * <p>伤害加成走 {@code SlashBladeEvent.DoSlashEvent}——它带 {@code getUser()}、
- * {@code getDamage()} 和 {@code setDamage()}，是拔刀剑官方提供的注入点，
- * 和 TACZ 的 {@code EntityHurtByGunEvent.Pre} 地位相同，不需要写 Mixin。
+ * <p>伤害加成统一在受伤阶段（本模组的 {@link LivingHurtEvent}）按直接来源分路算：平砍和斩击特效、
+ * Drive / 审判斩、幻影剑各吃各的特化项，见 {@link #onBladeHurt}。拔刀剑的好几条伤害路径不发挥砍事件，
+ * 只在受伤阶段才能一处覆盖全部来路，不需要写 Mixin。
  *
- * <p>为什么不用 {@code UpdateAttackEvent}：那个事件只有刀和刀的状态，<b>拿不到是谁在用</b>，
- * 没法知道该套用哪个玩家的专精，和原版的 {@code ItemAttributeModifierEvent} 是同一个毛病。
- * 它只适合做客户端显示，实际伤害必须走 {@code DoSlashEvent}。
- *
- * <p>普通挥砍与拔刀技（{@code CircleSlash}、{@code SakuraEnd} 等）都从
- * {@code AttackManager} / {@code AttackHelper} 触发这个事件，所以两者都能覆盖到。
- *
- * <p>本类直接引用拔刀剑的类型，靠 {@code mods.toml} 里的可选依赖 + 事件类不存在时
- * Forge 不会注册该监听来保证缺模组时不报错。
+ * <p>另外三件事靠拔刀剑自己的事件：拔刀技发动时记时间窗（{@code PerformSlashArtEvent}），
+ * 给时间窗里放出的召唤剑打标记，击杀加刀魂时按特化缩放（{@code AddProudSoulEvent}）。
  *
  * <p>方法签名里有拔刀剑的事件类，没装拔刀剑时不能让事件总线去反射它，所以不用
- * {@code @Mod.EventBusSubscriber}，由主类判断装了才手动注册。
+ * {@code @EventBusSubscriber}，由主类判断装了才手动注册到 {@code NeoForge.EVENT_BUS}。
  */
 public final class SlashBladeCombatHandler {
 
@@ -176,8 +168,8 @@ public final class SlashBladeCombatHandler {
     /**
      * 记下玩家放了拔刀技（SA）。
      *
-     * <p>拔刀剑的 SA 由好几段斩击组成，每一段都走 {@code DoSlashEvent}，但那个事件本身分不出
-     * 「这是普通连段还是 SA」。所以在 SA 发动时打个时间戳，之后一小段时间里的斩击都按 SA 算。
+     * <p>拔刀剑的 SA 由好几段斩击组成，每一段落到目标身上的伤害和普通连段看不出区别，
+     * 分不出「这是普通连段还是 SA」。所以在 SA 发动时打个时间戳，之后一小段时间里的斩击都按 SA 算。
      *
      * @param event 拔刀技事件
      */
@@ -233,10 +225,8 @@ public final class SlashBladeCombatHandler {
      * @param event 服务端 tick 事件
      */
     @SubscribeEvent
-    public static void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase == TickEvent.Phase.END) {
-            soulPlayer = null;
-        }
+    public static void onServerTick(ServerTickEvent.Post event) {
+        soulPlayer = null;
     }
 
     /**

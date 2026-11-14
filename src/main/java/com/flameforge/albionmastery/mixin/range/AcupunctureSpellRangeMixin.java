@@ -28,9 +28,9 @@ public abstract class AcupunctureSpellRangeMixin {
      * @param caster 施法者，可能为空
      * @return 不受专精额外放大的强度值
      */
-    @Redirect(method = {"getCount"},
+    @Redirect(method = {"getCount(ILnet/minecraft/world/entity/LivingEntity;)I"},
             at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/spells/blood/AcupunctureSpell;getSpellPower(ILnet/minecraft/world/entity/Entity;)F"),
-            require = 1, expect = 1)
+            require = 0, expect = 1)
     private float albionmastery$countPower(@Coerce Object spell, int spellLevel, Entity caster) {
         return SpellRangeProtection.spellPower((AbstractSpell) spell, spellLevel, caster);
     }

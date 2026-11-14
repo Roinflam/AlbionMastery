@@ -434,6 +434,11 @@ public class SpecializationScreen extends Screen {
     // ======================================================================
 
     @Override
+    public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        // 界面自己铺底，不要原版的模糊和菜单背景；super.render 开头会调这里，不覆盖的话背景会盖在内容上面
+    }
+
+    @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         computeRegions();
         MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
@@ -468,7 +473,8 @@ public class SpecializationScreen extends Screen {
         if (r.layout() == SpecScreenLayout.C) {
             drawList(guiGraphics, snapshot, r, mx, my);
             drawDetail(guiGraphics, snapshot, r, mx, my);
-            guiGraphics.fill(r.mainRight() + 6, r.mainTop(), r.mainRight() + 7, r.sideBottom(), 0x596B5223);
+            // 竖线只画到底栏上沿：C 版底栏提示跨中栏和右栏，画到底会从字中间穿过
+            guiGraphics.fill(r.mainRight() + 6, r.mainTop(), r.mainRight() + 7, r.mainBottom(), 0x596B5223);
         } else {
             int chipsBottom = drawChips(guiGraphics, mx, my, r.mainLeft(), r.mainRight(),
                     r.mainTop() + SEARCH_HEIGHT + 4);
@@ -4046,7 +4052,8 @@ public class SpecializationScreen extends Screen {
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double delta) {
+        // delta 是纵向滚动量；横向的 scrollX 不读，触控板横滑和以前一样不额外响应
         if (this.tourStep >= 0 || this.scaleKnob.contains(mouseX, mouseY)) {
             return true;
         }

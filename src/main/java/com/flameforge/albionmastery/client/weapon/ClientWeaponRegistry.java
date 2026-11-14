@@ -55,12 +55,6 @@ public final class ClientWeaponRegistry {
             PROVIDERS.add(ArsNouveauProvider.INSTANCE);
         }
         // 通用剑类只用原版类，永远可用；排最后，和解析器里的顺序一致
-        if (WeaponResolver.isSweetMagicLoaded()) {
-            PROVIDERS.add(SweetMagicProvider.INSTANCE);
-        }
-        if (WeaponResolver.isTinkersLoaded()) {
-            PROVIDERS.add(TinkersProvider.INSTANCE);
-        }
         PROVIDERS.add(VanillaMeleeProvider.INSTANCE);
         PROVIDERS.add(BowProvider.INSTANCE);
     }

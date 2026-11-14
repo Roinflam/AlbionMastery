@@ -1,5 +1,6 @@
 package com.flameforge.albionmastery.network;
 
+import com.flameforge.albionmastery.AMIds;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.event.CommonEventHandler;
 import com.flameforge.albionmastery.mastery.MasteryHelper;
@@ -14,10 +15,10 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
-import net.minecraftforge.network.NetworkEvent;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import javax.annotation.Nullable;
-import java.util.function.Supplier;
 
 /**
  * 客户端请求切换某个来源的专精特化。
@@ -26,7 +27,11 @@ import java.util.function.Supplier;
  * 包里只带一个特化键，解锁条件、冷却、键是否合法全部在服务端重新判一遍，
  * 客户端界面里的置灰只是给玩家看的，不构成任何授权。
  */
-public class C2SSelectSpecializationPacket {
+public class C2SSelectSpecializationPacket implements CustomPacketPayload {
+
+    /** 负载 ID。 */
+    public static final CustomPacketPayload.Type<C2SSelectSpecializationPacket> TYPE =
+            new CustomPacketPayload.Type<>(AMIds.of("select_specialization"));
 
     /** 目标武器类型的键。 */
     private final String typeKey;
@@ -113,65 +118,61 @@ public class C2SSelectSpecializationPacket {
     /**
      * 服务端处理。
      *
+     * @param packet  网络包
      * @param context 网络上下文
      */
-    public void handle(Supplier<NetworkEvent.Context> context) {
-        NetworkEvent.Context ctx = context.get();
-        ctx.enqueueWork(() -> {
-            ServerPlayer player = ctx.getSender();
-            if (player == null) {
+    public static void handle(C2SSelectSpecializationPacket packet, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        String weapon = packet.weaponKey.isEmpty() ? null : packet.weaponKey;
+        if (packet.followType) {
+            if (weapon == null) {
                 return;
             }
-            String weapon = this.weaponKey.isEmpty() ? null : this.weaponKey;
-            if (this.followType) {
-                if (weapon == null) {
-                    return;
-                }
-                SpecializationManager.Result result = SpecializationManager.followType(player, this.typeKey, weapon);
-                // 失败也要给话：补了冷却检查之后 COOLDOWN 成了可达分支，
-                // 只放一声拒绝音的话，玩家只会觉得按钮点了没反应
-                String provider = WeaponKeys.providerOf(this.typeKey);
-                Component feedback = switch (result) {
-                    case OK -> Component.translatable("msg.albionmastery.spec_follow_type",
-                            SpecTerms.of(provider, "page")).withStyle(ChatFormatting.GOLD);
-                    case COOLDOWN -> Component.translatable("msg.albionmastery.spec_cooldown",
-                                    SpecTerms.of(provider, "spec"),
-                                    formatDuration(SpecializationManager.remainingSwitchCooldown(
-                                            player, this.typeKey, weapon, MasteryConfig.serverSnapshot())))
-                            .withStyle(ChatFormatting.RED);
-                    case DISABLED -> Component.translatable("msg.albionmastery.spec_disabled")
-                            .withStyle(ChatFormatting.RED);
-                    default -> null;
-                };
-                if (feedback != null) {
-                    player.displayClientMessage(feedback, true);
-                }
-                if (result == SpecializationManager.Result.OK) {
-                    CommonEventHandler.syncFull(player);
-                }
-                playFeedbackSound(player, result);
-                return;
-            }
-            Specialization spec = Specialization.byKey(this.specKey);
-            if (spec == null) {
-                // 键不认识：要么是客户端版本不一致，要么是有人在乱发包，直接丢掉
-                return;
-            }
-            SpecializationManager.Result result =
-                    SpecializationManager.select(player, this.typeKey, weapon, this.slot, spec);
-            Component feedback = describe(result, player, spec, this.typeKey, weapon, this.slot,
-                    weapon != null);
+            SpecializationManager.Result result = SpecializationManager.followType(player, packet.typeKey, weapon);
+            // 失败也要给话：补了冷却检查之后 COOLDOWN 成了可达分支，
+            // 只放一声拒绝音的话，玩家只会觉得按钮点了没反应
+            String provider = WeaponKeys.providerOf(packet.typeKey);
+            Component feedback = switch (result) {
+                case OK -> Component.translatable("msg.albionmastery.spec_follow_type",
+                        SpecTerms.of(provider, "page")).withStyle(ChatFormatting.GOLD);
+                case COOLDOWN -> Component.translatable("msg.albionmastery.spec_cooldown",
+                                SpecTerms.of(provider, "spec"),
+                                formatDuration(SpecializationManager.remainingSwitchCooldown(
+                                        player, packet.typeKey, weapon, MasteryConfig.serverSnapshot())))
+                        .withStyle(ChatFormatting.RED);
+                case DISABLED -> Component.translatable("msg.albionmastery.spec_disabled")
+                        .withStyle(ChatFormatting.RED);
+                default -> null;
+            };
             if (feedback != null) {
                 player.displayClientMessage(feedback, true);
             }
-            // 成功和失败各给一声，光靠物品栏上方那行小字很容易没注意到
-            playFeedbackSound(player, result);
             if (result == SpecializationManager.Result.OK) {
-                // syncFull 会顺带给排行榜打标记（榜上的特化数要更新）并重算挂在属性上的特化效果
                 CommonEventHandler.syncFull(player);
             }
-        });
-        ctx.setPacketHandled(true);
+            playFeedbackSound(player, result);
+            return;
+        }
+        Specialization spec = Specialization.byKey(packet.specKey);
+        if (spec == null) {
+            // 键不认识：要么是客户端版本不一致，要么是有人在乱发包，直接丢掉
+            return;
+        }
+        SpecializationManager.Result result =
+                SpecializationManager.select(player, packet.typeKey, weapon, packet.slot, spec);
+        Component feedback = describe(result, player, spec, packet.typeKey, weapon, packet.slot,
+                weapon != null);
+        if (feedback != null) {
+            player.displayClientMessage(feedback, true);
+        }
+        // 成功和失败各给一声，光靠物品栏上方那行小字很容易没注意到
+        playFeedbackSound(player, result);
+        if (result == SpecializationManager.Result.OK) {
+            // syncFull 会顺带给排行榜打标记（榜上的特化数要更新）并重算挂在属性上的特化效果
+            CommonEventHandler.syncFull(player);
+        }
     }
 
     /**
@@ -265,5 +266,10 @@ public class C2SSelectSpecializationPacket {
         }
         return Component.translatable("msg.albionmastery.duration_hours",
                 minutes / 60L, minutes % 60L);
+    }
+
+    @Override
+    public CustomPacketPayload.Type<C2SSelectSpecializationPacket> type() {
+        return TYPE;
     }
 }

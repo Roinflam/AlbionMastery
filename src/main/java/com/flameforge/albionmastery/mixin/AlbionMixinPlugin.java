@@ -1,7 +1,7 @@
 package com.flameforge.albionmastery.mixin;
 
-import net.minecraftforge.fml.loading.FMLLoader;
-import net.minecraftforge.fml.loading.LoadingModList;
+import net.neoforged.fml.loading.FMLLoader;
+import net.neoforged.fml.loading.LoadingModList;
 import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
@@ -35,8 +35,6 @@ public final class AlbionMixinPlugin implements IMixinConfigPlugin {
             {"mods.flammpfeil.slashblade.", "slashblade"},
             {"io.redspace.ironsspellbooks.", "irons_spellbooks"},
             {"com.hollingsworth.arsnouveau.", "ars_nouveau"},
-            {"com.gametechbc.gtbcs_geomancy_plus.", "gtbcs_geomancy_plus"},
-            {"sweetmagic.", "sweetmagic"},
     };
 
     @Override

@@ -4,7 +4,6 @@ import com.flameforge.albionmastery.AlbionMastery;
 import com.flameforge.albionmastery.command.MasteryCommand;
 import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.leaderboard.MasteryLeaderboard;
-import com.flameforge.albionmastery.mastery.MasteryCapability;
 import com.flameforge.albionmastery.mastery.MasteryData;
 import com.flameforge.albionmastery.mastery.MasteryExperienceHook;
 import com.flameforge.albionmastery.mastery.rank.MasteryRankTracker;
@@ -15,48 +14,37 @@ import com.flameforge.albionmastery.network.NetworkHandler;
 import com.flameforge.albionmastery.network.S2CSyncMasteryPacket;
 import com.flameforge.albionmastery.network.S2CUpdateMasteryPacket;
 import com.flameforge.albionmastery.weapon.WeaponCatalog;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.AttachCapabilitiesEvent;
-import net.minecraftforge.event.OnDatapackSyncEvent;
-import net.minecraftforge.event.RegisterCommandsEvent;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.event.server.ServerStoppedEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.common.capabilities.RegisterCapabilitiesEvent;
+import net.neoforged.neoforge.event.OnDatapackSyncEvent;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.bus.api.SubscribeEvent;
 
 import java.util.HashMap;
 import java.util.Map;
 import com.flameforge.albionmastery.mastery.spec.SpecVisualAttributes;
 import com.flameforge.albionmastery.weapon.compat.BowSupport;
-import net.minecraftforge.event.entity.EntityAttributeModificationEvent;
-import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
-import com.flameforge.albionmastery.weapon.compat.SweetMagicSupport;
-import com.flameforge.albionmastery.weapon.WeaponResolver;
+import net.neoforged.neoforge.event.entity.EntityAttributeModificationEvent;
+import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
 import com.flameforge.albionmastery.mastery.spec.MeleeSwingTracker;
-import net.minecraftforge.event.entity.player.AttackEntityEvent;
+import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 
+import net.neoforged.fml.common.EventBusSubscriber;
 /**
  * 通用（双端）事件处理。
  *
  * <p>负责：
  * <ul>
- *     <li>注册并挂载专精 Capability</li>
- *     <li>死亡重生 / 切维度时继承与重新同步专精数据</li>
+ *     <li>死亡重生 / 切维度后重新同步专精数据（数据本身由数据附件随实体复制，见 {@code MasteryCapability}）</li>
  *     <li>把战斗中产生的大量小改动合并成定时增量同步</li>
  *     <li>在登录 / 登出 / 定时刷新时把玩家数据记进全局排行榜</li>
  * </ul>
  */
-@Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID)
+@EventBusSubscriber(modid = AlbionMastery.MOD_ID)
 public final class CommonEventHandler {
-
-    /** Capability 挂载时使用的 ID。 */
-    private static final ResourceLocation CAP_ID = new ResourceLocation(AlbionMastery.MOD_ID, "mastery");
 
     /** 同步节流用的 tick 计数器。 */
     private static int tickCounter = 0;
@@ -70,23 +58,13 @@ public final class CommonEventHandler {
     /**
      * MOD 总线上的事件处理。
      *
-     * <p>{@code RegisterCapabilitiesEvent} 是在 MOD 总线上触发的，与本类其余
-     * FORGE 总线事件不同，所以单独拆成一个订阅类。
+     * <p>{@code EntityAttributeModificationEvent} 是在 MOD 总线上触发的，与本类其余
+     * 游戏总线事件不同，所以单独拆成一个订阅类（总线由 FML 按事件类型自动选）。
      */
-    @Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD)
+    @EventBusSubscriber(modid = AlbionMastery.MOD_ID)
     public static final class ModBus {
 
         private ModBus() {
-        }
-
-        /**
-         * 注册专精 Capability。
-         *
-         * @param event 注册事件
-         */
-        @SubscribeEvent
-        public static void onRegisterCapabilities(RegisterCapabilitiesEvent event) {
-            event.register(MasteryData.class);
         }
 
         /**
@@ -128,34 +106,6 @@ public final class CommonEventHandler {
     }
 
     /**
-     * 每 tick 末尾兜底清一次甜蜜魔法的施法窗口。
-     *
-     * <p>窗口本该在施法方法返回时关掉，可一旦施法链路里有谁抛了异常，那一步就被跳过了，
-     * 窗口会一直开着：之后所有人的法力消耗、冷却都按这个人的特化算，他射的箭还会被写上魔法归属。
-     * 窗口的生命周期本来就不跨 tick，每 tick 末清一次是完全安全的兜底。
-     *
-     * @param event tick 事件
-     */
-    @SubscribeEvent
-    public static void onServerTickEndSweetMagic(TickEvent.ServerTickEvent event) {
-        if (event.phase == TickEvent.Phase.END && WeaponResolver.isSweetMagicLoaded()) {
-            SweetMagicSupport.endCast();
-        }
-    }
-
-    /**
-     * 把专精 Capability 挂到玩家实体上。
-     *
-     * @param event 挂载事件
-     */
-    @SubscribeEvent
-    public static void onAttachCapabilities(AttachCapabilitiesEvent<Entity> event) {
-        if (event.getObject() instanceof Player) {
-            event.addCapability(CAP_ID, new MasteryCapability.Provider());
-        }
-    }
-
-    /**
      * 注册调试 / 管理指令。
      *
      * @param event 指令注册事件
@@ -188,23 +138,7 @@ public final class CommonEventHandler {
         MasteryRankTracker.clear();
     }
 
-    /**
-     * 玩家死亡重生 / 跨维度传送时，把旧实体上的专精数据搬到新实体上。
-     *
-     * @param event 克隆事件
-     */
-    @SubscribeEvent
-    public static void onPlayerClone(PlayerEvent.Clone event) {
-        Player original = event.getOriginal();
-        // 必须先 revive 才能读取到旧实体上的 Capability
-        original.reviveCaps();
-        MasteryData oldData = MasteryHelper.get(original);
-        MasteryData newData = MasteryHelper.get(event.getEntity());
-        if (oldData != null && newData != null) {
-            newData.copyFrom(oldData);
-        }
-        original.invalidateCaps();
-    }
+    // 死亡重生、出末地时的数据复制交给数据附件（copyOnDeath + copyFrom），这里不用再搬一遍
 
     /**
      * 玩家登录：重算等级并做一次全量同步。
@@ -216,7 +150,7 @@ public final class CommonEventHandler {
         if (event.getEntity() instanceof ServerPlayer player) {
             // 改版前的特化存档迁移到分级特化、花超的点数退掉，都要赶在第一次全量同步之前
             SpecMigration.onLogin(player);
-            syncFull(player);
+            syncFull(player, "登录");
             // 移速修饰符不存盘，登录后按当前主手重挂一次
             SpecMoveSpeed.refresh(player);
             // 登录就记一笔：名字可能改过，而且没上榜的老玩家第一次装上本版本也得进榜
@@ -288,7 +222,7 @@ public final class CommonEventHandler {
     @SubscribeEvent
     public static void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            syncFull(player);
+            syncFull(player, "重生");
             // 重生和换维度都会得到一个新的玩家实体，属性上的修饰符跟着没了，要重挂
             SpecMoveSpeed.refresh(player);
         }
@@ -302,7 +236,7 @@ public final class CommonEventHandler {
     @SubscribeEvent
     public static void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            syncFull(player);
+            syncFull(player, "换维度");
             SpecMoveSpeed.refresh(player);
         }
     }
@@ -310,16 +244,13 @@ public final class CommonEventHandler {
     /**
      * 服务端 tick 末尾统一冲刷增量同步。
      *
-     * <p>放在 END 阶段、且按配置的间隔节流，是为了把霰弹枪 / 高射速武器在同一 tick 内
+     * <p>放在 tick 末尾、且按配置的间隔节流，是为了把霰弹枪 / 高射速武器在同一 tick 内
      * 产生的几十次经验变化合并成一个包，避免网络抖动。
      *
-     * @param event tick 事件
+     * @param event tick 末尾事件
      */
     @SubscribeEvent
-    public static void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) {
-            return;
-        }
+    public static void onServerTick(ServerTickEvent.Post event) {
         // 兜底发放没被 Mixin 接手的击杀奖励。放在节流之前每 tick 都跑，
         // 暂存表基本永远是空的，也就不会攥着过期的玩家引用
         MasteryExperienceHook.flushPending();
@@ -359,6 +290,16 @@ public final class CommonEventHandler {
      * @param player 目标玩家
      */
     public static void syncFull(ServerPlayer player) {
+        syncFull(player, "其它");
+    }
+
+    /**
+     * 对单个玩家做一次全量同步，日志里带上触发原因。
+     *
+     * @param player 目标玩家
+     * @param reason 触发原因（登录 / 重生 / 换维度等），只用于日志
+     */
+    private static void syncFull(ServerPlayer player, String reason) {
         MasteryData data = MasteryHelper.get(player);
         if (data == null) {
             return;
@@ -367,6 +308,7 @@ public final class CommonEventHandler {
         data.recomputeLevels(snapshot.weaponCurve(), snapshot.typeCurve(), snapshot.overallCurve());
         data.clearDirty();
         NetworkHandler.sendTo(player, S2CSyncMasteryPacket.of(data, snapshot));
+        AlbionMastery.LOGGER.debug("向 {} 发出专精全量同步（{}）", player.getGameProfile().getName(), reason);
         MasteryRankTracker.evaluate(player, data);
         markLeaderboardChanged(player);
         // 等级、特化或配置变了，特化槽可能刚解锁 / 刚失效：挂在玩家属性上的移速、攻速、攻击距离跟着重算，
@@ -402,7 +344,7 @@ public final class CommonEventHandler {
             return;
         }
         if (data.isNeedFullSync()) {
-            syncFull(player);
+            syncFull(player, "数据待全量");
             return;
         }
         if (!data.hasDirty()) {

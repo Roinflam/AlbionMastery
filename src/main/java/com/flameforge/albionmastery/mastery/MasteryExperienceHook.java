@@ -8,10 +8,9 @@ import com.flameforge.albionmastery.weapon.compat.IronsSpellsSupport;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import javax.annotation.Nullable;
-import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.common.util.FakePlayer;
+import net.neoforged.neoforge.common.util.FakePlayer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -22,8 +21,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import com.flameforge.albionmastery.weapon.compat.SweetMagicSupport;
 
+import net.minecraft.core.registries.BuiltInRegistries;
 /**
  * 击杀经验的统一入口。
  *
@@ -36,8 +35,8 @@ import com.flameforge.albionmastery.weapon.compat.SweetMagicSupport;
  *
  * <p>拿到这个「最终值」有两条路，这里两条都留着，互相兜底：
  * <ol>
- *     <li><b>Mixin</b>（{@code ForgeEventFactoryMixin}）——注入在
- *         {@code ForgeEventFactory.getExperienceDrop} 的返回处。事件的所有监听器都跑完了才轮到它，
+ *     <li><b>Mixin</b>（{@code EventHooksMixin}）——注入在
+ *         {@code EventHooks.getExperienceDrop} 的返回处。事件的所有监听器都跑完了才轮到它，
  *         拿到的必然是最终值。</li>
  *     <li><b>事件监听</b>（{@code EventPriority.LOWEST}）——兜底用。
  *         {@code LOWEST} 只是个优先级桶，同桶内按注册顺序执行，别的模组也用 LOWEST 时
@@ -45,7 +44,7 @@ import com.flameforge.albionmastery.weapon.compat.SweetMagicSupport;
  * </ol>
  *
  * <p>两条路的配合方式：监听器只把结果<b>暂存</b>不发放；Mixin 跑到时把暂存项换成最终值发出去，
- * 同时置位 {@link #mixinActive}，之后监听器就直接跳过。要是 Mixin 压根没生效（比如 Forge 改了
+ * 同时置位 {@link #mixinActive}，之后监听器就直接跳过。要是 Mixin 压根没生效（比如 NeoForge 改了
  * 那个方法的签名），暂存项会在服务端 tick 末尾被兜底发放。这样既不会重复计算，也不会静默失效。
  */
 public final class MasteryExperienceHook {
@@ -166,7 +165,7 @@ public final class MasteryExperienceHook {
         if (entity == null) {
             return false;
         }
-        ResourceLocation typeId = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
+        ResourceLocation typeId = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         return typeId != null && CUSTOM_NPCS_MOD_ID.equals(typeId.getNamespace());
     }
 
@@ -352,15 +351,6 @@ public final class MasteryExperienceHook {
         if (WeaponResolver.isIronsLoaded()) {
             ResolvedWeapon selected = IronsSpellsSupport.selectedSpell(player);
             groups.add(new XpGroup(selected == null ? List.of() : List.of(selected), 1.0D));
-        }
-        // 甜蜜魔法：手里拿的是法杖，真正在练的是它当前选中的那张魔法卷轴。
-        // 主副手各一组，和其它手持武器一个口径——副手那根同样按副手比例算，
-        // 两只手各拿一根时也各拿各的那份
-        if (WeaponResolver.isSweetMagicLoaded()) {
-            ResolvedWeapon mainMagic = SweetMagicSupport.selectedMagic(player, player.getMainHandItem());
-            ResolvedWeapon offMagic = SweetMagicSupport.selectedMagic(player, player.getOffhandItem());
-            groups.add(new XpGroup(mainMagic == null ? List.of() : List.of(mainMagic), 1.0D));
-            groups.add(new XpGroup(offMagic == null ? List.of() : List.of(offMagic), offhandRatio));
         }
         return groups;
     }

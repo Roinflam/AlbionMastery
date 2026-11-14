@@ -821,6 +821,11 @@ public class LeaderboardScreen extends Screen {
     // ======================================================================
 
     @Override
+    public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        // 界面自己铺底，不要原版的模糊和菜单背景；super.render 开头会调这里，不覆盖的话背景会盖在内容上面
+    }
+
+    @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         this.mouseXNow = mouseX;
         this.mouseYNow = mouseY;
@@ -1694,12 +1699,12 @@ public class LeaderboardScreen extends Screen {
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double delta) {
         if (this.state == State.READY) {
             this.scroll = Mth.clamp(this.scroll - delta * SCROLL_STEP, 0.0D, maxScroll());
             return true;
         }
-        return super.mouseScrolled(mouseX, mouseY, delta);
+        return super.mouseScrolled(mouseX, mouseY, scrollX, delta);
     }
 
     @Override

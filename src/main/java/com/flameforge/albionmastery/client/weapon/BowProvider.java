@@ -10,11 +10,10 @@ import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.List;
-import java.util.Map;
-import net.minecraft.resources.ResourceKey;
 
 /**
  * 通用弓弩的客户端来源：遍历物品注册表，弓一类、弩一类。被别的来源认走的不重复列。
@@ -45,8 +44,9 @@ public final class BowProvider implements IWeaponProvider {
     public void collect(List<WeaponEntry> out) {
         int sort = 0;
         // 直接遍历注册表本身，不再复制一份临时表
-        for (Map.Entry<ResourceKey<Item>, Item> entry : ForgeRegistries.ITEMS.getEntries()) {
-            Item item = entry.getValue();
+        // 按注册编号顺序遍历：遍历序号就是界面上的排列，每次启动必须一样，不能用哈希表视图那种顺序不稳的遍历
+        for (Holder.Reference<Item> holder : (Iterable<Holder.Reference<Item>>) BuiltInRegistries.ITEM.holders()::iterator) {
+            Item item = holder.value();
             ItemStack stack = new ItemStack(item);
             if (!BowSupport.isBowOrCrossbow(stack)) {
                 continue;
@@ -55,7 +55,7 @@ public final class BowProvider implements IWeaponProvider {
             if (resolved == null || !WeaponKeys.PROVIDER_BOW.equals(resolved.providerId())) {
                 continue;
             }
-            ResourceLocation id = entry.getKey().location();
+            ResourceLocation id = holder.key().location();
             out.add(new WeaponEntry(
                     resolved.weaponKey(),
                     resolved.typeKey(),

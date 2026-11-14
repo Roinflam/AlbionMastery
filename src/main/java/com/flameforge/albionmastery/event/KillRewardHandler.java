@@ -5,12 +5,12 @@ import com.flameforge.albionmastery.config.MasteryConfig;
 import com.flameforge.albionmastery.mastery.MasteryExperienceHook;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.entity.living.LivingDeathEvent;
-import net.minecraftforge.event.entity.living.LivingExperienceDropEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
+import net.neoforged.neoforge.event.entity.living.LivingExperienceDropEvent;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
 
+import net.neoforged.fml.common.EventBusSubscriber;
 /**
  * 击杀奖励的事件侧入口。
  *
@@ -18,10 +18,10 @@ import net.minecraftforge.fml.common.Mod;
  *
  * <p>这里读到的值<b>不保证</b>是最终值——{@code LOWEST} 只是个优先级桶，同桶内按注册顺序执行，
  * 别的模组也用 LOWEST 时谁先谁后是不确定的。所以这里只把结果暂存下来，
- * 交给 {@code ForgeEventFactoryMixin} 用真正的最终值覆盖；
+ * 交给 {@code EventHooksMixin} 用真正的最终值覆盖；
  * Mixin 万一没生效，暂存项会在 tick 末尾被兜底发放。详见 {@link MasteryExperienceHook}。
  */
-@Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID)
+@EventBusSubscriber(modid = AlbionMastery.MOD_ID)
 public final class KillRewardHandler {
 
     private KillRewardHandler() {

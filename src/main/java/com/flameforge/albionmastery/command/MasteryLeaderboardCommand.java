@@ -80,7 +80,7 @@ public final class MasteryLeaderboardCommand {
         Component periodName = periodName(period);
         if (list.isEmpty()) {
             source.sendFailure(Component.translatableWithFallback("command.albionmastery.board_history.none",
-                    "还没有存档的%s：换期时才会存，从装上这个版本后的第一次换期开始", periodName));
+                    "暂无%s存档：存档在换期时生成，自安装此版本后的第一次换期开始", periodName));
             return 0;
         }
         MasteryLeaderboard.PastPeriod past = key == null ? list.get(0) : null;
@@ -91,25 +91,25 @@ public final class MasteryLeaderboardCommand {
         }
         if (past == null) {
             source.sendFailure(Component.translatableWithFallback("command.albionmastery.board_history.unknown",
-                    "没有 %s 这一期的%s存档", key, periodName));
+                    "没有 %s 期的%s存档", key, periodName));
             source.sendSuccess(() -> keyList(period, list), false);
             return 0;
         }
 
         MasteryLeaderboard.PastPeriod shown = past;
         source.sendSuccess(() -> Component.translatableWithFallback("command.albionmastery.board_history.header",
-                "%s %s（%s）：共 %s 人有进展，按本期涨的经验排", periodName, shown.key(), period.describeKey(shown.key()), shown.participants()).withStyle(ChatFormatting.GOLD), false);
+                "%s %s（%s）：共 %s 人有进展，按本期经验排序", periodName, shown.key(), period.describeKey(shown.key()), shown.participants()).withStyle(ChatFormatting.GOLD), false);
         for (int i = 0; i < Math.min(CHAT_TOP, shown.rows().size()); i++) {
             LeaderboardRow row = shown.rows().get(i);
             int rank = i + 1;
             source.sendSuccess(() -> Component.translatableWithFallback("command.albionmastery.board_history.row",
-                    "%s. %s  +%s 经验，升了 %s 级", rank, row.name(), String.format(Locale.ROOT, "%,d", row.xpSum()), row.levelSum())
+                    "%s. %s  +%s 经验，升 %s 级", rank, row.name(), String.format(Locale.ROOT, "%,d", row.xpSum()), row.levelSum())
                     .withStyle(rank <= 3 ? ChatFormatting.YELLOW : ChatFormatting.WHITE), false);
         }
         String file = MasteryLeaderboard.historyDirectory(server)
                 .resolve(period.id() + "-" + shown.key() + ".txt").toString();
         source.sendSuccess(() -> Component.translatableWithFallback("command.albionmastery.board_history.more",
-                "完整前 %s 名在服务端文件 %s", shown.rows().size(), file).withStyle(ChatFormatting.GRAY), false);
+                "完整前 %s 名见服务端文件 %s", shown.rows().size(), file).withStyle(ChatFormatting.GRAY), false);
         if (list.size() > 1) {
             source.sendSuccess(() -> keyList(period, list), false);
         }

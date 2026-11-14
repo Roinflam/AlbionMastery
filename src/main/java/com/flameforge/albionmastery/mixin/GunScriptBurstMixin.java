@@ -27,10 +27,10 @@ public abstract class GunScriptBurstMixin {
      * @return 缩放后的间隔
      */
     @ModifyExpressionValue(
-            method = "shootOnce",
+            method = "shootOnce(Z)V",
             at = @At(value = "INVOKE",
                     target = "Lcom/tacz/guns/resource/pojo/data/gun/GunData;getBurstShootInterval()J"),
-            require = 0
+            require = 0, expect = 1
     )
     private long albionmastery$burstShootInterval(long interval) {
         return GunRateScaling.scaleMillis(this.shooter, interval);
@@ -43,10 +43,10 @@ public abstract class GunScriptBurstMixin {
      * @return 缩放后的间隔
      */
     @ModifyExpressionValue(
-            method = "getShootInterval",
+            method = "getShootInterval()J",
             at = @At(value = "INVOKE",
                     target = "Lcom/tacz/guns/resource/pojo/data/gun/BurstData;getMinInterval()D"),
-            require = 0
+            require = 0, expect = 1
     )
     private double albionmastery$scriptBurstInterval(double interval) {
         return GunRateScaling.scaleSeconds(this.shooter, interval);

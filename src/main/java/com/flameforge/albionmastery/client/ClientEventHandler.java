@@ -7,18 +7,18 @@ import com.flameforge.albionmastery.client.screen.MasteryScreen;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
-import net.minecraftforge.client.event.RegisterGuiOverlaysEvent;
-import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
-import net.minecraftforge.client.event.RenderGuiOverlayEvent;
-import net.minecraftforge.client.event.ScreenEvent;
-import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent;
+import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
+import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+import net.neoforged.neoforge.client.event.ScreenEvent;
+import net.neoforged.neoforge.event.TagsUpdatedEvent;
 
 /**
  * 客户端事件处理。
@@ -31,7 +31,7 @@ public final class ClientEventHandler {
     /**
      * FORGE 总线上的客户端事件。
      */
-    @Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID, value = Dist.CLIENT)
+    @EventBusSubscriber(modid = AlbionMastery.MOD_ID, value = Dist.CLIENT)
     public static final class Forge {
 
         private Forge() {
@@ -43,20 +43,17 @@ public final class ClientEventHandler {
          * @param event 标签更新事件
          */
         @SubscribeEvent
-        public static void onTagsUpdated(net.minecraftforge.event.TagsUpdatedEvent event) {
+        public static void onTagsUpdated(TagsUpdatedEvent event) {
             com.flameforge.albionmastery.client.weapon.ClientWeaponRegistry.invalidate();
         }
 
         /**
-         * 每客户端 tick 检查一次开界面按键。
+         * 每客户端 tick 检查一次开界面按键（tick 末尾，和以前只认 END 阶段一样）。
          *
          * @param event tick 事件
          */
         @SubscribeEvent
-        public static void onClientTick(TickEvent.ClientTickEvent event) {
-            if (event.phase != TickEvent.Phase.END) {
-                return;
-            }
+        public static void onClientTick(ClientTickEvent.Post event) {
             // 施法倍速的补挂要每 tick 走，开着界面时别人也在施法，不能跟着下面的提前返回一起跳过
             CastSpeedSync.tick();
             // 换弹动作的实测倍速同理。这一行会碰 TACZ 的类，没装 TACZ 时不能让它执行到
@@ -93,27 +90,6 @@ public final class ClientEventHandler {
         }
 
         /**
-         * 在 HUD 之上绘制升级提示。
-         *
-         * <p>挂在物品栏这一层的 Post 上，是为了每帧只画一次——
-         * {@code RenderGuiOverlayEvent} 会为每个 HUD 元素各触发一次。
-         *
-         * @param event HUD 绘制事件
-         */
-        @SubscribeEvent
-        public static void onRenderOverlay(RenderGuiOverlayEvent.Post event) {
-            if (event.getOverlay() != VanillaGuiOverlay.HOTBAR.type()) {
-                return;
-            }
-            // 开着界面时改在界面之上画（见下面）：HUD 在界面底下，罗盘的背景几乎不透明，
-            // 在罗盘里点「满级」弹出来的横幅以前只能听见声音看不见
-            if (Minecraft.getInstance().screen != null) {
-                return;
-            }
-            MasteryToastManager.render(event.getGuiGraphics());
-        }
-
-        /**
          * 开着界面时，升级横幅和段位晋升动画画在界面之上。
          *
          * @param event 界面绘制事件
@@ -139,8 +115,7 @@ public final class ClientEventHandler {
     /**
      * MOD 总线上的客户端事件。
      */
-    @Mod.EventBusSubscriber(modid = AlbionMastery.MOD_ID, value = Dist.CLIENT,
-            bus = Mod.EventBusSubscriber.Bus.MOD)
+    @EventBusSubscriber(modid = AlbionMastery.MOD_ID, value = Dist.CLIENT)
     public static final class ModBus {
 
         private ModBus() {
@@ -157,20 +132,24 @@ public final class ClientEventHandler {
         }
 
         /**
-         * 注册段位晋升动画的 HUD 层，放在所有 HUD 元素最上面。
+         * 注册一个 HUD 层，放在所有 HUD 元素最上面，画升级横幅和段位晋升动画。
          *
-         * <p>没有像升级横幅那样挂在物品栏那一层的 Post 上：换了自定义物品栏的 HUD 模组会取消原版物品栏，
-         * 那一层的 Post 就不触发了，晋升动画不能跟着消失；放在最上层也不会被聊天栏、标题文字压住。
+         * <p>每个 HUD 层画完画布都会整体抬高一截，挂在原版物品栏层上的东西会被后面的层盖住，
+         * 所以横幅也并进这个顶层；不依赖任何原版层，换了自定义物品栏的 HUD 模组也照常出现。
          * 开着界面时这里不画，改由 {@link Forge#onScreenRender} 画在界面之上，两处互斥，一帧只画一次。
+         * 自己注册的层不会跟着 F1 隐藏，要自己判断。
          *
          * @param event 注册事件
          */
         @SubscribeEvent
-        public static void onRegisterOverlays(RegisterGuiOverlaysEvent event) {
-            event.registerAboveAll("rank_ceremony", (gui, guiGraphics, partialTick, width, height) -> {
-                if (Minecraft.getInstance().screen != null) {
+        public static void onRegisterLayers(RegisterGuiLayersEvent event) {
+            event.registerAboveAll(ResourceLocation.fromNamespaceAndPath(AlbionMastery.MOD_ID, "overlay"),
+                    (guiGraphics, deltaTracker) -> {
+                Minecraft minecraft = Minecraft.getInstance();
+                if (minecraft.screen != null || minecraft.options.hideGui) {
                     return;
                 }
+                MasteryToastManager.render(guiGraphics);
                 guiGraphics.pose().pushPose();
                 // 压在升级横幅（200）和物品栏图标之上
                 guiGraphics.pose().translate(0.0F, 0.0F, 300.0F);

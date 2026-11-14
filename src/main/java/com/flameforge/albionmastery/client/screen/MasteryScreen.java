@@ -37,7 +37,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
-import net.minecraftforge.fml.ModList;
+import net.neoforged.fml.ModList;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
@@ -1839,6 +1839,11 @@ public class MasteryScreen extends Screen {
     // ======================================================================
     // 渲染
     // ======================================================================
+
+    @Override
+    public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        // 界面自己铺底，不要原版的模糊和菜单背景；super.render 开头会调这里，不覆盖的话背景会盖在内容上面
+    }
 
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
@@ -4159,7 +4164,8 @@ public class MasteryScreen extends Screen {
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double delta) {
+        // delta 是纵向滚动量；横向的 scrollX 不读，触控板横滑和以前一样不额外响应
         if (this.scaleKnob.contains(mouseX, mouseY)) {
             return true;
         }

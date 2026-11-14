@@ -12,6 +12,7 @@ import com.flameforge.albionmastery.network.S2CLeaderboardPacket;
 import com.flameforge.albionmastery.network.S2CPlayerMasteryPacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -120,7 +121,7 @@ public final class ClientLeaderboardHandler {
 
         CompoundTag data;
         try {
-            data = NbtIo.readCompressed(new ByteArrayInputStream(bytes));
+            data = NbtIo.readCompressed(new ByteArrayInputStream(bytes), NbtAccounter.unlimitedHeap());
         } catch (IOException exception) {
             AlbionMastery.LOGGER.error("解压玩家专精数据失败: {}", name, exception);
             screen.onPlayerMissing(uuid);

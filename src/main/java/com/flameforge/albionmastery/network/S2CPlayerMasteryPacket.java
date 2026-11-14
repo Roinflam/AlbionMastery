@@ -1,13 +1,13 @@
 package com.flameforge.albionmastery.network;
 
+import com.flameforge.albionmastery.AMIds;
 import com.flameforge.albionmastery.AlbionMastery;
 import com.flameforge.albionmastery.client.ClientLeaderboardHandler;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.network.NetworkEvent;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -15,7 +15,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * 某名玩家的整份专精数据（S2C），分片发送。
@@ -30,7 +29,11 @@ import java.util.function.Supplier;
  *
  * <p>客户端收到后走和读档同一个 {@code deserializeNBT}，键校验、特化校验完全是同一套。
  */
-public class S2CPlayerMasteryPacket {
+public class S2CPlayerMasteryPacket implements CustomPacketPayload {
+
+    /** 负载 ID。 */
+    public static final CustomPacketPayload.Type<S2CPlayerMasteryPacket> TYPE =
+            new CustomPacketPayload.Type<>(AMIds.of("player_mastery"));
 
     /** 名字最大长度。 */
     private static final int MAX_NAME = 48;
@@ -162,15 +165,18 @@ public class S2CPlayerMasteryPacket {
     }
 
     /**
-     * 主线程处理：交给客户端拼片。
+     * 主线程处理：交给客户端拼片。只会在客户端被调用。
      *
+     * @param packet  网络包
      * @param context 网络上下文
      */
-    public void handle(Supplier<NetworkEvent.Context> context) {
-        NetworkEvent.Context ctx = context.get();
-        ctx.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                () -> () -> ClientLeaderboardHandler.acceptPlayerChunk(this.uuid, this.name, this.found,
-                        this.transferId, this.chunkIndex, this.chunkCount, this.chunk)));
-        ctx.setPacketHandled(true);
+    public static void handle(S2CPlayerMasteryPacket packet, IPayloadContext context) {
+        ClientLeaderboardHandler.acceptPlayerChunk(packet.uuid, packet.name, packet.found,
+                packet.transferId, packet.chunkIndex, packet.chunkCount, packet.chunk);
+    }
+
+    @Override
+    public CustomPacketPayload.Type<S2CPlayerMasteryPacket> type() {
+        return TYPE;
     }
 }

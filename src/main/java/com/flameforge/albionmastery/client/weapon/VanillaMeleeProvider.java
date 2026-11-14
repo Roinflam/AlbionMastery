@@ -10,12 +10,11 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.SwordItem;
 import net.minecraft.world.item.TridentItem;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.List;
-import java.util.Map;
 import com.flameforge.albionmastery.weapon.compat.VanillaMeleeSupport;
-import net.minecraft.resources.ResourceKey;
 
 /**
  * 通用近战武器的客户端来源：遍历物品注册表，剑一类、斧一类、三叉戟一类。被别的来源认走的不重复列。
@@ -47,8 +46,9 @@ public final class VanillaMeleeProvider implements IWeaponProvider {
         int sort = 0;
         // 直接遍历注册表本身：以前先 stream().map().toList() 复制一份一两万条的临时表，
         // 那份表唯一的用处就是被遍历一次，纯属白扔内存
-        for (Map.Entry<ResourceKey<Item>, Item> entry : ForgeRegistries.ITEMS.getEntries()) {
-            Item item = entry.getValue();
+        // 按注册编号顺序遍历：遍历序号就是界面上的排列，每次启动必须一样，不能用哈希表视图那种顺序不稳的遍历
+        for (Holder.Reference<Item> holder : (Iterable<Holder.Reference<Item>>) BuiltInRegistries.ITEM.holders()::iterator) {
+            Item item = holder.value();
             ItemStack stack = new ItemStack(item);
             // 判定统一交给 VanillaMeleeSupport：它认标签，模组自己写基类的武器也能收到
             if (!VanillaMeleeSupport.isVanillaMelee(stack)) {
@@ -59,7 +59,7 @@ public final class VanillaMeleeProvider implements IWeaponProvider {
             if (resolved == null || !WeaponKeys.PROVIDER_VANILLA_MELEE.equals(resolved.providerId())) {
                 continue;
             }
-            ResourceLocation id = entry.getKey().location();
+            ResourceLocation id = holder.key().location();
             out.add(new WeaponEntry(
                     resolved.weaponKey(),
                     resolved.typeKey(),

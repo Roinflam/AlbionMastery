@@ -64,13 +64,12 @@ import javax.annotation.Nullable;
  * <p>这一行只在「基础信息」区块显示时才加（伤害本身就在那个区块里）。
  * 如果枪包用 hide flag 把这个区块隐藏了，没有伤害行可以挂，这一行也一起不显示。
  *
- * <p>类上的 {@code remap = false} 只对 TACZ 自己的方法（getText / shouldShow 之类）生效；
- * {@code getHeight} / {@code renderText} 是 Minecraft 接口 {@code ClientTooltipComponent}
- * 的方法，正式环境有混淆名，所以这两处的注入单独打开 {@code remap = true}。
+ * <p>{@code getHeight} / {@code renderText} 是 Minecraft 接口 {@code ClientTooltipComponent} 的方法。
+ * 1.21.1 的运行环境直接用 Mojang 名，和 TACZ 自己的方法一样按明文名、带完整描述符写，不再单独映射。
  *
  * <p>被重定向的伤害取值方法本身已经算过配件修正，因此显示值天然包含配件加成。
  */
-@Mixin(value = ClientGunTooltip.class, remap = false)
+@Mixin(ClientGunTooltip.class)
 public abstract class ClientGunTooltipMixin {
 
     /** TACZ 提示框里一行文字的行高。 */
@@ -104,13 +103,15 @@ public abstract class ClientGunTooltipMixin {
      * @return 加成后的伤害
      */
     @Redirect(
-            method = "getText",
+            method = "getText()V",
             at = @At(
                     value = "INVOKE",
                     target = "Lcom/tacz/guns/util/AttachmentDataUtils;getDamageWithAttachment"
                             + "(Lnet/minecraft/world/item/ItemStack;"
                             + "Lcom/tacz/guns/resource/pojo/data/gun/GunData;)D"
-            )
+            ),
+            require = 0,
+            expect = 1
     )
     private double albionmastery$applyMasteryBonus(ItemStack stack, GunData gunData) {
         double base = AttachmentDataUtils.getDamageWithAttachment(stack, gunData);
@@ -131,14 +132,15 @@ public abstract class ClientGunTooltipMixin {
      * @return 应用特化之后的容量
      */
     @ModifyExpressionValue(
-            method = "getText",
+            method = "getText()V",
             at = @At(
                     value = "INVOKE",
                     target = "Lcom/tacz/guns/util/AttachmentDataUtils;getAmmoCountWithAttachment"
                             + "(Lnet/minecraft/world/item/ItemStack;"
                             + "Lcom/tacz/guns/resource/pojo/data/gun/GunData;)I"
             ),
-            require = 0
+            require = 0,
+            expect = 1
     )
     private int albionmastery$applyMagazineSpec(int original) {
         SpecializationValues values = SpecializationEffects.forStack(
@@ -154,7 +156,7 @@ public abstract class ClientGunTooltipMixin {
      *
      * @param callbackInfo 回调信息
      */
-    @Inject(method = "getText", at = @At("RETURN"))
+    @Inject(method = "getText()V", at = @At("RETURN"), require = 0, expect = 1)
     private void albionmastery$buildMasteryLine(CallbackInfo callbackInfo) {
         this.albionmastery$masteryLine = null;
         if (!MasteryConfig.CLIENT.showMasteryTooltip.get()
@@ -180,12 +182,11 @@ public abstract class ClientGunTooltipMixin {
     /**
      * 有专精行时，把整块提示的高度加一行。
      *
-     * <p>{@code getHeight} 是 Minecraft 接口方法，正式环境是混淆名，所以这里单独 {@code remap = true}。
-     * 注入失败只会让这一行没位置画（下面 {@code renderText} 的注入也会一起失败），不影响启动。
+     * <p>注入失败只会让这一行没位置画（下面 {@code renderText} 的注入也会一起失败），不影响启动。
      *
      * @param callbackInfo 携带原始高度的回调
      */
-    @Inject(method = "getHeight", at = @At("RETURN"), cancellable = true, remap = true, require = 0)
+    @Inject(method = "getHeight()I", at = @At("RETURN"), cancellable = true, require = 0, expect = 1)
     private void albionmastery$extendHeight(CallbackInfoReturnable<Integer> callbackInfo) {
         if (this.albionmastery$masteryLine == null) {
             return;
@@ -215,14 +216,14 @@ public abstract class ClientGunTooltipMixin {
      * @return 画完专精行之后的 Y 坐标
      */
     @ModifyVariable(
-            method = "renderText",
+            method = "renderText(Lnet/minecraft/client/gui/Font;IILorg/joml/Matrix4f;"
+                    + "Lnet/minecraft/client/renderer/MultiBufferSource$BufferSource;)V",
             slice = @Slice(
                     from = @At(
                             value = "FIELD",
                             target = "Lcom/tacz/guns/client/tooltip/ClientGunTooltip;damage"
                                     + ":Lnet/minecraft/network/chat/MutableComponent;",
-                            opcode = Opcodes.GETFIELD,
-                            remap = false
+                            opcode = Opcodes.GETFIELD
                     )
             ),
             at = @At(
@@ -236,8 +237,8 @@ public abstract class ClientGunTooltipMixin {
                     shift = At.Shift.AFTER
             ),
             index = 6,
-            remap = true,
-            require = 0
+            require = 0,
+            expect = 1
     )
     private int albionmastery$drawMasteryLine(int yOffset, Font font, int x, int y,
                                               Matrix4f matrix, MultiBufferSource.BufferSource buffer) {

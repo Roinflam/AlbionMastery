@@ -47,8 +47,7 @@ final class FtbQuestsBridge {
             return;
         }
         // 正处在 FTB 的玩家上下文里，多半是任务奖励里的命令改了专精等级、同步后一路调到这里。
-        // withPlayerContext 退出时把当前玩家清成 null 而不是恢复原值，嵌套进去会让外层接着自动领取的
-        // 队伍奖励落到别的队员手里；外层也可能是另一名玩家，不能借他的上下文提交这个队伍的任务。
+        // 外层上下文可能是另一名玩家，不能借他的上下文提交这个队伍的任务，所以推迟到外层退出之后。
         if (file.getCurrentPlayer() != null) {
             deferRecheck(player);
             return;

@@ -3,7 +3,9 @@ package com.flameforge.albionmastery.client.screen;
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.vertex.BufferUploader;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.renderer.GameRenderer;
@@ -58,18 +60,60 @@ public final class RenderUtil {
         RenderSystem.defaultBlendFunc();
         RenderSystem.disableCull();
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        BufferBuilder buffer = Tesselator.getInstance().getBuilder();
-        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-        return buffer;
+        return openBatch(DefaultVertexFormat.POSITION_COLOR);
     }
 
     /**
      * 结束并提交本批图元。
      */
     public static void end() {
-        Tesselator.getInstance().end();
+        submitBatch();
         RenderSystem.enableCull();
         RenderSystem.disableBlend();
+    }
+
+    /** 当前打开、还没提交的一批顶点；没有时为 null。 */
+    private static BufferBuilder open;
+
+    /**
+     * 现在是否开着一批顶点没提交。
+     *
+     * <p>所有 {@link BufferBuilder} 共用 {@link Tesselator} 里同一块缓冲，上一批没提交就再开一批，
+     * 前一批的顶点会悄悄混进后一批；画徽章这类可能被嵌套调用的地方先问一声，开着就这一帧不画。
+     *
+     * @return 开着一批时为 true
+     */
+    public static boolean isBatchOpen() {
+        return open != null;
+    }
+
+    /**
+     * 开一批三角形顶点。上一批还没提交时直接抛异常，不让两批顶点混在一起。
+     *
+     * @param format 顶点格式
+     * @return 用于写入顶点的缓冲
+     */
+    public static BufferBuilder openBatch(VertexFormat format) {
+        if (open != null) {
+            throw new IllegalStateException("上一批顶点还没提交");
+        }
+        open = Tesselator.getInstance().begin(VertexFormat.Mode.TRIANGLES, format);
+        return open;
+    }
+
+    /**
+     * 提交当前这批顶点。一个顶点都没写的空批什么也不画，也不报错。
+     */
+    public static void submitBatch() {
+        BufferBuilder buffer = open;
+        open = null;
+        if (buffer == null) {
+            return;
+        }
+        MeshData mesh = buffer.build();
+        if (mesh != null) {
+            BufferUploader.drawWithShader(mesh);
+        }
     }
 
     // ======================================================================
@@ -158,21 +202,20 @@ public final class RenderUtil {
         // 六边形顶点是按屏幕坐标顺时针排的，这个绕向在 GUI 投影下会被背面剔除整个吃掉——
         // 纯色批次（begin()）里就是靠关掉剔除才画得出来的，这里同样要关，画完再开回去
         RenderSystem.disableCull();
-        BufferBuilder buffer = Tesselator.getInstance().getBuilder();
-        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_TEX_COLOR);
+        BufferBuilder buffer = openBatch(DefaultVertexFormat.POSITION_TEX_COLOR);
         float half = 0.5F * crop;
         for (int i = 0; i < points.length; i++) {
             float[] a = points[i];
             float[] b = points[(i + 1) % points.length];
-            buffer.vertex(matrix, cx, cy, 0.0F).uv(0.5F, 0.5F).color(1.0F, 1.0F, 1.0F, alpha).endVertex();
-            buffer.vertex(matrix, a[0], a[1], 0.0F)
-                    .uv(0.5F + (a[0] - cx) / radius * half, 0.5F + (a[1] - cy) / radius * half)
-                    .color(1.0F, 1.0F, 1.0F, alpha).endVertex();
-            buffer.vertex(matrix, b[0], b[1], 0.0F)
-                    .uv(0.5F + (b[0] - cx) / radius * half, 0.5F + (b[1] - cy) / radius * half)
-                    .color(1.0F, 1.0F, 1.0F, alpha).endVertex();
+            buffer.addVertex(matrix, cx, cy, 0.0F).setUv(0.5F, 0.5F).setColor(1.0F, 1.0F, 1.0F, alpha);
+            buffer.addVertex(matrix, a[0], a[1], 0.0F)
+                    .setUv(0.5F + (a[0] - cx) / radius * half, 0.5F + (a[1] - cy) / radius * half)
+                    .setColor(1.0F, 1.0F, 1.0F, alpha);
+            buffer.addVertex(matrix, b[0], b[1], 0.0F)
+                    .setUv(0.5F + (b[0] - cx) / radius * half, 0.5F + (b[1] - cy) / radius * half)
+                    .setColor(1.0F, 1.0F, 1.0F, alpha);
         }
-        Tesselator.getInstance().end();
+        submitBatch();
         RenderSystem.enableCull();
         RenderSystem.disableBlend();
     }
@@ -186,9 +229,9 @@ public final class RenderUtil {
         float g = green(argb);
         float b = blue(argb);
         for (int i = 1; i < points.length - 1; i++) {
-            buffer.vertex(matrix, points[0][0], points[0][1], 0.0F).color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, points[i][0], points[i][1], 0.0F).color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, points[i + 1][0], points[i + 1][1], 0.0F).color(r, g, b, a).endVertex();
+            buffer.addVertex(matrix, points[0][0], points[0][1], 0.0F).setColor(r, g, b, a);
+            buffer.addVertex(matrix, points[i][0], points[i][1], 0.0F).setColor(r, g, b, a);
+            buffer.addVertex(matrix, points[i + 1][0], points[i + 1][1], 0.0F).setColor(r, g, b, a);
         }
     }
 
@@ -274,11 +317,11 @@ public final class RenderUtil {
         for (int i = 0; i < segments; i++) {
             double a0 = step * i;
             double a1 = step * (i + 1);
-            buffer.vertex(matrix, cx, cy, 0.0F).color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, cx + (float) (Math.cos(a0) * radius), cy + (float) (Math.sin(a0) * radius), 0.0F)
-                    .color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, cx + (float) (Math.cos(a1) * radius), cy + (float) (Math.sin(a1) * radius), 0.0F)
-                    .color(r, g, b, a).endVertex();
+            buffer.addVertex(matrix, cx, cy, 0.0F).setColor(r, g, b, a);
+            buffer.addVertex(matrix, cx + (float) (Math.cos(a0) * radius), cy + (float) (Math.sin(a0) * radius), 0.0F)
+                    .setColor(r, g, b, a);
+            buffer.addVertex(matrix, cx + (float) (Math.cos(a1) * radius), cy + (float) (Math.sin(a1) * radius), 0.0F)
+                    .setColor(r, g, b, a);
         }
     }
 
@@ -324,13 +367,13 @@ public final class RenderUtil {
             float x1o = cx + cos1 * outer;
             float y1o = cy + sin1 * outer;
 
-            buffer.vertex(matrix, x0i, y0i, 0.0F).color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, x0o, y0o, 0.0F).color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, x1o, y1o, 0.0F).color(r, g, b, a).endVertex();
+            buffer.addVertex(matrix, x0i, y0i, 0.0F).setColor(r, g, b, a);
+            buffer.addVertex(matrix, x0o, y0o, 0.0F).setColor(r, g, b, a);
+            buffer.addVertex(matrix, x1o, y1o, 0.0F).setColor(r, g, b, a);
 
-            buffer.vertex(matrix, x0i, y0i, 0.0F).color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, x1o, y1o, 0.0F).color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, x1i, y1i, 0.0F).color(r, g, b, a).endVertex();
+            buffer.addVertex(matrix, x0i, y0i, 0.0F).setColor(r, g, b, a);
+            buffer.addVertex(matrix, x1o, y1o, 0.0F).setColor(r, g, b, a);
+            buffer.addVertex(matrix, x1i, y1i, 0.0F).setColor(r, g, b, a);
         }
     }
 
@@ -362,13 +405,13 @@ public final class RenderUtil {
         float g = green(argb);
         float b = blue(argb);
 
-        buffer.vertex(matrix, x1 + nx, y1 + ny, 0.0F).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x1 - nx, y1 - ny, 0.0F).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2 - nx, y2 - ny, 0.0F).color(r, g, b, a).endVertex();
+        buffer.addVertex(matrix, x1 + nx, y1 + ny, 0.0F).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x1 - nx, y1 - ny, 0.0F).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2 - nx, y2 - ny, 0.0F).setColor(r, g, b, a);
 
-        buffer.vertex(matrix, x1 + nx, y1 + ny, 0.0F).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2 - nx, y2 - ny, 0.0F).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, x2 + nx, y2 + ny, 0.0F).color(r, g, b, a).endVertex();
+        buffer.addVertex(matrix, x1 + nx, y1 + ny, 0.0F).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2 - nx, y2 - ny, 0.0F).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2 + nx, y2 + ny, 0.0F).setColor(r, g, b, a);
     }
 
     // ======================================================================
@@ -387,16 +430,14 @@ public final class RenderUtil {
         RenderSystem.blendFunc(GlStateManager.SourceFactor.SRC_ALPHA, GlStateManager.DestFactor.ONE);
         RenderSystem.disableCull();
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        BufferBuilder buffer = Tesselator.getInstance().getBuilder();
-        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-        return buffer;
+        return openBatch(DefaultVertexFormat.POSITION_COLOR);
     }
 
     /**
      * 结束叠加混合的一批图元，混合函数恢复默认。
      */
     public static void endAdditive() {
-        Tesselator.getInstance().end();
+        submitBatch();
         RenderSystem.defaultBlendFunc();
         RenderSystem.enableCull();
         RenderSystem.disableBlend();
@@ -412,9 +453,8 @@ public final class RenderUtil {
      * @param argb   颜色
      */
     public static void vertex(BufferBuilder buffer, Matrix4f matrix, float x, float y, int argb) {
-        buffer.vertex(matrix, x, y, 0.0F)
-                .color((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF, (argb >>> 24) & 0xFF)
-                .endVertex();
+        // setColor(int) 吃 ARGB 打包色，和以前拆成四个分量写入的字节一样
+        buffer.addVertex(matrix, x, y, 0.0F).setColor(argb);
     }
 
     /**

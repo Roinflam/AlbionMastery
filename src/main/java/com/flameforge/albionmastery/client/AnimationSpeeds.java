@@ -259,47 +259,4 @@ public final class AnimationSpeeds {
     private static double positive(double value) {
         return value > 0.0D && Double.isFinite(value) ? value : 1.0D;
     }
-
-    /**
-     * 一个可变速的虚拟时钟。
-     *
-     * <p>每次 {@link #advance} 传入真实的纳秒时间戳和当前倍速，返回虚拟时间戳：
-     * 真实时间前进了 d，虚拟时间就前进 d × 倍速。倍速为 1 时和真实时间完全一致。
-     *
-     * <p>不是线程安全的，也不需要：动画只在渲染线程上推进。
-     */
-    public static final class VirtualClock {
-
-        /** 上一次收到的真实时间戳。 */
-        private long lastReal;
-
-        /** 上一次返回的虚拟时间戳。 */
-        private long lastVirtual;
-
-        /** 还没收到过第一个时间戳。 */
-        private boolean fresh = true;
-
-        /**
-         * 推进时钟并取虚拟时间。
-         *
-         * @param realNanos 真实的 {@code System.nanoTime()}
-         * @param scale     当前倍速
-         * @return 虚拟时间戳（纳秒）
-         */
-        public long advance(long realNanos, double scale) {
-            if (this.fresh) {
-                // 第一次直接对齐真实时间，让还没开始播的动画和别的 Runner 站在同一条起跑线上
-                this.fresh = false;
-                this.lastReal = realNanos;
-                this.lastVirtual = realNanos;
-                return realNanos;
-            }
-            long delta = realNanos - this.lastReal;
-            this.lastReal = realNanos;
-            if (delta > 0L) {
-                this.lastVirtual += scale == 1.0D ? delta : (long) (delta * scale);
-            }
-            return this.lastVirtual;
-        }
-    }
 }

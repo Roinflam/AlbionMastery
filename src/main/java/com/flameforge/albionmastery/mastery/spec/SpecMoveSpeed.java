@@ -12,9 +12,10 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraftforge.common.ForgeMod;
+import net.minecraft.core.Holder;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.ai.attributes.Attribute;
 
-import java.util.UUID;
 import com.flameforge.albionmastery.weapon.compat.BowSupport;
 import net.minecraft.world.item.ItemStack;
 
@@ -31,8 +32,8 @@ import net.minecraft.world.item.ItemStack;
  * <p>为什么只在服务端做：{@code MOVEMENT_SPEED} 是会自动同步给客户端的属性，
  * 服务端加上修饰符，客户端的移动预测自然就跟着变了，不需要再发一遍包。
  *
- * <p>用固定 UUID 的修饰符，每次刷新先按 UUID 摘掉旧的再挂新的，永远不会叠加出两个。
- * 用 {@code MULTIPLY_TOTAL}：数值是「在最终速度上乘 (1 + x)」，和其它模组的加速减速
+ * <p>用固定 ID 的修饰符，每次刷新先按 ID 摘掉旧的再挂新的，永远不会叠加出两个。
+ * 用 {@code ADD_MULTIPLIED_TOTAL}：数值是「在最终速度上乘 (1 + x)」，和其它模组的加速减速
  * 相乘而不是相加，不会和别人打架。
  *
  * <p>什么时候要刷新：主手物品变了、特化切换了、登录 / 重生 / 换维度（属性实例是新的）。
@@ -40,49 +41,32 @@ import net.minecraft.world.item.ItemStack;
  */
 public final class SpecMoveSpeed {
 
-    /** 修饰符的固定 UUID，只用来认自己挂的那一个。 */
-    private static final UUID MODIFIER_ID = UUID.fromString("7c1d3a2e-5b6f-4e8a-9d0c-1f2e3d4c5b6a");
+    /** 移速修饰符的 ID，只用来认自己挂的那一个。 */
+    private static final ResourceLocation MODIFIER_ID = id("spec_move_speed");
 
-    /** 修饰符名字，只在调试时看到。 */
-    private static final String MODIFIER_NAME = "albionmastery:spec_move_speed";
+    /** 攻速修饰符的 ID。 */
+    private static final ResourceLocation ATTACK_SPEED_ID = id("spec_attack_speed");
 
-    /** 攻速修饰符的固定 UUID。 */
-    private static final UUID ATTACK_SPEED_ID = UUID.fromString("3e9f7a1c-2d4b-4c6e-8f0a-5b7d9e1f3a2c");
+    /** 攻击距离修饰符的 ID。 */
+    private static final ResourceLocation REACH_ID = id("spec_entity_reach");
 
-    /** 攻速修饰符名字。 */
-    private static final String ATTACK_SPEED_NAME = "albionmastery:spec_attack_speed";
+    /** 拉弓倍速修饰符的 ID。 */
+    private static final ResourceLocation DRAW_SPEED_ID = id("visual_draw_speed");
 
-    /** 攻击距离修饰符的固定 UUID。 */
-    private static final UUID REACH_ID = UUID.fromString("5a8c2e4f-7b1d-4f3a-9c6e-2d8b4a0f6e13");
+    /** 近战倍速修饰符的 ID。 */
+    private static final ResourceLocation MELEE_SPEED_ID = id("visual_melee_speed");
 
-    /** 攻击距离修饰符名字。 */
-    private static final String REACH_NAME = "albionmastery:spec_entity_reach";
+    /** 换弹倍速修饰符的 ID。 */
+    private static final ResourceLocation RELOAD_SPEED_ID = id("visual_reload_speed");
 
-    /** 拉弓倍速修饰符的固定 UUID。 */
-    private static final UUID DRAW_SPEED_ID = UUID.fromString("b4f1c6a9-3e27-4d58-8a1b-6c9d0e5f7a24");
-
-    /** 拉弓倍速修饰符名字。 */
-    private static final String DRAW_SPEED_NAME = "albionmastery:visual_draw_speed";
-
-    /** 近战倍速修饰符的固定 UUID。 */
-    private static final UUID MELEE_SPEED_ID = UUID.fromString("1d6e8b03-5a4c-42f7-9e1d-83b5c7a0f6d2");
-
-    /** 近战倍速修饰符名字。 */
-    private static final String MELEE_SPEED_NAME = "albionmastery:visual_melee_speed";
-
-    /** 换弹倍速修饰符的固定 UUID。 */
-    private static final UUID RELOAD_SPEED_ID = UUID.fromString("8c2a5f16-9b70-4e3d-a45c-0f1e6d8b2937");
-
-    /** 换弹倍速修饰符名字。 */
-    private static final String RELOAD_SPEED_NAME = "albionmastery:visual_reload_speed";
-
-    /** 施法倍速修饰符的固定 UUID。 */
-    private static final UUID CAST_SPEED_ID = UUID.fromString("6b3d9e42-0c85-4a17-b2f6-7d4e1a8c30b5");
-
-    /** 施法倍速修饰符名字。 */
-    private static final String CAST_SPEED_NAME = "albionmastery:visual_cast_speed";
+    /** 施法倍速修饰符的 ID。 */
+    private static final ResourceLocation CAST_SPEED_ID = id("visual_cast_speed");
 
     private SpecMoveSpeed() {
+    }
+
+    private static ResourceLocation id(String path) {
+        return ResourceLocation.fromNamespaceAndPath(AlbionMastery.MOD_ID, path);
     }
 
     /**
@@ -97,27 +81,27 @@ public final class SpecMoveSpeed {
         ResolvedWeapon weapon = currentWeapon(player, main);
         SpecializationValues values = currentValues(player, weapon);
         String provider = weapon == null ? "" : weapon.providerId();
-        apply(player, Attributes.MOVEMENT_SPEED, MODIFIER_ID, MODIFIER_NAME, values.moveSpeed());
+        apply(player, Attributes.MOVEMENT_SPEED, MODIFIER_ID, values.moveSpeed());
         // 吃原版攻速属性的近战走这条：攻击间隔倍率 0.75 = 攻速 x(1/0.75)。
         // 哪些来源吃这套属性由 WeaponKeys 那张表说了算，新增来源只要登记一次，
         // 不会再出现「匠魂被漏在外面、攻速特化是空操作」那种改了一半的情况
         boolean vanillaMelee = WeaponKeys.usesVanillaMeleeAttributes(provider);
-        apply(player, Attributes.ATTACK_SPEED, ATTACK_SPEED_ID, ATTACK_SPEED_NAME,
+        apply(player, Attributes.ATTACK_SPEED, ATTACK_SPEED_ID,
                 vanillaMelee ? speedOf(values.attackInterval()) : 1.0D);
         // 攻击距离同理只给吃原版属性的那几个来源：近战附属用自己的判定盒，
         // 拔刀剑有自己的斩击范围，都不看这个属性。
-        // Forge 的实体交互距离属性会同步给客户端，准星选中实体的距离跟着变
-        apply(player, ForgeMod.ENTITY_REACH.get(), REACH_ID, REACH_NAME,
+        // 原版的实体交互距离属性会同步给客户端，准星选中实体的距离跟着变
+        apply(player, Attributes.ENTITY_INTERACTION_RANGE, REACH_ID,
                 vanillaMelee ? values.reach() : 1.0D);
 
         // 下面三个是「画面该放多快」，会同步给所有看得见这个玩家的客户端（见 SpecVisualAttributes）。
         // 拉弓那条同时也是拉弦计时本身的倍速，所以两端读的是同一个数
-        apply(player, SpecVisualAttributes.DRAW_SPEED.get(), DRAW_SPEED_ID, DRAW_SPEED_NAME,
+        apply(player, SpecVisualAttributes.DRAW_SPEED, DRAW_SPEED_ID,
                 BowSupport.isBowOrCrossbow(main) ? positive(values.drawSpeed()) : 1.0D);
-        apply(player, SpecVisualAttributes.MELEE_SPEED.get(), MELEE_SPEED_ID, MELEE_SPEED_NAME,
+        apply(player, SpecVisualAttributes.MELEE_SPEED, MELEE_SPEED_ID,
                 WeaponKeys.PROVIDER_LRTACTICAL_MELEE.equals(provider)
                         ? speedOf(values.attackInterval()) : 1.0D);
-        apply(player, SpecVisualAttributes.RELOAD_SPEED.get(), RELOAD_SPEED_ID, RELOAD_SPEED_NAME,
+        apply(player, SpecVisualAttributes.RELOAD_SPEED, RELOAD_SPEED_ID,
                 WeaponKeys.PROVIDER_TACZ_GUN.equals(provider) ? speedOf(values.reloadTime()) : 1.0D);
         // 正在拉的那把弓说了算：主手是剑、副手在拉弓时，上面那条会把倍速按主手写成 1.0，
         // 而刷新随时可能被别的事（涨经验、物品耐久变化）触发，拉到一半就变回原速
@@ -140,7 +124,7 @@ public final class SpecMoveSpeed {
             return;
         }
         SpecializationValues values = currentValues(player, currentWeapon(player, using));
-        apply(player, SpecVisualAttributes.DRAW_SPEED.get(), DRAW_SPEED_ID, DRAW_SPEED_NAME,
+        apply(player, SpecVisualAttributes.DRAW_SPEED, DRAW_SPEED_ID,
                 positive(values.drawSpeed()));
     }
 
@@ -154,7 +138,7 @@ public final class SpecMoveSpeed {
      * @param timeFactor 施法时间倍率；1.0 表示不变
      */
     public static void refreshCastSpeed(ServerPlayer player, double timeFactor) {
-        apply(player, SpecVisualAttributes.CAST_SPEED.get(), CAST_SPEED_ID, CAST_SPEED_NAME, speedOf(timeFactor));
+        apply(player, SpecVisualAttributes.CAST_SPEED, CAST_SPEED_ID, speedOf(timeFactor));
     }
 
     /**
@@ -182,12 +166,11 @@ public final class SpecMoveSpeed {
      *
      * @param player     玩家
      * @param attribute  属性
-     * @param id         修饰符 UUID
-     * @param name       修饰符名字
+     * @param id         修饰符 ID
      * @param multiplier 想要的倍率
      */
-    private static void apply(ServerPlayer player, net.minecraft.world.entity.ai.attributes.Attribute attribute,
-                              UUID id, String name, double multiplier) {
+    private static void apply(ServerPlayer player, Holder<Attribute> attribute,
+                              ResourceLocation id, double multiplier) {
         AttributeInstance instance = player.getAttribute(attribute);
         if (instance == null) {
             return;
@@ -197,7 +180,7 @@ public final class SpecMoveSpeed {
 
         // 已经挂着同样的值就什么都不做：这个方法在主手 NBT 每次变化时都会被叫到，
         // 枪械开一枪就变一次，不能每次都摘了重挂
-        if (existing != null && Math.abs(existing.getAmount() - wanted) < 1.0E-9D) {
+        if (existing != null && Math.abs(existing.amount() - wanted) < 1.0E-9D) {
             return;
         }
         if (existing != null) {
@@ -206,10 +189,12 @@ public final class SpecMoveSpeed {
         if (Math.abs(wanted) < 1.0E-9D) {
             return;
         }
+        // 不用 addOrUpdateTransientModifier：它按引用比新旧修饰符，新建的对象永远算「变了」，
+        // 每次都会标脏、向客户端同步属性；上面两段提前返回也就白写了
         instance.addTransientModifier(new AttributeModifier(
-                id, name, wanted, AttributeModifier.Operation.MULTIPLY_TOTAL));
+                id, wanted, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
         AlbionMastery.LOGGER.debug("玩家 {} 的特化修饰符 {} 更新为 x{}",
-                player.getGameProfile().getName(), name, multiplier);
+                player.getGameProfile().getName(), id, multiplier);
     }
 
     /**
@@ -226,14 +211,14 @@ public final class SpecMoveSpeed {
         if (attack != null && attack.getModifier(ATTACK_SPEED_ID) != null) {
             attack.removeModifier(ATTACK_SPEED_ID);
         }
-        AttributeInstance reach = player.getAttribute(ForgeMod.ENTITY_REACH.get());
+        AttributeInstance reach = player.getAttribute(Attributes.ENTITY_INTERACTION_RANGE);
         if (reach != null && reach.getModifier(REACH_ID) != null) {
             reach.removeModifier(REACH_ID);
         }
-        removeOne(player, SpecVisualAttributes.DRAW_SPEED.get(), DRAW_SPEED_ID);
-        removeOne(player, SpecVisualAttributes.MELEE_SPEED.get(), MELEE_SPEED_ID);
-        removeOne(player, SpecVisualAttributes.RELOAD_SPEED.get(), RELOAD_SPEED_ID);
-        removeOne(player, SpecVisualAttributes.CAST_SPEED.get(), CAST_SPEED_ID);
+        removeOne(player, SpecVisualAttributes.DRAW_SPEED, DRAW_SPEED_ID);
+        removeOne(player, SpecVisualAttributes.MELEE_SPEED, MELEE_SPEED_ID);
+        removeOne(player, SpecVisualAttributes.RELOAD_SPEED, RELOAD_SPEED_ID);
+        removeOne(player, SpecVisualAttributes.CAST_SPEED, CAST_SPEED_ID);
     }
 
     /**
@@ -241,10 +226,9 @@ public final class SpecMoveSpeed {
      *
      * @param player    玩家
      * @param attribute 属性
-     * @param id        修饰符 UUID
+     * @param id        修饰符 ID
      */
-    private static void removeOne(ServerPlayer player,
-                                  net.minecraft.world.entity.ai.attributes.Attribute attribute, UUID id) {
+    private static void removeOne(ServerPlayer player, Holder<Attribute> attribute, ResourceLocation id) {
         AttributeInstance instance = player.getAttribute(attribute);
         if (instance != null && instance.getModifier(id) != null) {
             instance.removeModifier(id);

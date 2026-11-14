@@ -2,9 +2,9 @@ package com.flameforge.albionmastery.compat.ftbquests;
 
 import com.flameforge.albionmastery.AlbionMastery;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.fml.ModList;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModList;
+import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 
 /**
  * FTB 任务联动的入口：多一种「专精段位」任务（{@code albionmastery:mastery_rank}）。
@@ -29,12 +29,14 @@ public final class FtbQuestsCompat {
      * <p>登记本身推迟到通用初始化阶段的主线程任务里做：模组构造是多线程并行跑的，
      * FTB 任务自己也在构造函数里往同一张不加锁的类型表里登记，两边同时写有概率把表写坏。
      * 服务端要到服务器启动完才读任务文件，客户端进服才收到任务数据，这个时机足够早。
+     *
+     * @param modBus 本模组的事件总线（主类构造器拿到的那条）
      */
-    public static void init() {
+    public static void init(IEventBus modBus) {
         if (!LOADED) {
             return;
         }
-        FMLJavaModLoadingContext.get().getModEventBus().addListener(FtbQuestsCompat::onCommonSetup);
+        modBus.addListener(FtbQuestsCompat::onCommonSetup);
     }
 
     private static void onCommonSetup(FMLCommonSetupEvent event) {

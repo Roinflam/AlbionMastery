@@ -6,7 +6,7 @@ import com.flameforge.albionmastery.mastery.LevelCurve;
 import com.flameforge.albionmastery.mastery.spec.Specialization;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.common.ForgeConfigSpec;
+import net.neoforged.neoforge.common.ModConfigSpec;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.Collections;
@@ -36,10 +36,10 @@ import java.util.ArrayList;
  */
 public final class MasteryConfig {
 
-    public static final ForgeConfigSpec COMMON_SPEC;
+    public static final ModConfigSpec COMMON_SPEC;
     public static final Common COMMON;
 
-    public static final ForgeConfigSpec CLIENT_SPEC;
+    public static final ModConfigSpec CLIENT_SPEC;
     public static final Client CLIENT;
 
     /**
@@ -54,7 +54,7 @@ public final class MasteryConfig {
      */
     private static final Map<String, String> SPEC_VALUE_COMMENTS = Map.ofEntries(
             Map.entry("magazine", "弹匣容量倍率（2.0 = 翻倍）"),
-            Map.entry("reloadTime", "换弹耗时倍率（2.0 = 要花两倍时间，0.5 = 只要一半时间）"),
+            Map.entry("reloadTime", "换弹耗时倍率（2.0 = 耗时翻倍，0.5 = 耗时减半）"),
             Map.entry("damage", "通用伤害倍率"),
             Map.entry("attackInterval", "近战攻击间隔倍率（0.6 = 出手快四成，1.6 = 慢六成）"),
             Map.entry("summonedDamage", "拔刀剑幻影剑（召唤剑）伤害倍率"),
@@ -62,63 +62,63 @@ public final class MasteryConfig {
             Map.entry("vsPlayerDamage", "目标是玩家时的额外倍率"),
             Map.entry("vsMobDamage", "目标不是玩家时的额外倍率"),
             Map.entry("armoredDamage", "目标有护甲时的额外倍率"),
-            Map.entry("unarmoredDamage", "目标没有护甲时的额外倍率"),
+            Map.entry("unarmoredDamage", "目标无护甲时的额外倍率"),
             Map.entry("headShotDamage", "爆头时的额外倍率"),
-            Map.entry("bodyShotDamage", "没爆头时的额外倍率"),
+            Map.entry("bodyShotDamage", "未爆头时的额外倍率"),
             Map.entry("executeDamage", "目标残血时的额外倍率"),
-            Map.entry("executeThreshold", "残血的判定线，目标血量低于最大值的这个比例才算"),
+            Map.entry("executeThreshold", "残血判定线，以目标最大生命值的比例计"),
             Map.entry("freshDamage", "目标接近满血时的额外倍率"),
-            Map.entry("desperationDamage", "自己血量见底时能吃到的最高额外倍率，按血量线性过渡"),
-            Map.entry("desperationThreshold", "自己血量低于这个比例才开始吃上面那条"),
-            Map.entry("desperationFloor", "自己血量低到这个比例就吃满，再低也不会更高"),
+            Map.entry("desperationDamage", "自身生命值极低时的最高额外倍率，按生命值线性过渡"),
+            Map.entry("desperationThreshold", "自身生命值低于此比例时开始获得背水加成"),
+            Map.entry("desperationFloor", "自身生命值降到此比例时背水加成达到最高"),
             Map.entry("critChance", "暴击概率（0.15 = 15%）"),
-            Map.entry("critDamage", "暴击时的额外倍率（1.5 = 暴击打 1.5 倍）"),
-            Map.entry("lifeSteal", "吸血比例：按最终造成伤害的这个比例回血（0.1 = 10%）"),
+            Map.entry("critDamage", "暴击时的额外倍率（1.5 = 伤害为 1.5 倍）"),
+            Map.entry("lifeSteal", "吸血比例：按最终伤害的此比例回复生命（0.1 = 10%）"),
             Map.entry("moveSpeed", "手持该类武器时的移动速度倍率（1.1 = 快一成，0.9 = 慢一成）"),
             Map.entry("xpGain", "用该类武器获得专精经验的倍率"),
-            Map.entry("killRefill", "枪械击杀后立刻补回弹匣容量的这个比例（0.5 = 补半个弹匣）"),
-            Map.entry("comboStep", "连击每层增加的伤害比例（0.05 = 每层 +5%），第一下不吃"),
+            Map.entry("killRefill", "枪械击杀后立即补回弹匣容量的比例（0.5 = 补半个弹匣）"),
+            Map.entry("comboStep", "连击每层增加的伤害比例（0.05 = 每层 +5%），首击不计"),
             Map.entry("comboMax", "连击最多叠几层"),
             Map.entry("durability", "武器耐久消耗倍率（0.5 = 只扣一半，1.5 = 多扣五成）"),
             Map.entry("manaCost", "法术法力消耗倍率（0.7 = 省三成）"),
             Map.entry("spellCooldown", "法术冷却时间倍率（0.7 = 快三成）"),
-            Map.entry("spellLevel", "法术等级加成，已停用（等级会间接放大法术范围和实体数量），填了也不生效"),
+            Map.entry("spellLevel", "法术等级加成。已停用，此项不生效"),
             Map.entry("gunVolume", "枪声音量倍率（0.3 = 只剩三成响，传播距离也跟着缩）"),
-            Map.entry("bulletSpeed", "子弹初速倍率（1.2 = 快两成；上限 2.5，太快会穿墙漏判）"),
-            Map.entry("recoil", "后座倍率（0.7 = 只剩七成后座）"),
+            Map.entry("bulletSpeed", "子弹初速倍率（1.2 = 快两成）。上限 2.5，过快易穿墙漏判"),
+            Map.entry("recoil", "后坐倍率（0.7 = 后坐降为七成）"),
             Map.entry("castTime", "法术施法时间倍率（0.8 = 前摇快两成）"),
             Map.entry("drawSpeed", "拉弓蓄力速度倍率（1.3 = 拉满快三成），只对弓有效"),
-            Map.entry("doubleCast", "法术双重施法概率（1.0 = 每次施放后必定自动免费再放一次，不扣法力不算冷却）"),
-            Map.entry("fireRate", "枪械射速倍率（1.3 = 射速快三成）。上限 3；最快 1200 发/分，TACZ 按 tick 开火，再快打不出来。点射的连发间隔也跟着变"),
+            Map.entry("doubleCast", "法术双重施法概率（1.0 = 每次施放后必定再施放一次，不消耗法力，不计冷却）"),
+            Map.entry("fireRate", "枪械射速倍率（1.3 = 射速快三成）。上限 3，最快 1200 发/分，TACZ 按 tick 开火，无法更快。点射的连发间隔随之变化"),
             Map.entry("adsTime", "枪械开镜耗时倍率（0.7 = 开镜快三成，1.3 = 慢三成）"),
-            Map.entry("hipSpread", "枪械腰射散布倍率（0.5 = 散布减半）。没完全开镜时开的枪都算腰射"),
+            Map.entry("hipSpread", "枪械腰射散布倍率（0.5 = 散布减半）。未完全开镜时的射击均算腰射"),
             Map.entry("aimSpread", "枪械开镜散布倍率（0.5 = 散布减半）。瞄准进度满了才算开镜"),
-            Map.entry("drawTime", "枪械掏枪耗时倍率（0.5 = 切到这把枪后一半时间就能开火）"),
+            Map.entry("drawTime", "枪械拔枪耗时倍率（0.5 = 切枪后可开火的时间减半）"),
             Map.entry("boltTime", "枪械拉栓耗时倍率（0.5 = 拉栓快一倍），只对栓动 / 泵动枪有效"),
-            Map.entry("sprintTime", "枪械冲刺后恢复射击的耗时倍率（0.5 = 停跑后一半时间就能开火）"),
+            Map.entry("sprintTime", "枪械冲刺后恢复射击的耗时倍率（0.5 = 停止冲刺后等待时间减半）"),
             Map.entry("ammoSave", "省弹概率（0.3 = 30%），上限 0.9。枪械：这一发不扣弹匣，背包直读和栓动枪不生效。"
                     + "弓弩：只有这一箭确实从背包里扣掉了才会按概率退还，无限附魔、创造模式、模组的无限弓和箭袋饰品都不退"),
-            Map.entry("pierce", "子弹 / 箭 / 魔艺投射物额外穿透的目标数，整数（1 = 多打穿一个目标）。爆炸弹不生效"),
+            Map.entry("pierce", "子弹 / 箭 / 魔艺投射物额外穿透的目标数，整数（1 = 多穿透一个目标）。对爆炸弹无效"),
             Map.entry("knockback", "击退倍率（1.5 = 击退远一半，0.5 = 只剩一半），对近战、拔刀剑、弓箭有效"),
             Map.entry("reach", "攻击距离倍率（1.2 = 远两成），上限 2。只对吃原版交互距离属性的近战有效（当前是 "
                     + WeaponKeys.vanillaAttributeProviderList() + "）"),
-            Map.entry("backstabDamage", "从目标背后打中时的额外倍率（目标身后约 120° 的扇形）"),
-            Map.entry("damageTaken", "手持该武器时自己受到的伤害倍率（0.8 = 少掉两成血），最低 0.1"),
+            Map.entry("backstabDamage", "从目标背后命中时的额外倍率（目标身后约 120° 的扇形）"),
+            Map.entry("damageTaken", "手持该武器时自身受到的伤害倍率（0.8 = 减伤两成），最低 0.1"),
             Map.entry("saDamage", "拔刀剑 SA 伤害倍率：SA 发动后 1.5 秒内的斩击都算"),
-            Map.entry("soulGain", "拔刀剑耀魂获取倍率（1.5 = 多拿一半耀魂）"),
-            Map.entry("killHeal", "击杀后回复自己最大生命值的这个比例（0.1 = 回一成血）"),
-            Map.entry("frenzyStep", "嗜战：每次击杀叠一层，每层伤害加成（0.08 = 每层 +8%），8 秒内不再击杀就清零"),
+            Map.entry("soulGain", "拔刀剑耀魂获取倍率（1.5 = 多获得一半）"),
+            Map.entry("killHeal", "击杀后回复自身最大生命值的此比例（0.1 = 回复一成）"),
+            Map.entry("frenzyStep", "嗜战：每次击杀叠一层，每层伤害加成（0.08 = 每层 +8%），8 秒内未击杀则清零"),
             Map.entry("frenzyMax", "嗜战最多叠几层"),
             Map.entry("nearDamage", "目标在 6 格内时的伤害倍率"),
             Map.entry("farDamage", "目标在 24 格外时的伤害倍率"),
-            Map.entry("igniteChance", "命中时点燃目标 4 秒的概率（同一 tick 对同一目标只掷一次，霰弹不会必中）"),
-            Map.entry("slowChance", "命中时让目标缓慢 II 3 秒的概率"),
-            Map.entry("weakenChance", "命中时让目标虚弱 4 秒的概率"),
+            Map.entry("igniteChance", "命中时点燃目标 4 秒的概率。同一 tick 对同一目标只判定一次，霰弹并非必定点燃"),
+            Map.entry("slowChance", "命中时使目标缓慢 II 3 秒的概率"),
+            Map.entry("weakenChance", "命中时使目标虚弱 4 秒的概率"),
             Map.entry("lastRoundDamage", "枪械弹匣只剩最后三成子弹时的伤害倍率"),
-            Map.entry("ricochet", "铁枪子弹在方块上额外弹射的次数，整数（2 = 多弹两次），和弹射子弹改装件叠加"),
-            Map.entry("seeking", "铁枪子弹的追踪力度，加在枪自己的追踪上（一个追踪火药改装件是 0.1），上限 1"),
-            Map.entry("blowback", "铁枪开枪时把人往后推的力度，加在枪自己的人物反冲上（燧发枪自带 0.5），负数是减，减到 0 以下按 0 算"),
-            Map.entry("firstShotDamage", "铁枪满弹匣打出的第一发的伤害倍率（单发枪每一发都算），只乘子弹直接命中"),
+            Map.entry("ricochet", "铁枪子弹在方块上额外弹射的次数，整数（2 = 多弹两次），与弹射子弹改装件叠加"),
+            Map.entry("seeking", "铁枪子弹的追踪力度，加在枪本身的追踪上（一个追踪火药改装件为 0.1），上限 1"),
+            Map.entry("blowback", "铁枪开枪时人物后退的力度，叠加在枪本身的人物反冲上（燧发枪自带 0.5）。负数为减少，合计最低为 0"),
+            Map.entry("firstShotDamage", "铁枪满弹匣时第一发的伤害倍率，单发枪每发均算首发，只作用于子弹直接命中"),
             Map.entry("ricochetDamage", "铁枪子弹在方块上弹射过之后再命中的伤害倍率"),
             Map.entry("effectDamage", "铁枪改装件附带伤害的倍率：黑火药装药的爆炸、电击弹芯的闪电、魂火硬币的灵魂伤害"));
 
@@ -132,11 +132,11 @@ public final class MasteryConfig {
             new EnumMap<>(Specialization.class);
 
     static {
-        Pair<Common, ForgeConfigSpec> commonPair = new ForgeConfigSpec.Builder().configure(Common::new);
+        Pair<Common, ModConfigSpec> commonPair = new ModConfigSpec.Builder().configure(Common::new);
         COMMON = commonPair.getLeft();
         COMMON_SPEC = commonPair.getRight();
 
-        Pair<Client, ForgeConfigSpec> clientPair = new ForgeConfigSpec.Builder().configure(Client::new);
+        Pair<Client, ModConfigSpec> clientPair = new ModConfigSpec.Builder().configure(Client::new);
         CLIENT = clientPair.getLeft();
         CLIENT_SPEC = clientPair.getRight();
     }
@@ -286,20 +286,21 @@ public final class MasteryConfig {
      * 特化数值跟随模组版本更新：配置里记的版本比 {@link #SPEC_BALANCE_VERSION} 小、且服主没关自动更新时，
      * 把每个特化的每一项都设回默认值，再写上当前版本并保存。
      *
-     * <p>在配置加载事件里、刷新快照之前调用。保存文件会再触发一次重载事件，那时版本已经对上，不会重复重置。
+     * <p>在配置加载事件里、刷新快照之前调用。保存文件会再触发重载事件（{@code save()} 在当前线程同步发一次，
+     * 文件监视线程多半还会再发一次），那时版本已经对上，不会重复重置。
      *
      * @return 这次有没有重置
      */
     public static synchronized boolean migrateSpecBalance() {
-        // 加锁：Forge 补配置时会写一次文件，文件监视线程随即触发重载，和启动线程的加载撞在一起；
-        // 两边各跑一遍结果一样（都是改回默认值），锁住只是免得交错着改、日志也看得清
+        // 加锁：补配置、save() 都会触发重载，可能来自文件监视线程，也可能是 save() 在当前线程同步发出（可重入，
+        // 同一线程再进来时版本已对上、直接返回）；两边各跑一遍结果一样（都是改回默认值），锁住只是免得交错着改、日志也看得清
         int from = COMMON.specBalanceVersion.get();
         if (!COMMON.autoUpdateSpecBalance.get() || from >= SPEC_BALANCE_VERSION) {
             return false;
         }
         int changed = 0;
         for (SpecEntry entry : SPEC_ENTRIES.values()) {
-            for (ForgeConfigSpec.DoubleValue value : entry.values().values()) {
+            for (ModConfigSpec.DoubleValue value : entry.values().values()) {
                 if (Double.compare(value.get(), value.getDefault()) != 0) {
                     value.set(value.getDefault());
                     changed++;
@@ -402,110 +403,110 @@ public final class MasteryConfig {
             return values;
         }
 
-        public final ForgeConfigSpec.IntValue maxLevel;
-        public final ForgeConfigSpec.DoubleValue overallDamagePerLevel;
-        public final ForgeConfigSpec.DoubleValue typeDamagePerLevel;
-        public final ForgeConfigSpec.DoubleValue weaponDamagePerLevel;
-        public final ForgeConfigSpec.DoubleValue weaponCrossDamagePerLevel;
-        public final ForgeConfigSpec.DoubleValue maxTotalDamageBonus;
+        public final ModConfigSpec.IntValue maxLevel;
+        public final ModConfigSpec.DoubleValue overallDamagePerLevel;
+        public final ModConfigSpec.DoubleValue typeDamagePerLevel;
+        public final ModConfigSpec.DoubleValue weaponDamagePerLevel;
+        public final ModConfigSpec.DoubleValue weaponCrossDamagePerLevel;
+        public final ModConfigSpec.DoubleValue maxTotalDamageBonus;
         /**
          * 每个武器来源各自的专精伤害总倍率：来源 ID → 配置值。
          *
          * <p>按 {@link WeaponKeys#ALL_PROVIDERS} 生成，一个来源一个键，谁也不蹭谁的。
          * 以后加来源只要往那张表里加一行，这里自动多一个默认 1.0 的键。
          */
-        public final Map<String, ForgeConfigSpec.DoubleValue> sourceMasteryMultipliers;
-        public final ForgeConfigSpec.DoubleValue xpBase;
-        public final ForgeConfigSpec.DoubleValue xpExponent;
-        public final ForgeConfigSpec.DoubleValue xpPerDamage;
-        public final ForgeConfigSpec.DoubleValue xpPerKill;
-        public final ForgeConfigSpec.BooleanValue xpFromOriginalMobExperience;
-        public final ForgeConfigSpec.IntValue npcFallbackMobExperience;
+        public final Map<String, ModConfigSpec.DoubleValue> sourceMasteryMultipliers;
+        public final ModConfigSpec.DoubleValue xpBase;
+        public final ModConfigSpec.DoubleValue xpExponent;
+        public final ModConfigSpec.DoubleValue xpPerDamage;
+        public final ModConfigSpec.DoubleValue xpPerKill;
+        public final ModConfigSpec.BooleanValue xpFromOriginalMobExperience;
+        public final ModConfigSpec.IntValue npcFallbackMobExperience;
         /** CustomNPCs 掉落经验参与专精经验折算前的额外倍率。 */
-        public final ForgeConfigSpec.DoubleValue npcExperienceMultiplier;
-        public final ForgeConfigSpec.DoubleValue xpPerMobExperience;
-        public final ForgeConfigSpec.DoubleValue typeXpMultiplier;
-        public final ForgeConfigSpec.DoubleValue overallXpMultiplier;
-        public final ForgeConfigSpec.DoubleValue maxXpPerHit;
-        public final ForgeConfigSpec.DoubleValue netherXpMultiplier;
-        public final ForgeConfigSpec.DoubleValue endXpMultiplier;
-        public final ForgeConfigSpec.DoubleValue moddedDimensionXpMultiplier;
-        public final ForgeConfigSpec.ConfigValue<List<? extends String>> dimensionXpMultipliers;
-        public final ForgeConfigSpec.DoubleValue offhandXpRatio;
-        public final ForgeConfigSpec.DoubleValue multiWeaponXpRatio;
-        public final ForgeConfigSpec.DoubleValue spellMasteryCooldownShare;
-        public final ForgeConfigSpec.DoubleValue spellMasteryManaShare;
-        public final ForgeConfigSpec.DoubleValue spellMasteryReductionCap;
-        public final ForgeConfigSpec.ConfigValue<List<? extends String>> spellEffectDurationSpells;
-        public final ForgeConfigSpec.ConfigValue<List<? extends String>> spellEffectDurationIgnoredEffects;
-        public final ForgeConfigSpec.ConfigValue<List<? extends Double>> shareFalloff;
-        public final ForgeConfigSpec.DoubleValue nearbyShareRadius;
-        public final ForgeConfigSpec.BooleanValue xpFromPlayerDamage;
-        public final ForgeConfigSpec.IntValue syncIntervalTicks;
-        public final ForgeConfigSpec.BooleanValue splitMeleeByPack;
-        public final ForgeConfigSpec.BooleanValue enableSpecialization;
-        public final ForgeConfigSpec.IntValue specSwitchCooldownSeconds;
-        public final ForgeConfigSpec.IntValue comboWindowTicks;
-        public final ForgeConfigSpec.DoubleValue killRefillMobRatio;
-        public final ForgeConfigSpec.BooleanValue debugLogging;
-        public final ForgeConfigSpec.DoubleValue doubleCastTimeFactor;
-        public final ForgeConfigSpec.ConfigValue<List<? extends String>> doubleCastExcludedSpells;
+        public final ModConfigSpec.DoubleValue npcExperienceMultiplier;
+        public final ModConfigSpec.DoubleValue xpPerMobExperience;
+        public final ModConfigSpec.DoubleValue typeXpMultiplier;
+        public final ModConfigSpec.DoubleValue overallXpMultiplier;
+        public final ModConfigSpec.DoubleValue maxXpPerHit;
+        public final ModConfigSpec.DoubleValue netherXpMultiplier;
+        public final ModConfigSpec.DoubleValue endXpMultiplier;
+        public final ModConfigSpec.DoubleValue moddedDimensionXpMultiplier;
+        public final ModConfigSpec.ConfigValue<List<? extends String>> dimensionXpMultipliers;
+        public final ModConfigSpec.DoubleValue offhandXpRatio;
+        public final ModConfigSpec.DoubleValue multiWeaponXpRatio;
+        public final ModConfigSpec.DoubleValue spellMasteryCooldownShare;
+        public final ModConfigSpec.DoubleValue spellMasteryManaShare;
+        public final ModConfigSpec.DoubleValue spellMasteryReductionCap;
+        public final ModConfigSpec.ConfigValue<List<? extends String>> spellEffectDurationSpells;
+        public final ModConfigSpec.ConfigValue<List<? extends String>> spellEffectDurationIgnoredEffects;
+        public final ModConfigSpec.ConfigValue<List<? extends Double>> shareFalloff;
+        public final ModConfigSpec.DoubleValue nearbyShareRadius;
+        public final ModConfigSpec.BooleanValue xpFromPlayerDamage;
+        public final ModConfigSpec.IntValue syncIntervalTicks;
+        public final ModConfigSpec.BooleanValue splitMeleeByPack;
+        public final ModConfigSpec.BooleanValue enableSpecialization;
+        public final ModConfigSpec.IntValue specSwitchCooldownSeconds;
+        public final ModConfigSpec.IntValue comboWindowTicks;
+        public final ModConfigSpec.DoubleValue killRefillMobRatio;
+        public final ModConfigSpec.BooleanValue debugLogging;
+        public final ModConfigSpec.DoubleValue doubleCastTimeFactor;
+        public final ModConfigSpec.ConfigValue<List<? extends String>> doubleCastExcludedSpells;
 
         /** 补录成武器的物品。 */
-        public final ForgeConfigSpec.ConfigValue<List<? extends String>> extraWeapons;
+        public final ModConfigSpec.ConfigValue<List<? extends String>> extraWeapons;
 
         /** 明确不算武器的物品。 */
-        public final ForgeConfigSpec.ConfigValue<List<? extends String>> notWeapons;
-        public final ForgeConfigSpec.IntValue specSlotCount;
-        public final ForgeConfigSpec.IntValue specSlot1WeaponPercent;
-        public final ForgeConfigSpec.IntValue specSlot2TypePercent;
-        public final ForgeConfigSpec.IntValue specSlot3SourcePercent;
-        public final ForgeConfigSpec.IntValue specSlot4TypePercent;
-        public final ForgeConfigSpec.IntValue specTypeBypassPercent;
-        public final ForgeConfigSpec.ConfigValue<String> specNormalLevelScale;
-        public final ForgeConfigSpec.ConfigValue<String> specBreakthroughLevelScale;
-        public final ForgeConfigSpec.ConfigValue<String> specNormalLevelCost;
-        public final ForgeConfigSpec.ConfigValue<String> specBreakthroughLevelCost;
-        public final ForgeConfigSpec.IntValue specModPointsAtMaxSource;
-        public final ForgeConfigSpec.IntValue specRankModPointStart;
-        public final ForgeConfigSpec.IntValue specRankModPointEvery;
-        public final ForgeConfigSpec.IntValue specRankModPointMax;
-        public final ForgeConfigSpec.IntValue specBreakthroughPointsAtMaxType;
-        public final ForgeConfigSpec.IntValue specMaxedWeaponBreakthroughPoint;
-        public final ForgeConfigSpec.IntValue specMaxedWeaponBreakthroughPointMax;
-        public final ForgeConfigSpec.IntValue specRankReductionStart;
-        public final ForgeConfigSpec.IntValue specRankReductionEvery;
-        public final ForgeConfigSpec.IntValue specRankReductionPercentPerStep;
-        public final ForgeConfigSpec.IntValue specRankReductionMaxPercent;
-        public final ForgeConfigSpec.IntValue specRankReductionMaxedWeaponsInType;
-        public final ForgeConfigSpec.IntValue specRespecCooldownSeconds;
+        public final ModConfigSpec.ConfigValue<List<? extends String>> notWeapons;
+        public final ModConfigSpec.IntValue specSlotCount;
+        public final ModConfigSpec.IntValue specSlot1WeaponPercent;
+        public final ModConfigSpec.IntValue specSlot2TypePercent;
+        public final ModConfigSpec.IntValue specSlot3SourcePercent;
+        public final ModConfigSpec.IntValue specSlot4TypePercent;
+        public final ModConfigSpec.IntValue specTypeBypassPercent;
+        public final ModConfigSpec.ConfigValue<String> specNormalLevelScale;
+        public final ModConfigSpec.ConfigValue<String> specBreakthroughLevelScale;
+        public final ModConfigSpec.ConfigValue<String> specNormalLevelCost;
+        public final ModConfigSpec.ConfigValue<String> specBreakthroughLevelCost;
+        public final ModConfigSpec.IntValue specModPointsAtMaxSource;
+        public final ModConfigSpec.IntValue specRankModPointStart;
+        public final ModConfigSpec.IntValue specRankModPointEvery;
+        public final ModConfigSpec.IntValue specRankModPointMax;
+        public final ModConfigSpec.IntValue specBreakthroughPointsAtMaxType;
+        public final ModConfigSpec.IntValue specMaxedWeaponBreakthroughPoint;
+        public final ModConfigSpec.IntValue specMaxedWeaponBreakthroughPointMax;
+        public final ModConfigSpec.IntValue specRankReductionStart;
+        public final ModConfigSpec.IntValue specRankReductionEvery;
+        public final ModConfigSpec.IntValue specRankReductionPercentPerStep;
+        public final ModConfigSpec.IntValue specRankReductionMaxPercent;
+        public final ModConfigSpec.IntValue specRankReductionMaxedWeaponsInType;
+        public final ModConfigSpec.IntValue specRespecCooldownSeconds;
         /** 单件武器的专精经验倍率，「武器 ID=倍率」。 */
-        public final ForgeConfigSpec.ConfigValue<List<? extends String>> weaponXpMultipliers;
+        public final ModConfigSpec.ConfigValue<List<? extends String>> weaponXpMultipliers;
         /** 单件武器的专精伤害加成倍率，「武器 ID=倍率」。 */
-        public final ForgeConfigSpec.ConfigValue<List<? extends String>> weaponDamageMultipliers;
-        public final ForgeConfigSpec.BooleanValue autoUpdateSpecBalance;
-        public final ForgeConfigSpec.IntValue specBalanceVersion;
-        public final ForgeConfigSpec.BooleanValue leaderboardEnable;
-        public final ForgeConfigSpec.IntValue leaderboardTopCount;
-        public final ForgeConfigSpec.IntValue leaderboardUpdateIntervalSeconds;
+        public final ModConfigSpec.ConfigValue<List<? extends String>> weaponDamageMultipliers;
+        public final ModConfigSpec.BooleanValue autoUpdateSpecBalance;
+        public final ModConfigSpec.IntValue specBalanceVersion;
+        public final ModConfigSpec.BooleanValue leaderboardEnable;
+        public final ModConfigSpec.IntValue leaderboardTopCount;
+        public final ModConfigSpec.IntValue leaderboardUpdateIntervalSeconds;
 
         /** 榜单条目保留天数。 */
-        public final ForgeConfigSpec.IntValue leaderboardRetentionDays;
-        public final ForgeConfigSpec.IntValue leaderboardRequestCooldownSeconds;
-        public final ForgeConfigSpec.BooleanValue leaderboardBroadcastTopChanges;
-        public final ForgeConfigSpec.EnumValue<LeaderboardSort> leaderboardBroadcastSort;
+        public final ModConfigSpec.IntValue leaderboardRetentionDays;
+        public final ModConfigSpec.IntValue leaderboardRequestCooldownSeconds;
+        public final ModConfigSpec.BooleanValue leaderboardBroadcastTopChanges;
+        public final ModConfigSpec.EnumValue<LeaderboardSort> leaderboardBroadcastSort;
 
         /** 每件武器每升一级给多少段位经验。 */
-        public final ForgeConfigSpec.IntValue rankXpPerWeaponLevel;
+        public final ModConfigSpec.IntValue rankXpPerWeaponLevel;
         /** 晋升段位时在聊天栏通告全服。 */
-        public final ForgeConfigSpec.BooleanValue rankUpBroadcast;
+        public final ModConfigSpec.BooleanValue rankUpBroadcast;
 
-        Common(ForgeConfigSpec.Builder builder) {
-            builder.comment("武器专精系统 - 玩法数值（以服务端配置为准，登录时会下发给客户端用于界面显示）")
+        Common(ModConfigSpec.Builder builder) {
+            builder.comment("武器专精系统 · 玩法数值。以服务端配置为准，登录时下发给客户端用于界面显示")
                     .push("mastery");
 
             this.maxLevel = builder
-                    .comment("专精等级上限（大类与单件武器共用同一个上限）")
+                    .comment("专精等级上限，类型与单件武器共用同一上限")
                     .defineInRange("maxLevel", 100, 1, 1000);
 
             this.overallDamagePerLevel = builder
@@ -517,7 +518,7 @@ public final class MasteryConfig {
                     .defineInRange("typeDamagePerLevel", 0.01D, 0.0D, 1.0D);
 
             this.weaponDamagePerLevel = builder
-                    .comment("单件武器专精每 1 级，为这件武器自身提供的伤害加成（0.02 = 2%）")
+                    .comment("单件武器专精每 1 级，为该武器自身提供的伤害加成（0.02 = 2%）")
                     .defineInRange("weaponDamagePerLevel", 0.02D, 0.0D, 1.0D);
 
             this.weaponCrossDamagePerLevel = builder
@@ -525,16 +526,16 @@ public final class MasteryConfig {
                     .defineInRange("weaponCrossDamagePerLevel", 0.001D, 0.0D, 1.0D);
 
             this.maxTotalDamageBonus = builder
-                    .comment("单件武器可获得的伤害加成总上限（100.0 = 最多 +10000%），只是兜底防止数值失控")
+                    .comment("单件武器可获得的伤害加成总上限（100.0 = 最多 +10000%），用于防止数值失控")
                     .defineInRange("maxTotalDamageBonus", 100.0D, 0.0D, 1000.0D);
 
             builder.comment("不同武器来源的专精伤害倍率。",
-                            "这里乘的是专精本身给出的伤害加成：总体（内圈）、类型（中圈）、单件武器（外圈）以及同类型联动都会一起乘。",
-                            "一个来源一个键，互相不影响，默认全是 1.0 = 完全保持专精原本的强度。",
-                            "以后模组新增来源，这里会自动多出一行，不会去蹭别的来源的倍率。",
-                            "更新模组不会覆盖已经改过的值。")
+                            "此倍率作用于专精本身的伤害加成：总体（内圈）、类型（中圈）、单件武器（外圈）及同类联动均一同乘算。",
+                            "每个来源一个键，互不影响，默认均为 1.0 = 保持专精原本的强度。",
+                            "模组新增来源时，此处会自动增加一项，不沿用其他来源的倍率。",
+                            "更新模组不会覆盖已修改的值。")
                     .push("sourceDamageMultiplier");
-            Map<String, ForgeConfigSpec.DoubleValue> multipliers = new LinkedHashMap<>();
+            Map<String, ModConfigSpec.DoubleValue> multipliers = new LinkedHashMap<>();
             for (String providerId : WeaponKeys.ALL_PROVIDERS) {
                 String note = SOURCE_NOTES.getOrDefault(providerId, providerId);
                 multipliers.put(providerId, builder
@@ -545,28 +546,28 @@ public final class MasteryConfig {
             builder.pop();
 
             this.weaponDamageMultipliers = builder
-                    .comment("单件武器的专精伤害加成倍率，一行一条「武器ID=倍率」，乘在专精加成上，和上面的来源倍率叠乘。",
+                    .comment("单件武器的专精伤害加成倍率，一行一条「武器ID=倍率」，乘在专精加成上，与上方的来源倍率叠乘。",
                             "武器 ID：普通物品写物品 ID；TACZ 枪写枪的 ID（如 tacz:ak47）；铁魔法写法术 ID；拔刀剑写刀的 ID。",
-                            "同一个 ID 在两个来源里撞了，可以写完整武器键（如 tacz_gun/tacz:ak47）。",
-                            "手持武器打 /albionmastery info，第一行就是武器键，点一下能复制。例：\"tacz:m95=0.8\"")
+                            "同一 ID 在两个来源中重复时，可写完整武器键（如 tacz_gun/tacz:ak47）。",
+                            "手持武器执行 /albionmastery info，第一行即武器键，点击可复制。例：\"tacz:m95=0.8\"")
                     .defineListAllowEmpty("weaponDamageMultipliers", List.of(), MasteryConfig::validWeaponMultiplier);
 
             this.xpBase = builder
                     .comment("经验曲线基数：升到第 L 级所需经验 = round(xpBase * L ^ xpExponent)。",
-                            "默认基数由 40 调整为 80，新配置的升级需求为原默认的两倍，",
-                            "已有 xpBase 配置原值保留；旧服若需要经验翻倍，请自行将原基数乘以 2。")
+                            "默认值已由 40 改为 80，新配置的升级需求为原来的两倍。",
+                            "已有配置保留原值；旧服如需同样调整，请自行将原值乘以 2。")
                     .defineInRange("xpBase", 80.0D, 0.1D, 1.0E9D);
 
             this.xpExponent = builder
-                    .comment("经验曲线指数，越大后期越肝。",
-                            "默认 1.0 是线性：单级需求随目标等级线性增长。",
-                            "1.25 会让满级总量翻 2.8 倍，后期明显更肝。")
+                    .comment("经验曲线指数，越大后期升级越慢。",
+                            "默认 1.0 为线性：单级需求随目标等级线性增长。",
+                            "设为 1.25 时满级总经验约为默认的 2.8 倍。")
                     .defineInRange("xpExponent", 1.0D, 0.0D, 5.0D);
 
             this.xpPerDamage = builder
-                    .comment("每造成 1 点伤害获得的专精经验（按加成生效前的基础伤害计算，避免正反馈）。",
+                    .comment("每造成 1 点伤害获得的专精经验，按加成生效前的基础伤害计算。",
                             "默认 0：专精经验只来自击杀时生物实际掉落的经验值，",
-                            "打木桩、打高血量低价值的怪不会刷出经验。想恢复「按伤害给」就调大它。")
+                            "攻击木桩或高生命值、低价值的怪物不会获得经验。需要按伤害给予经验时调大此值。")
                     .defineInRange("xpPerDamage", 0.0D, 0.0D, 1000.0D);
 
             this.xpPerKill = builder
@@ -575,71 +576,71 @@ public final class MasteryConfig {
                     .defineInRange("xpPerKill", 0.0D, 0.0D, 100000.0D);
 
             this.xpPerMobExperience = builder
-                    .comment("被杀生物每掉落 1 点经验值，额外获得的专精经验。",
-                            "打凋灵和打鸡给的专精经验差距会拉开。设为 0 则退化为固定击杀奖励。")
+                    .comment("被击杀生物每掉落 1 点经验值，额外获得的专精经验。",
+                            "击杀凋灵与鸡所得的专精经验差距随之拉大。设为 0 时仅有固定击杀奖励。")
                     .defineInRange("xpPerMobExperience", 8.0D, 0.0D, 1000.0D);
             this.xpFromOriginalMobExperience = builder
-                    .comment("折算专精经验时用生物「原本」掉落的经验值（true），还是其它模组都改完之后实际掉的数（false）。",
-                            "莱特兰-恶意会按怪物等级把掉落经验放大几倍到几十倍，金龟这类附魔也会加成，",
-                            "取实际掉落值的话专精经验会跟着一起膨胀。默认 true，只按原版数值算")
+                    .comment("折算专精经验时使用生物原本的掉落经验（true），还是经其他模组修改后的实际掉落经验（false）。",
+                            "莱特兰-恶意会按怪物等级将掉落经验放大数倍至数十倍，金龟等附魔也有加成，",
+                            "使用实际掉落值时专精经验会随之膨胀。默认 true，只按原版数值计算")
                     .define("xpFromOriginalMobExperience", true);
             this.npcFallbackMobExperience = builder
-                    .comment("击杀自定义 NPC（CustomNPCs）时，优先读取 NPC 编辑页「掉落」里设的经验（最小 / 最大的平均）；",
-                            "只有读不到 CustomNPCs 数据时才使用这里的兜底值。NPC 明确把最小 / 最大都设为 0 时就是 0，不会套兜底。",
-                            "没装 CustomNPCs 时这一项没有作用，本模组不依赖它")
+                    .comment("击杀自定义 NPC（CustomNPCs）时，优先读取 NPC 编辑页「掉落」中设置的经验（最小 / 最大的平均值）；",
+                            "读不到 CustomNPCs 数据时才使用此兜底值。NPC 的最小 / 最大经验都设为 0 时结果为 0，不使用兜底值。",
+                            "未安装 CustomNPCs 时此项无效，本模组不依赖该模组")
                     .defineInRange("npcFallbackMobExperience", 0, 0, 100000);
             this.npcExperienceMultiplier = builder
                     .comment("CustomNPCs 的掉落经验参与专精经验折算前额外乘的倍率。默认 0.1 = 只取原配置经验的 1/10。",
-                            "NPC 原始经验大于 1 且该倍率大于 0 时，折算后的经验最低按 1 计算，避免小经验 NPC 乘完直接接近 0。",
-                            "如果 NPC 的最小 / 最大经验都为 0，则仍然是 0，不会被最低 1 抬起来。")
+                            "NPC 原始经验大于 1 且该倍率大于 0 时，折算后的经验最低按 1 计算。",
+                            "NPC 的最小 / 最大经验都为 0 时结果仍为 0，不受最低值影响。")
                     .defineInRange("npcExperienceMultiplier", 0.1D, 0.0D, 100.0D);
 
             this.typeXpMultiplier = builder
-                    .comment("武器类型专精的升级所需经验倍率，以单件武器为基准。",
-                            "3.0 表示把一个类型练满，需要的经验是把一把武器练满的 3 倍。",
-                            "类型与单件武器每次都拿到同样多的经验，难度差异全在这个倍率上，",
-                            "这样「几倍肝度」是个确定的数，不会因为玩家换了几把武器就变。")
+                    .comment("武器类型专精升级所需经验的倍率，以单件武器为基准。",
+                            "3.0 表示练满一个类型所需经验为练满一件武器的 3 倍。",
+                            "类型与单件武器每次获得的经验相同，进度差别只取决于此倍率，",
+                            "与玩家使用的武器数量无关。")
                     .defineInRange("typeXpMultiplier", 3.0D, 0.1D, 100.0D);
 
             this.overallXpMultiplier = builder
-                    .comment("总体（模组）专精的升级所需经验倍率，以单件武器为基准")
+                    .comment("总体（来源）专精的升级所需经验倍率，以单件武器为基准")
                     .defineInRange("overallXpMultiplier", 10.0D, 0.1D, 100.0D);
 
             this.weaponXpMultipliers = builder
-                    .comment("单件武器的专精经验倍率，一行一条「武器ID=倍率」：用这件武器打怪拿到的经验乘这个数，",
-                            "类型和来源拿到的经验也按同样的数一起涨。武器 ID 的写法见 weaponDamageMultipliers。",
+                    .comment("单件武器的专精经验倍率，一行一条「武器ID=倍率」：使用该武器击杀所得经验乘此倍率，",
+                            "类型和来源同样按此倍率计算。武器 ID 的写法见 weaponDamageMultipliers。",
                             "例：\"tacz:ak47=0.5\"、\"minecraft:netherite_sword=1.5\"、\"irons_spellbooks:fireball=2\"")
                     .defineListAllowEmpty("weaponXpMultipliers", List.of(), MasteryConfig::validWeaponMultiplier);
 
             this.maxXpPerHit = builder
-                    .comment("单次命中可获得的经验上限，防止被超高伤害配置刷经验")
+                    .comment("单次命中获得的经验上限，防止超高伤害导致经验过多")
                     .defineInRange("maxXpPerHit", 200.0D, 1.0D, 1.0E9D);
 
             this.offhandXpRatio = builder
                     .comment("副手武器获得的专精经验比例。",
-                            "主手是全额，副手默认半额——挂一把不用的枪在副手跟着满级总归有点白嫖。",
-                            "两只手拿同一件武器时只按主手发一次，不会叠加。")
+                            "主手为全额，副手默认半额，以免副手闲置的武器也随之练满。",
+                            "双手持同一件武器时只按主手计算一次，不叠加。")
                     .defineInRange("offhandXpRatio", 0.5D, 0.0D, 1.0D);
             this.multiWeaponXpRatio = builder
-                    .comment("一件物品里装着多件武器时（铁魔法的魔法书装了好几个法术），",
-                            "每件武器拿到的击杀经验按这个比例打折。1.0 = 每个法术都拿全额")
+                    .comment("一件物品包含多件武器时（如铁魔法的魔法书装有多个法术），",
+                            "每件武器获得的击杀经验乘以此比例。1.0 = 每个法术都获得全额")
                     .defineInRange("multiWeaponXpRatio", 1.0D, 0.0D, 1.0D);
             this.spellMasteryCooldownShare = builder
-                    .comment("铁魔法：专精加成有多大比例同时折算成冷却缩减。",
+                    .comment("铁魔法：专精加成按此比例同时折算为冷却缩减。",
                             "例：加成 +40%、比例 0.3 → 冷却缩短 12%。",
-                            "传送、净化这类没有数值的法术只能靠这个和法力折扣体现专精，设 0 就没有")
+                            "传送、净化等无数值的法术只能通过此项和法力折扣体现专精，设为 0 时不生效")
                     .defineInRange("spellMasteryCooldownShare", 0.3D, 0.0D, 1.0D);
             this.spellMasteryManaShare = builder
                     .comment("铁魔法：专精加成有多大比例同时折算成法力消耗折扣，算法同上")
                     .defineInRange("spellMasteryManaShare", 0.3D, 0.0D, 1.0D);
             this.spellMasteryReductionCap = builder
-                    .comment("上面两项折算出来的缩减最多到多少（0.5 = 最多减半），防止高加成把冷却和法力压到没有")
+                    .comment("以上两项折算出的缩减上限（0.5 = 最多减半），防止高加成使冷却和法力消耗趋近于零")
                     .defineInRange("spellMasteryReductionCap", 0.5D, 0.0D, 0.9D);
             this.spellEffectDurationSpells = builder
-                    .comment("铁魔法：这些法术上的效果（增益 / 减益）持续时间额外按专精倍率延长。",
-                            "铁魔法本体的效果时长几乎都是从「法术强度」算出来的，强度涨了时长自然涨，不用列在这里；",
-                            "列在这里的是时长只按法术等级写死、不看强度的那些（多来自附属），",
-                            "列进去的法术不会被重复放大。写法术 ID，如 gtbcs_geomancy_plus:tremor_step")
+                    .comment("铁魔法：所列法术施加的效果（增益 / 减益）持续时间额外按专精倍率延长。",
+                            "铁魔法本体的效果时长几乎都由法术强度计算，随强度增长，无需列出；",
+                            "此处只列时长按法术等级固定、与强度无关的法术，多来自附属模组。",
+                            "所列法术不会被重复放大。填写法术 ID，如 gtbcs_geomancy_plus:tremor_step")
                     .defineListAllowEmpty("spellEffectDurationSpells", List.of(
                             "gtbcs_geomancy_plus:tremor_step",
                             "gtbcs_geomancy_plus:seismic_surf",
@@ -650,8 +651,8 @@ public final class MasteryConfig {
                             "irons_spellbooks:echoing_strikes"),
                             value -> value instanceof String);
             this.spellEffectDurationIgnoredEffects = builder
-                    .comment("上面那条规则里永远不碰的效果 ID。ID 以 _cast / _loop 结尾、或含 casting / resource 的",
-                            "施法状态类效果已经写死跳过，不用列；这里放额外要排除的")
+                    .comment("延长效果时长时始终排除的效果 ID。ID 以 _cast / _loop 结尾或含 casting / resource 的",
+                            "施法状态类效果已自动排除，无需列出；此处只填额外排除的效果")
                     .defineListAllowEmpty("spellEffectDurationIgnoredEffects", List.of(),
                             value -> value instanceof String);
 
@@ -665,22 +666,22 @@ public final class MasteryConfig {
 
             this.moddedDimensionXpMultiplier = builder
                     .comment("在模组维度击杀时的专精经验倍率。",
-                            "判定方式是「维度 ID 的命名空间不是 minecraft」，",
-                            "装什么维度模组都自动生效，不需要逐个登记。")
+                            "判定方式为维度 ID 的命名空间不是 minecraft，",
+                            "对所有维度模组自动生效，无需逐个登记。")
                     .defineInRange("moddedDimensionXpMultiplier", 2.0D, 0.0D, 100.0D);
 
             this.dimensionXpMultipliers = builder
-                    .comment("单独指定某些维度的倍率，优先级高于上面所有规则。",
+                    .comment("单独指定部分维度的倍率，优先级高于以上所有规则。",
                             "每行格式：维度ID=倍率，例如 twilightforest:twilight_forest=1.8")
                     .defineList("dimensionXpMultipliers", List.of(),
                             entry -> entry instanceof String);
 
             this.shareFalloff = builder
-                    .comment("附近玩家共享击杀经验时，每人拿到的比例，按参与人数查表。",
-                            "第一项是只有 1 人时（100%），第二项是 2 人时每人拿多少，以此类推；",
-                            "人数超过表长就一直用最后一项。默认值参考 LoL 的共享经验曲线：",
-                            "人越多每人拿得越少，但队伍总收益是上升的。",
-                            "只有主副手拿着「还没练满」的可专精武器的玩家才算进人数。")
+                    .comment("附近玩家共享击杀经验时每人获得的比例，按参与人数查表。",
+                            "第一项为 1 人时（100%），第二项为 2 人时每人的比例，以此类推；",
+                            "人数超过表长时沿用最后一项。",
+                            "默认值下人数越多每人所得越少，但队伍总收益上升。",
+                            "只有主副手持有未练满的可专精武器的玩家计入人数。")
                     .defineList("shareFalloff",
                             List.of(1.0D, 0.725D, 0.633D, 0.575D, 0.55D),
                             value -> value instanceof Number number
@@ -692,7 +693,7 @@ public final class MasteryConfig {
                     .defineInRange("nearbyShareRadius", 32.0D, 0.0D, 256.0D);
 
             this.xpFromPlayerDamage = builder
-                    .comment("是否允许对玩家造成伤害时获得专精经验（PVP 服建议保持 true，纯 PVE 服可关掉防止互刷）")
+                    .comment("伤害玩家时是否获得专精经验。PVP 服建议开启，纯 PVE 服可关闭，避免玩家互相攻击获得经验")
                     .define("xpFromPlayerDamage", true);
 
             this.syncIntervalTicks = builder
@@ -701,34 +702,34 @@ public final class MasteryConfig {
 
             this.splitMeleeByPack = builder
                     .comment("近战附属（lrtactical）的武器类型是否按刀包拆分。",
-                            "开启：每个刀包各算一个武器类型，专精树上多出一层，和拔刀剑的附属包一致。",
-                            "关闭：所有近战武器共用一个「近战」类型（1.0.0 的旧行为）。",
-                            "改动会让近战「类型层」的经验换一套键，等于类型层从头开始；",
+                            "开启：每个刀包各为一个武器类型，专精罗盘多出一层，与拔刀剑附属包的处理一致。",
+                            "关闭：所有近战武器共用一个「近战」类型，与 1.0.0 相同。",
+                            "切换后近战的类型层等级从零开始；",
                             "武器层与总体层的等级不受影响。")
                     .define("splitMeleeByPack", true);
 
-            builder.comment("专精特化：每个武器类型（中圈）最多 4 个槽（普通、突破、普通、突破），武器练到门槛后生效，几个槽的效果叠加。",
-                            "特化用改装点升级（Lv1～Lv5），普通版满级后用突破点突破（★1～★5），下面每个特化小节里的数值是参考值。",
-                            "不同武器叫法不同：枪和弓叫改装、刀叫改造、剑叫专长、拔刀剑叫修习、铁魔法叫铭刻、魔艺叫改良。",
-                            "每一项都有得有失，每个来源的第一项（原厂配置 / 无专长 / 无修习等）是什么都不改的默认值。",
-                            "倍率一律是「乘在原值上」，时间类小于 1 表示更快。")
+            builder.comment("专精特化：每个武器类型（中圈）最多 4 个槽，依次为普通、突破、普通、突破；武器达到门槛后生效，各槽效果叠加。",
+                            "特化用改装点升级（Lv1～Lv5），普通版满级后用突破点突破（★1～★5），下方各特化小节中的数值为参考值。",
+                            "各来源叫法不同：枪和弓称改装，刀称改造，剑称专长，拔刀剑称修习，铁魔法称铭刻，魔艺称改良。",
+                            "各来源的第一项（原厂配置、无专长、无修习等）为不做任何改动的默认值，其余各项有得有失。",
+                            "倍率均乘在原值上，时间类小于 1 表示更快。")
                     .push("specialization");
             this.enableSpecialization = builder
-                    .comment("是否启用特化系统。关闭后已选的特化不生效，但选择仍然保留在存档里")
+                    .comment("是否启用特化系统。关闭后已选特化不生效，但仍保留在存档中")
                     .define("enable", true);
             this.specSwitchCooldownSeconds = builder
                     .comment("切换特化的冷却时间（秒），默认 1 小时。",
-                            "冷却只记在内存里，服务端重启后清零")
+                            "冷却记录在内存中，服务端重启后清零")
                     .defineInRange("switchCooldownSeconds", 3600, 0, 604800);
             this.specSlotCount = builder
-                    .comment("每个武器类型开几个特化槽（1～4），按「普通、突破、普通、突破」的顺序取前几个。",
-                            "普通槽装普通版（Lv1～Lv5），突破槽装突破版（★1～★5）；同一套配置里不能装两个同系的特化。",
-                            "只开 1 个槽时没有突破槽，这个槽直接用特化当前最强的一版。几个槽的效果叠加：",
-                            "倍率相乘、概率和比例相加、层数取大的")
+                    .comment("每个武器类型开放的特化槽数（1～4），按普通、突破、普通、突破的顺序取前几个。",
+                            "普通槽装普通版（Lv1～Lv5），突破槽装突破版（★1～★5）。同一套配置中不能装两个同类别的特化。",
+                            "只开 1 个槽时没有突破槽，该槽直接使用特化当前最强的一版。各槽效果叠加：",
+                            "倍率相乘，概率和比例相加，层数取最大值")
                     .defineInRange("slotCount", 4, 1, 4);
             this.specSlot1WeaponPercent = builder
-                    .comment("槽 1：一件武器要练到等级上限的百分之几，才吃得到这个类型的特化（段位可以减免，见下面的 rankReduction*）。",
-                            "这是每件武器各自的门槛，所有槽都要先过这一条；类型练到 typeMasteryBypassPercent 后整个类型免这条")
+                    .comment("槽 1：武器等级达到上限的此百分比后，所属类型的特化才对该武器生效。段位可减免此门槛，见下方 rankReduction*。",
+                            "此门槛按武器分别计算，所有槽都需先满足；类型达到 typeMasteryBypassPercent 后，整个类型免除此门槛")
                     .defineInRange("slot1WeaponPercent", 100, 1, 100);
             this.specSlot2TypePercent = builder
                     .comment("槽 2（突破槽）：类型要到等级上限的百分之几才开。0 = 不要求")
@@ -740,104 +741,104 @@ public final class MasteryConfig {
                     .comment("槽 4（突破槽）：类型要到等级上限的百分之几才开。0 = 不要求")
                     .defineInRange("slot4TypePercent", 100, 0, 100);
             this.specTypeBypassPercent = builder
-                    .comment("类型练到等级上限的百分之几后，这个类型下所有武器都跳过槽 1 的武器门槛（这一类已经玩透了）。0 = 不豁免")
+                    .comment("类型等级达到上限的该百分比后，该类型下所有武器免除槽 1 的武器门槛。0 = 不豁免")
                     .defineInRange("typeMasteryBypassPercent", 100, 0, 100);
             this.specNormalLevelScale = builder
-                    .comment("普通版每一级的系数，几个数就分几级（最多 10 级），用逗号隔开。",
-                            "下面每个特化小节里写的数值是「参考值」：系数 0.2 = 从不变往参考值走两成，正面和负面按同一个系数一起涨。",
-                            "默认普通版满级是参考值的 0.8 倍")
+                    .comment("普通版每一级的系数，用逗号隔开，填几个数即分几级（最多 10 级）。",
+                            "下方各特化小节中的数值为参考值：系数 0.2 表示从原值向参考值变化两成，正面与负面效果按同一系数增长。",
+                            "默认普通版满级为参考值的 0.8 倍")
                     .define("normalLevelScale", "0.2, 0.35, 0.5, 0.65, 0.8", SpecRules::validList);
             this.specBreakthroughLevelScale = builder
-                    .comment("突破版每一级的系数，规则同上。普通版满级后才能突破，默认突破满级是参考值的 1.2 倍")
+                    .comment("突破版每一级的系数，规则同上。普通版满级后才能突破，默认突破满级为参考值的 1.2 倍")
                     .define("breakthroughLevelScale", "0.88, 0.96, 1.04, 1.12, 1.2", SpecRules::validList);
             this.specNormalLevelCost = builder
-                    .comment("普通版升每一级花几个改装点，逗号隔开；条数少于级数时最后一项往后沿用")
+                    .comment("普通版每升一级所需改装点数，用逗号隔开；条数少于级数时沿用最后一项")
                     .define("normalLevelCost", "1, 1, 1, 1, 1", SpecRules::validList);
             this.specBreakthroughLevelCost = builder
-                    .comment("突破版升每一级花几个突破点，规则同上")
+                    .comment("突破版每升一级所需突破点数，规则同上")
                     .define("breakthroughLevelCost", "1, 1, 1, 1, 1", SpecRules::validList);
             this.specModPointsAtMaxSource = builder
-                    .comment("改装点（各来源的叫法不同：改造点、专长点、修习点……）按来源等级给，每个来源一份：",
-                            "来源满级时给这么多，中间按等级线性给、向下取整。默认 20 = 每 5 级 1 点。",
-                            "普通版等级按来源共用：在步枪里升到 Lv3 的特化，到冲锋枪里也是 Lv3")
+                    .comment("改装点（各来源叫法不同，如改造点、专长点、修习点）按来源等级发放，各来源分别计算：",
+                            "来源满级时为此数值，中间等级线性折算并向下取整。默认 20 = 每 5 级 1 点。",
+                            "普通版等级在同一来源内共用：在步枪中升到 Lv3 的特化，在冲锋枪中也是 Lv3")
                     .defineInRange("modPointsAtMaxSource", 20, 0, 1000);
             this.specRankModPointStart = builder
-                    .comment("段位加改装点：从第几段开始，每个来源 +1")
+                    .comment("段位加改装点：起始段位，每个来源 +1")
                     .defineInRange("rankModPointStart", 3, 1, 100000);
             this.specRankModPointEvery = builder
-                    .comment("段位加改装点：之后每几段再 +1")
+                    .comment("段位加改装点：此后每几段再 +1")
                     .defineInRange("rankModPointEvery", 3, 1, 100000);
             this.specRankModPointMax = builder
                     .comment("段位加改装点：最多加几点。0 = 段位不加改装点")
                     .defineInRange("rankModPointMax", 10, 0, 1000);
             this.specBreakthroughPointsAtMaxType = builder
-                    .comment("突破点按类型等级给，每个类型一份：类型满级时给这么多，中间线性给、向下取整。",
-                            "突破按类型分开：步枪里突破过的特化，到冲锋枪里要用冲锋枪的突破点另外突破")
+                    .comment("突破点按类型等级发放，各类型分别计算：类型满级时为此数值，中间线性折算并向下取整。",
+                            "突破按类型分别计算：在步枪中突破的特化，在冲锋枪中需用冲锋枪的突破点另行突破")
                     .defineInRange("breakthroughPointsAtMaxType", 10, 0, 1000);
             this.specMaxedWeaponBreakthroughPoint = builder
-                    .comment("类型里每有一把满级武器，额外给几个突破点。0 = 不给")
+                    .comment("类型中每有一件满级武器额外发放的突破点。0 = 不发放")
                     .defineInRange("maxedWeaponBreakthroughPoint", 1, 0, 100);
             this.specMaxedWeaponBreakthroughPointMax = builder
-                    .comment("满级武器给的突破点最多加到几点")
+                    .comment("满级武器额外发放突破点的上限")
                     .defineInRange("maxedWeaponBreakthroughPointMax", 5, 0, 1000);
             this.specRankReductionStart = builder
-                    .comment("段位减免槽 1 的武器门槛：从第几段开始减")
+                    .comment("段位减免槽 1 武器门槛的起始段位")
                     .defineInRange("rankReductionStart", 3, 1, 100000);
             this.specRankReductionEvery = builder
-                    .comment("段位减免：之后每几段再减一档")
+                    .comment("段位减免：此后每几段再减一档")
                     .defineInRange("rankReductionEvery", 2, 1, 100000);
             this.specRankReductionPercentPerStep = builder
-                    .comment("段位减免：每档减掉等级上限的百分之几（默认 5 = 100 级上限时每档减 5 级）。0 = 不减免")
+                    .comment("段位减免：每档减去等级上限的百分比（默认 5 = 上限 100 时每档减 5 级）。0 = 不减免")
                     .defineInRange("rankReductionPercentPerStep", 5, 0, 100);
             this.specRankReductionMaxPercent = builder
-                    .comment("段位减免：最多减掉等级上限的百分之几")
+                    .comment("段位减免：最多减去等级上限的百分比")
                     .defineInRange("rankReductionMaxPercent", 50, 0, 100);
             this.specRankReductionMaxedWeaponsInType = builder
-                    .comment("段位减免的前提：这件武器所在的类型里已经有几把满级武器。0 = 不要求")
+                    .comment("段位减免的前提：该武器所属类型中已有的满级武器数。0 = 不要求")
                     .defineInRange("rankReductionMaxedWeaponsInType", 1, 0, 1000);
             this.specRespecCooldownSeconds = builder
-                    .comment("重置改装点 / 突破点的冷却（秒），默认 24 小时；记在玩家存档里，重启不清。",
-                            "改版后老存档迁移完的第一次重置不算冷却")
+                    .comment("重置改装点 / 突破点的冷却（秒），默认 24 小时，记录在玩家存档中，重启不清零。",
+                            "旧存档完成改版迁移后，首次重置不计冷却")
                     .defineInRange("respecCooldownSeconds", 86400, 0, 2592000);
             this.autoUpdateSpecBalance = builder
-                    .comment("模组更新重新平衡了特化数值时，是否自动把下面各特化的数值换成新版默认值。",
-                            "Forge 配置只会补上缺的项，已经写在文件里的旧数值不会被新默认值覆盖，",
-                            "不开这个的话，升级后老服务器上的特化还是旧数值（说明文字却会按旧数值显示，不会错）。",
-                            "自己改过特化数值、想保留的服主请关掉")
+                    .comment("模组更新调整特化数值时，是否自动将下方各特化的数值替换为新版默认值。",
+                            "Forge 配置只补充缺少的项，文件中已有的旧数值不会被新默认值覆盖；",
+                            "关闭此项时，升级后旧服务器上的特化仍为旧数值，说明文字也按旧数值显示。",
+                            "改过特化数值且希望保留的服主请关闭此项")
                     .define("autoUpdateSpecBalance", true);
             this.specBalanceVersion = builder
-                    .comment("特化数值的版本号，由模组自己维护，不用手动改。",
-                            "小于当前版本且上面那项开着时，下次启动会把全部特化数值重置为新默认值，然后写成当前版本")
+                    .comment("特化数值的版本号，由模组维护，无需手动修改。",
+                            "小于当前版本且上一项开启时，下次启动会将全部特化数值重置为新默认值，并写入当前版本")
                     .defineInRange("specBalanceVersion", 0, 0, Integer.MAX_VALUE);
             this.debugLogging = builder
-                    .comment("排查用：把特化效果的关键路径（双重施法排队 / 补放、法力折扣等）打成 INFO 日志。",
-                            "默认关闭；只有排查问题时才打开，人多的时候会刷屏")
+                    .comment("排查问题用：将特化效果的关键路径（双重施法排队 / 补放、法力折扣等）写入 INFO 日志。",
+                            "默认关闭；玩家多时日志量大")
                     .define("debugLogging", false);
             this.doubleCastTimeFactor = builder
-                    .comment("双重施法补放的那一次，施法时间（引导 / 前摇）乘这个系数。0.5 = 减半")
+                    .comment("双重施法额外施放时，施法时间（引导 / 前摇）乘以此系数。0.5 = 减半")
                     .defineInRange("doubleCastTimeFactor", 0.5D, 0.05D, 1.0D);
             this.doubleCastExcludedSpells = builder
-                    .comment("永远不双重施法的法术 ID。持续引导类（CONTINUOUS）和类名带 Summon 的召唤类已经写死排除，",
-                            "这里放额外要排的，比如召唤亡灵这种类名里没有 Summon 的")
+                    .comment("始终不触发双重施法的法术 ID。持续引导类（CONTINUOUS）和类名含 Summon 的召唤类已自动排除，",
+                            "此处填写额外排除的法术，如类名不含 Summon 的召唤亡灵")
                     .defineListAllowEmpty("doubleCastExcludedSpells", List.of(
                             "irons_spellbooks:raise_dead",
                             "irons_spellbooks:raise_hell"),
                             value -> value instanceof String);
             this.extraWeapons = builder
-                    .comment("补录成武器的物品，格式「物品id=大类」，大类可填 sword / axe / trident / other / bow / crossbow，",
-                            "只写物品 id 不写大类时按 other（其它近战）算。",
-                            "模组自己写基类、不继承原版武器类的武器，本体已经内置了一份常见的（灾变、诡厄、额外植物学、血肉重塑），",
-                            "这里只放内置表没收到的。例：\"examplemod:big_sword=sword\"")
+                    .comment("补录为武器的物品，格式「物品id=类型」，类型可填 sword / axe / trident / other / bow / crossbow，",
+                            "只写物品 id 不写类型时按 other（其他近战）计算。",
+                            "不继承原版武器类的模组武器需在此补录，常见的（灾变、诡厄、额外植物学、血肉重塑）已内置，",
+                            "此处只填内置表未收录的。例：\"examplemod:big_sword=sword\"")
                     .defineListAllowEmpty("extraWeapons", List.of(), value -> value instanceof String);
             this.notWeapons = builder
-                    .comment("明确不算武器的物品 id：被误收进专精树的东西写在这里就会被踢掉，优先级高于上面的补录表和物品类判定")
+                    .comment("明确不算武器的物品 id：误收入专精罗盘的物品填在此处即被移除，优先级高于上方的补录表和物品类判定")
                     .defineListAllowEmpty("notWeapons", List.of(), value -> value instanceof String);
             this.killRefillMobRatio = builder
-                    .comment("击杀补弹：特化里写的补弹比例按「杀玩家」算，杀怪物时再乘这个系数。",
-                            "默认 0.2：弹药带杀玩家补 50%，杀怪只补 10%，割草不至于永远不用换弹")
+                    .comment("击杀补弹：特化中的补弹比例按击杀玩家计算，击杀怪物时再乘此系数。",
+                            "默认 0.2：弹药带击杀玩家补 50%，击杀怪物只补 10%，以免连续击杀时无需换弹")
                     .defineInRange("killRefillMobRatio", 0.2D, 0.0D, 1.0D);
             this.comboWindowTicks = builder
-                    .comment("连击的时间窗（tick）：两次命中同一目标间隔超过这个时间，连击层数清零。默认 3 秒")
+                    .comment("连击的时间窗（tick）：两次命中同一目标间隔超过此时间，连击层数清零。默认 3 秒")
                     .defineInRange("comboWindowTicks", 60, 1, 1200);
 
             // 每个特化一个小节，只暴露它真正用到的数值项。
@@ -1802,50 +1803,50 @@ public final class MasteryConfig {
 
             builder.pop();
 
-            builder.comment("全局专精排行榜：在专精界面左下角进入，能看全局谁练得最狠、点进去看他整个罗盘和选的特化。",
-                            "榜单数据存在主世界 data/albionmastery_leaderboard.dat 里，下线的玩家也在榜上。",
-                            "单人世界同样可用（开局域网联机时就是一份小榜单）。")
+            builder.comment("全局专精排行榜：从专精界面左下角进入，可查看全服专精排名，点击玩家可查看其罗盘和所选特化。",
+                            "榜单数据存在主世界 data/albionmastery_leaderboard.dat 中，离线玩家也在榜上。",
+                            "单人世界同样可用，开放局域网时即为一份小榜单。")
                     .push("leaderboard");
             this.leaderboardEnable = builder
-                    .comment("总开关。关掉后客户端请求一律回「未开启」，已经存下的榜单数据不会删")
+                    .comment("总开关。关闭后客户端请求一律返回「未开启」，已保存的榜单数据不删除")
                     .define("enable", true);
             this.leaderboardTopCount = builder
-                    .comment("榜单最多显示前多少名。请求者自己不在前几名里也能看到自己的名次和数据")
+                    .comment("榜单最多显示的名次数。请求者不在其中时也能看到自己的名次和数据")
                     .defineInRange("topCount", 100, 5, 500);
             this.leaderboardUpdateIntervalSeconds = builder
-                    .comment("在线玩家的榜单数据多久刷新一次（秒）。登录、登出、玩家自己打开榜单时另外会立刻刷新，",
-                            "所以这个值只影响「别人看到你」的延迟，调大点省性能")
+                    .comment("在线玩家榜单数据的刷新间隔（秒）。玩家登录、登出或打开榜单时会另外立即刷新，",
+                            "因此此值只影响其他玩家看到的数据延迟，调大可降低开销")
                     .defineInRange("updateIntervalSeconds", 30, 5, 600);
             this.leaderboardRetentionDays = builder
-                    .comment("多久没上线的玩家从榜单里清掉（天）。0 = 永不清理。",
-                            "榜单会把每个玩家的整份专精数据存在主世界的存档里，开服久了只增不减，",
-                            "长期运行的服务器建议留个上限。在线玩家永远不会被清")
+                    .comment("离线超过此天数的玩家从榜单中移除。0 = 永不清理。",
+                            "榜单会将每名玩家的完整专精数据保存在主世界存档中，只增不减，",
+                            "长期运行的服务器建议设置此值。在线玩家不会被移除")
                     .defineInRange("retentionDays", 90, 0, 3650);
             this.leaderboardRequestCooldownSeconds = builder
-                    .comment("同一名玩家两次请求榜单之间至少隔几秒（要榜单、看某个人分别计）。0 = 不限")
+                    .comment("同一玩家两次请求榜单的最小间隔（秒），榜单与玩家详情分别计时。0 = 不限")
                     .defineInRange("requestCooldownSeconds", 2, 0, 60);
             this.leaderboardBroadcastTopChanges = builder
-                    .comment("总榜前三名易主时给所有在线玩家弹一条和升级同款的横幅（本人看到的是「你成为了…」，",
-                            "别人看到的是「xxx 替代 yyy 成为了…」），不走聊天。只看总榜，日榜周榜月榜的变动不通知")
+                    .comment("总榜前三名易主时向所有在线玩家显示与升级提示相同的横幅（本人看到「你成为…」，",
+                            "其他玩家看到「xxx 取代 yyy，成为…」），不发聊天消息。只统计总榜，日、周、月榜的变动不通知")
                     .define("broadcastTopChanges", true);
             this.leaderboardBroadcastSort = builder
-                    .comment("广播按哪种排序算前三：MAXED 满级数，LEVEL_SUM 等级总和，UNLOCKED 已解锁数，XP 经验总和，",
-                            "RANK 段位（和 LEVEL_SUM 同序，段位经验就是等级总和乘每级段位经验）")
+                    .comment("广播按哪种排序计算前三：MAXED 满级数，LEVEL_SUM 等级总和，UNLOCKED 已解锁数，XP 经验总和，",
+                            "RANK 段位（与 LEVEL_SUM 同序，段位经验即等级总和乘每级段位经验）")
                     .defineEnum("broadcastSort", LeaderboardSort.MAXED);
             builder.pop();
 
-            builder.comment("段位：账号级的总进度，规则照搬星际战甲的精通段位。",
-                            "段位经验只来自外圈（单件武器）：每件武器每升一级给固定的段位经验，类型和总体两圈不算。",
-                            "门槛与星际战甲一致：1~30 段累计 2500 × 段位²（30 段至崇宗师 = 2,250,000），",
-                            "之后每 147,500 升一个传奇段位。段位按武器等级现算：调低等级上限、或调高经验曲线（xpBase / xpExponent）时段位会跟着降；",
-                            "反过来段位会升，重载配置后可能一次触发多段晋升")
+            builder.comment("段位：账号级的总进度，规则沿用星际战甲的精通段位。",
+                            "段位经验只来自外圈（单件武器）：每件武器每升一级获得固定段位经验，类型和总体两圈不计。",
+                            "门槛与星际战甲一致：1～30 段累计 2500 × 段位²（30 段至崇宗师 = 2,250,000），",
+                            "之后每 147,500 升一个传奇段位。段位按武器等级实时计算：调低等级上限或调高经验曲线（xpBase / xpExponent）时段位随之下降；",
+                            "反之段位上升，重载配置后可能一次触发多段晋升")
                     .push("rank");
             this.rankXpPerWeaponLevel = builder
-                    .comment("每件武器每升一级给多少段位经验。星际战甲是武器 100、战甲 200。",
-                            "按默认的等级上限 100，一件满级武器给 10,000，225 件满级武器到至崇宗师")
+                    .comment("每件武器每升一级的段位经验。星际战甲为武器 100、战甲 200。",
+                            "按默认等级上限 100，一件满级武器提供 10,000，225 件满级武器达到至崇宗师")
                     .defineInRange("xpPerWeaponLevel", 100, 1, 100000);
             this.rankUpBroadcast = builder
-                    .comment("晋升段位时在聊天栏通告全服（关掉后只有本人收到一行记录；屏幕上方的晋升动画不受影响）")
+                    .comment("晋升段位时在聊天栏通告全服。关闭后只有本人收到一行记录，屏幕上方的晋升动画不受影响")
                     .define("broadcastRankUp", true);
             builder.pop();
 
@@ -1864,13 +1865,13 @@ public final class MasteryConfig {
      * @param spec     特化
      * @param defaults 往里面塞「项名 -&gt; 默认值」
      */
-    private static void defineSpec(ForgeConfigSpec.Builder builder, Specialization spec,
+    private static void defineSpec(ModConfigSpec.Builder builder, Specialization spec,
                                    Consumer<Map<String, Double>> defaults) {
         Map<String, Double> wanted = new LinkedHashMap<>();
         defaults.accept(wanted);
 
         builder.push(spec.configSection());
-        Map<String, ForgeConfigSpec.DoubleValue> values = new HashMap<>();
+        Map<String, ModConfigSpec.DoubleValue> values = new HashMap<>();
         for (Map.Entry<String, Double> entry : wanted.entrySet()) {
             String key = entry.getKey();
             // 上下界和网络包的夹取用同一张表（SpecializationValues.minOf / maxOf），
@@ -1906,7 +1907,7 @@ public final class MasteryConfig {
      *
      * @param values 项名 -&gt; 配置值
      */
-    public record SpecEntry(Map<String, ForgeConfigSpec.DoubleValue> values) {
+    public record SpecEntry(Map<String, ModConfigSpec.DoubleValue> values) {
 
         /**
          * 取一项数值。
@@ -1916,7 +1917,7 @@ public final class MasteryConfig {
          * @return 数值
          */
         public double get(String key, double fallback) {
-            ForgeConfigSpec.DoubleValue value = this.values.get(key);
+            ModConfigSpec.DoubleValue value = this.values.get(key);
             return value == null ? fallback : value.get();
         }
     }
@@ -1926,23 +1927,23 @@ public final class MasteryConfig {
      */
     public static final class Client {
 
-        public final ForgeConfigSpec.BooleanValue renderItemIcons;
-        public final ForgeConfigSpec.DoubleValue defaultZoom;
-        public final ForgeConfigSpec.BooleanValue showMasteryTooltip;
-        public final ForgeConfigSpec.BooleanValue equalSourceWedges;
-        public final ForgeConfigSpec.BooleanValue detailedTooltip;
-        public final ForgeConfigSpec.BooleanValue showLevelUpToast;
-        public final ForgeConfigSpec.BooleanValue levelUpSound;
-        public final ForgeConfigSpec.BooleanValue overrideDamageDisplay;
-        public final ForgeConfigSpec.BooleanValue rankUpAnimation;
-        public final ForgeConfigSpec.BooleanValue rankUpSound;
-        public final ForgeConfigSpec.EnumValue<SpecScreenLayout> specScreenLayout;
-        public final ForgeConfigSpec.BooleanValue specGuideBar;
-        public final ForgeConfigSpec.IntValue specGuideVersion;
-        public final ForgeConfigSpec.ConfigValue<String> screenScale;
+        public final ModConfigSpec.BooleanValue renderItemIcons;
+        public final ModConfigSpec.DoubleValue defaultZoom;
+        public final ModConfigSpec.BooleanValue showMasteryTooltip;
+        public final ModConfigSpec.BooleanValue equalSourceWedges;
+        public final ModConfigSpec.BooleanValue detailedTooltip;
+        public final ModConfigSpec.BooleanValue showLevelUpToast;
+        public final ModConfigSpec.BooleanValue levelUpSound;
+        public final ModConfigSpec.BooleanValue overrideDamageDisplay;
+        public final ModConfigSpec.BooleanValue rankUpAnimation;
+        public final ModConfigSpec.BooleanValue rankUpSound;
+        public final ModConfigSpec.EnumValue<SpecScreenLayout> specScreenLayout;
+        public final ModConfigSpec.BooleanValue specGuideBar;
+        public final ModConfigSpec.IntValue specGuideVersion;
+        public final ModConfigSpec.ConfigValue<String> screenScale;
 
-        Client(ForgeConfigSpec.Builder builder) {
-            builder.comment("武器专精系统 - 客户端表现")
+        Client(ModConfigSpec.Builder builder) {
+            builder.comment("武器专精系统 · 客户端表现")
                     .push("client");
 
             this.renderItemIcons = builder
@@ -1952,8 +1953,8 @@ public final class MasteryConfig {
                     .define("renderItemIcons", true);
 
             this.defaultZoom = builder
-                    .comment("专精界面打开时的缩放倍数，相对于「整张图刚好放进屏幕」的自动值。",
-                            "1.0 = 打开就能看到全貌；调大则打开时更靠近中心。")
+                    .comment("专精界面打开时的缩放倍数，相对于整张图恰好占满屏幕时的自动值。",
+                            "1.0 = 打开时显示全貌；调大则打开时更靠近中心。")
                     .defineInRange("defaultZoom", 1.0D, 0.3D, 4.0D);
 
             this.showMasteryTooltip = builder
@@ -1961,12 +1962,12 @@ public final class MasteryConfig {
                     .define("showMasteryTooltip", true);
 
             this.equalSourceWedges = builder
-                    .comment("专精树的来源扇形是否平分整圈：false = 按武器数量按比例分，武器多的来源占更大的角度（默认）；",
-                            "true = 每个来源占的角度一样大，武器多的来源在自己那片里排得密一点")
+                    .comment("专精罗盘的来源扇形是否平分整圈：false = 按武器数量比例分配，武器多的来源角度更大（默认）；",
+                            "true = 每个来源角度相同，武器多的来源在扇形内排列更密")
                     .define("equalSourceWedges", false);
 
             this.detailedTooltip = builder
-                    .comment("提示文本里是否展开加成来源拆解（大类 / 本武器 / 同类联动），默认只显示一行摘要")
+                    .comment("提示文本中是否展开加成来源（类型 / 本武器 / 同类联动），默认只显示一行摘要")
                     .define("detailedTooltip", false);
 
             this.showLevelUpToast = builder
@@ -1974,16 +1975,16 @@ public final class MasteryConfig {
                     .define("showLevelUpToast", true);
 
             this.levelUpSound = builder
-                    .comment("升级时播放一声轻微的提示音（音量 0.3、音调 1.7，不打断战斗）")
+                    .comment("升级时播放轻微的提示音（音量 0.3、音调 1.7）")
                     .define("levelUpSound", true);
 
             this.overrideDamageDisplay = builder
-                    .comment("是否把 TACZ 枪械提示里显示的伤害直接替换为加成后的最终数值。",
-                            "关闭后提示里显示的是未计专精加成的原始伤害。")
+                    .comment("是否将 TACZ 枪械提示中的伤害替换为加成后的最终数值。",
+                            "关闭后提示中显示未计专精加成的原始伤害。")
                     .define("overrideDamageDisplay", true);
 
             this.rankUpAnimation = builder
-                    .comment("晋升段位时在屏幕正上方播放晋升动画（关掉后只剩聊天栏那一行）")
+                    .comment("晋升段位时在屏幕正上方播放晋升动画，关闭后只保留聊天栏的记录")
                     .define("rankUpAnimation", true);
 
             this.rankUpSound = builder
@@ -1991,25 +1992,25 @@ public final class MasteryConfig {
                     .define("rankUpSound", true);
 
             this.specScreenLayout = builder
-                    .comment("特化页的排布：A = 左栏列出槽位、卡片两列；B = 槽位横排在顶上、卡片三列；",
-                            "C = 列表 + 详情（右栏是选中特化的每级数值表）。特化页顶栏的按钮也能切换，切了会写回这里。",
-                            "窗口窄到放不下 C 的三栏时按 B 显示，这里存的值不变。")
+                    .comment("特化页布局：A = 左栏列出槽位，卡片两列；B = 槽位横排在顶部，卡片三列；",
+                            "C = 列表 + 详情，右栏为所选特化的各级数值表。也可用特化页顶栏的按钮切换，切换结果写回此处。",
+                            "窗口过窄、无法显示 C 的三栏时按 B 显示，此处保存的值不变。")
                     .defineEnum("specScreenLayout", SpecScreenLayout.B);
 
             this.specGuideBar = builder
-                    .comment("特化页槽位下面的引导条：按选中的槽列出该走的几步，再写一句下一步点哪里。",
-                            "引导条右边的「收起」会把这里改成 false；顶栏的「?」重看引导时会重新打开。")
+                    .comment("特化页槽位下方的引导条：按选中的槽列出操作步骤，并提示下一步的位置。",
+                            "点击引导条右侧的「收起」会将此项改为 false；通过顶栏的「?」重看引导时会重新开启。")
                     .define("specGuideBar", true);
 
             this.specGuideVersion = builder
-                    .comment("看过的特化页上手引导版本。小于当前版本时，第一次打开特化页会从头走一遍引导；改成 0 可以再看一次。")
+                    .comment("已读的特化页上手引导版本。小于当前版本时，第一次打开特化页会从头显示引导；设为 0 可重新查看。")
                     .defineInRange("specGuideVersion", 0, 0, 1000);
 
             // 校验写在这里而不是调客户端的 ScreenScale：配置类两端都加载，专用服上不能碰客户端类
             this.screenScale = builder
-                    .comment("专精界面（罗盘、特化页、段位之路、排行榜）自己的界面缩放，只取整数倍，不影响别的界面。",
-                            "auto = 按显示器尺寸自动挑一档（不超过原版界面尺寸）；auto+1 / auto-1 = 在自动的基础上大 / 小一档；",
-                            "写 1～8 的数就固定用那一档。界面左下角的放大镜按钮也能调，调了会写回这里。")
+                    .comment("专精界面（罗盘、特化页、段位之路、排行榜）独立的界面缩放，只取整数倍，不影响其他界面。",
+                            "auto = 按显示器尺寸自动选择一档（不超过原版界面尺寸）；auto+1 / auto-1 = 在自动档基础上大 / 小一档；",
+                            "填 1～8 则固定使用该档。也可用界面左下角的放大镜按钮调整，调整结果写回此处。")
                     .define("screenScale", "auto",
                             v -> v instanceof String text && text.trim().matches("auto(?:[+-][1-8])?|[1-8]"));
 

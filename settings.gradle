@@ -1,15 +1,8 @@
 pluginManagement {
     repositories {
-        gradlePluginPortal()
-        maven {
-            name = 'MinecraftForge'
-            url = 'https://maven.minecraftforge.net/'
-        }
+        gradlePluginPortal()                                   // Gradle 官方插件
+        maven { url 'https://maven.neoforged.net/releases' }   // NeoForge 与 ModDevGradle
     }
-}
-
-plugins {
-    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.7.0'
 }
 
 rootProject.name = 'AlbionMastery'

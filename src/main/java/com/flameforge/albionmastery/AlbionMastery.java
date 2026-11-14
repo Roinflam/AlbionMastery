@@ -2,31 +2,31 @@ package com.flameforge.albionmastery;
 
 import com.flameforge.albionmastery.event.CommonEventHandler;
 import com.flameforge.albionmastery.config.MasteryConfig;
+import com.flameforge.albionmastery.dev.DevMixinAudit;
 import com.flameforge.albionmastery.event.ArsCombatHandler;
 import com.flameforge.albionmastery.event.GunCombatHandler;
 import com.flameforge.albionmastery.event.SlashBladeCombatHandler;
 import com.flameforge.albionmastery.event.SpellCombatHandler;
 import com.flameforge.albionmastery.leaderboard.MasteryLeaderboard;
 import com.flameforge.albionmastery.mastery.DimensionXpBonus;
+import com.flameforge.albionmastery.mastery.MasteryCapability;
 import com.flameforge.albionmastery.network.NetworkHandler;
 import com.flameforge.albionmastery.weapon.WeaponCatalog;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.eventbus.api.IEventBus;
-import net.minecraftforge.fml.ModLoadingContext;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.config.ModConfig;
-import net.minecraftforge.fml.event.config.ModConfigEvent;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.server.ServerLifecycleHooks;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.config.ModConfigEvent;
+import net.neoforged.fml.loading.FMLEnvironment;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.flameforge.albionmastery.mastery.spec.SpecVisualAttributes;
-import com.flameforge.albionmastery.event.SweetMagicCombatHandler;
 import com.flameforge.albionmastery.compat.ftbquests.FtbQuestsCompat;
 
 /**
@@ -54,45 +54,54 @@ public class AlbionMastery {
 
     /**
      * 模组构造：注册配置与网络通道。
+     *
+     * @param modBus    本模组的事件总线
+     * @param container 本模组的容器（登记配置用）
      */
-    public AlbionMastery() {
-        IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
-
-        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, MasteryConfig.COMMON_SPEC);
-        ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, MasteryConfig.CLIENT_SPEC);
+    public AlbionMastery(IEventBus modBus, ModContainer container) {
+        container.registerConfig(ModConfig.Type.COMMON, MasteryConfig.COMMON_SPEC);
+        container.registerConfig(ModConfig.Type.CLIENT, MasteryConfig.CLIENT_SPEC);
 
         // 模组列表里的配置按钮（Cloth Config 界面）；界面类引用客户端类，专用服务端不加载
-        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                () -> com.flameforge.albionmastery.client.screen.MasteryConfigScreen::register);
+        if (FMLEnvironment.dist == Dist.CLIENT) {
+            // 1.20.1 是 DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> MasteryConfigScreen::register)；
+            // 1.21.1 登记配置界面要用本模组的容器（registerExtensionPoint），所以把容器传进去
+            com.flameforge.albionmastery.client.screen.MasteryConfigScreen.register(container);
+        }
 
         modBus.addListener(this::onConfigLoading);
         modBus.addListener(this::onConfigReloading);
 
+        // 玩家专精数据（数据附件）
+        MasteryCapability.register(modBus);
+
         SpecVisualAttributes.register(modBus);
-        NetworkHandler.register();
+        NetworkHandler.register(modBus);
         // 四个来源全是可选依赖。这几个处理器的方法签名里有对应模组的事件类，
         // 没装时不能让事件总线去反射它们，所以逐个判断装了才注册；
         // 没装的来源，它的节点不会出现在树上，相关功能也一概不启用
         if (WeaponResolver.isTaczLoaded()) {
-            MinecraftForge.EVENT_BUS.register(GunCombatHandler.class);
+            NeoForge.EVENT_BUS.register(GunCombatHandler.class);
         }
         if (WeaponResolver.isSlashBladeLoaded()) {
-            MinecraftForge.EVENT_BUS.register(SlashBladeCombatHandler.class);
+            NeoForge.EVENT_BUS.register(SlashBladeCombatHandler.class);
         }
         if (WeaponResolver.isIronsLoaded()) {
-            MinecraftForge.EVENT_BUS.register(SpellCombatHandler.class);
+            NeoForge.EVENT_BUS.register(SpellCombatHandler.class);
         }
         if (WeaponResolver.isArsLoaded()) {
-            MinecraftForge.EVENT_BUS.register(ArsCombatHandler.class);
-        }
-        if (WeaponResolver.isSweetMagicLoaded()) {
-            MinecraftForge.EVENT_BUS.register(SweetMagicCombatHandler.class);
+            NeoForge.EVENT_BUS.register(ArsCombatHandler.class);
         }
         if (WeaponResolver.isIronsArtificeLoaded()) {
-            MinecraftForge.EVENT_BUS.register(com.flameforge.albionmastery.event.IronsArtificeCombatHandler.class);
+            NeoForge.EVENT_BUS.register(com.flameforge.albionmastery.event.IronsArtificeCombatHandler.class);
         }
         // FTB 任务同样可选：装了就多一种「专精段位」任务，没装时入口里自己判断、不碰 FTB 的类
-        FtbQuestsCompat.init();
+        FtbQuestsCompat.init(modBus);
+
+        // 开发环境专用：强制加载全部 Mixin 目标，核对注入器有没有打上（打包后的 jar 里不登记）
+        if (Platform.isDevelopment()) {
+            DevMixinAudit.register();
+        }
     }
 
     /**
@@ -121,8 +130,8 @@ public class AlbionMastery {
     private void onConfigReloading(ModConfigEvent.Reloading event) {
         if (event.getConfig().getType() == ModConfig.Type.COMMON) {
             // 等级上限或曲线变了，排行榜上存的「满级数」这些概况就不对了，得按新曲线重算。
-            // 配置重载事件是文件监视线程发出来的，不在主线程，SavedData 不能在这里直接碰，
-            // 用 server.execute 丢回主线程去做
+            // 配置重载事件可能来自文件监视线程，也可能是 save() 在当前线程同步发出的；
+            // SavedData 不能在别的线程上碰，一律用 server.execute 丢回主线程去做（在主线程上调用时直接执行）
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             if (server == null) {
                 MasteryConfig.migrateSpecBalance();

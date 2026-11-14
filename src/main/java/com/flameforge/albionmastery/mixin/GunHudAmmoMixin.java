@@ -20,7 +20,7 @@ import org.spongepowered.asm.mixin.injection.At;
  * <p>这里读的是客户端同步缓存里的数据，而不是本地配置：多人服里数值以服务端为准。
  * HUD 画的一定是本地玩家自己的枪，所以直接用同步缓存就够，不需要再判断是谁。
  */
-@Mixin(value = GunHudOverlay.class, remap = false)
+@Mixin(GunHudOverlay.class)
 public abstract class GunHudAmmoMixin {
 
     /**
@@ -30,14 +30,16 @@ public abstract class GunHudAmmoMixin {
      * @return 应用特化之后的容量
      */
     @ModifyExpressionValue(
-            method = "handleCacheCount",
+            method = "handleCacheCount(Lnet/minecraft/client/player/LocalPlayer;Lnet/minecraft/world/item/ItemStack;"
+                    + "Lcom/tacz/guns/resource/pojo/data/gun/GunData;Lcom/tacz/guns/api/item/IGun;)V",
             at = @At(
                     value = "INVOKE",
                     target = "Lcom/tacz/guns/util/AttachmentDataUtils;getAmmoCountWithAttachment"
                             + "(Lnet/minecraft/world/item/ItemStack;"
                             + "Lcom/tacz/guns/resource/pojo/data/gun/GunData;)I"
             ),
-            require = 0
+            require = 0,
+            expect = 1
     )
     private static int albionmastery$applyMagazineSpec(int original, LocalPlayer player,
                                                       ItemStack stack) {

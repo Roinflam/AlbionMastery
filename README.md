@@ -6,8 +6,8 @@
 
 [![CurseForge Downloads](https://cf.way2muchnoise.eu/full_albion-mastery_downloads.svg?badge_style=for_the_badge)](https://www.curseforge.com/minecraft/mc-mods/albion-mastery)
 [![Modrinth Downloads](https://img.shields.io/modrinth/dt/albionmastery?style=for-the-badge&logo=modrinth&label=Modrinth)](https://modrinth.com/mod/albionmastery)
-[![MC Version](https://img.shields.io/badge/Minecraft-1.20.1-brightgreen?style=for-the-badge&logo=minecraft)](https://minecraft.net)
-[![Forge](https://img.shields.io/badge/Forge-47.x-orange?style=for-the-badge)](https://files.minecraftforge.net/net/minecraftforge/forge/index_1.20.1.html)
+[![MC Version](https://img.shields.io/badge/Minecraft-1.21.1-brightgreen?style=for-the-badge&logo=minecraft)](https://minecraft.net)
+[![NeoForge](https://img.shields.io/badge/NeoForge-21.1.x-orange?style=for-the-badge)](https://neoforged.net)
 [![License](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey?style=for-the-badge)](LICENSE)
 
 [![GitHub](https://img.shields.io/badge/GitHub-Roinflam-181717?style=for-the-badge&logo=github)](https://github.com/Roinflam)
@@ -18,7 +18,7 @@
 <details open>
 <summary><h2>English</h2></summary>
 
-**Albion Mastery** is a weapon mastery system for Minecraft 1.20.1 Forge. It finds the weapons in the mods you already have installed (guns, melee weapons, blades, spells, bows) and lets every weapon level up as you fight with it. Mastery is tracked on three rings, from the weapon source to the weapon type to the single weapon, and each ring gives a damage bonus. Once a weapon type is trained far enough you can pick specializations that trade one strength for another.
+**Albion Mastery** is a weapon mastery system for Minecraft 1.21.1 NeoForge. It finds the weapons in the mods you already have installed (guns, melee weapons, blades, spells, bows) and lets every weapon level up as you fight with it. Mastery is tracked on three rings, from the weapon source to the weapon type to the single weapon, and each ring gives a damage bonus. Once a weapon type is trained far enough you can pick specializations that trade one strength for another.
 
 ### Features
 
@@ -43,8 +43,6 @@ All optional; install any combination:
 - SlashBlade Resharped and its addons
 - Iron's Spells 'n Spellbooks (spells)
 - Ars Nouveau (spell glyphs)
-- Tinkers' Construct
-- Sweet Magic
 - Iron's Arms 'n Artifice (guns)
 - Vanilla and modded melee weapons, bows and crossbows (no mod needed)
 
@@ -59,34 +57,32 @@ FTB Quests is also optional: with it installed you get a "Mastery Rank" task typ
 
 | Component | Version |
 | --- | --- |
-| Minecraft | 1.20.1 |
-| Forge | 47.x |
+| Minecraft | 1.21.1 |
+| NeoForge | 21.1.265 or newer |
 
 Install on both the server and the client. No other mod is required; Cloth Config is bundled.
 
 ### Building from source
 
-The repository does **not** include third-party mod jars (they belong to their authors and can't be redistributed). Download the following Forge 1.20.1 jars yourself and put them into `libs/` (any file name works, the build script picks up every jar in that folder):
+The repository does **not** include third-party mod jars (they belong to their authors and can't be redistributed). Download the following NeoForge 1.21.1 jars yourself and put them into `libs/` (any file name works, the build script picks up every jar in that folder):
 
 | Mod | Version used here |
 | --- | --- |
-| TACZ | 1.1.7-hotfix2 |
-| LR Tactical | 0.4.1 |
-| SlashBlade Resharped | 1.9.65 |
-| Iron's Spells 'n Spellbooks | 3.16.2, plus Iron's Lib 2.3.0, Caelus 3.2.0, GeckoLib 4.8.4, playerAnimator 1.0.2-rc1, Curios 5.14.1 |
-| Ars Nouveau | 4.12.7 |
-| Tinkers' Construct | 3.11.2, plus Mantle 1.11.104 |
-| Sweet Magic | 1.5.1 |
-| Iron's Arms 'n Artifice | 1.1.1 (needs Iron's Lib 2.2.0 or later) |
-| FTB Quests | 2001.4.22, plus FTB Library 2001.2.13, FTB Teams 2001.3.2, Architectury 9.2.14 |
+| TACZ | 1.2.0 |
+| LR Tactical | 0.4.3 |
+| SlashBlade Resharped | 2.1.9 |
+| Iron's Spells 'n Spellbooks | 3.16.3, plus Iron's Lib 2.3.0, GeckoLib 4.9.3, playerAnimator 2.0.4, Curios 9.5.1 |
+| Ars Nouveau | 5.13.5 |
+| Iron's Arms 'n Artifice | 1.1.1 (needs Iron's Lib and GeckoLib) |
+| FTB Quests | 2101.1.38, plus FTB Library 2101.1.39, FTB Teams 2101.1.12, Architectury 13.0.11 |
 
-Then build with JDK 17:
+Then build with JDK 21:
 
 ```bash
 ./gradlew build
 ```
 
-The jar is in `build/libs/` (the file without `-slim` is the one to use; it contains the bundled Cloth Config). Don't run `clean` and `build` in the same command: the build script copies the jars from `libs/` during configuration, and `clean` deletes that copy.
+The jar is in `build/libs/`, with Cloth Config bundled inside.
 
 More details for server owners and developers (config, commands, how each source is hooked in) are in [`README-部署说明.md`](README-部署说明.md) (Chinese).
 
@@ -102,7 +98,7 @@ More details for server owners and developers (config, commands, how each source
 <details>
 <summary><h2>中文</h2></summary>
 
-**阿尔比恩专精**是 Minecraft 1.20.1 Forge 的武器专精系统。它会自动找出你已经装的模组里的武器（枪、近战、拔刀剑、法术、弓弩），用哪件武器战斗，哪件武器就升级。专精分三圈：武器来源 → 武器类型 → 单件武器，每一圈都给伤害加成；某个武器类型练到一定程度后，还能选特化，用一种长处换另一种。
+**阿尔比恩专精**是 Minecraft 1.21.1 NeoForge 的武器专精系统。它会自动找出你已经装的模组里的武器（枪、近战、拔刀剑、法术、弓弩），用哪件武器战斗，哪件武器就升级。专精分三圈：武器来源 → 武器类型 → 单件武器，每一圈都给伤害加成；某个武器类型练到一定程度后，还能选特化，用一种长处换另一种。
 
 ### 特色
 
@@ -127,8 +123,6 @@ More details for server owners and developers (config, commands, how each source
 - 拔刀剑（SlashBlade Resharped）及其附属
 - 铁魔法（Iron's Spells 'n Spellbooks）
 - 新生魔艺（Ars Nouveau）
-- 匠魂（Tinkers' Construct）
-- 甜蜜魔法（Sweet Magic）
 - Iron的武备与巧械（Iron's Arms 'n Artifice，枪械）
 - 原版和其它模组的近战武器、弓弩（不用装任何模组）
 
@@ -143,34 +137,32 @@ FTB 任务也是可选的：装了以后多一种「专精段位」任务。
 
 | 组件 | 版本 |
 | --- | --- |
-| Minecraft | 1.20.1 |
-| Forge | 47.x |
+| Minecraft | 1.21.1 |
+| NeoForge | 21.1.265 及以上 |
 
 服务端和客户端都要装。不需要任何前置，Cloth Config 已经内嵌。
 
 ### 从源码构建
 
-仓库里**不带**第三方模组的 jar（版权归各自作者，不能随源码再分发）。请自己下载下面这些 Forge 1.20.1 版 jar 放进 `libs/`（文件名随意，构建脚本会扫描整个目录）：
+仓库里**不带**第三方模组的 jar（版权归各自作者，不能随源码再分发）。请自己下载下面这些 NeoForge 1.21.1 版 jar 放进 `libs/`（文件名随意，构建脚本会扫描整个目录）：
 
 | 模组 | 本仓库用的版本 |
 | --- | --- |
-| TACZ | 1.1.7-hotfix2 |
-| LR Tactical | 0.4.1 |
-| 拔刀剑 SlashBlade Resharped | 1.9.65 |
-| 铁魔法 Iron's Spells 'n Spellbooks | 3.16.2，以及 Iron's Lib 2.3.0、Caelus 3.2.0、GeckoLib 4.8.4、playerAnimator 1.0.2-rc1、Curios 5.14.1 |
-| 新生魔艺 Ars Nouveau | 4.12.7 |
-| 匠魂 Tinkers' Construct | 3.11.2，以及 Mantle 1.11.104 |
-| 甜蜜魔法 Sweet Magic | 1.5.1 |
-| Iron的武备与巧械 Iron's Arms 'n Artifice | 1.1.1（要 Iron's Lib 2.2.0 及以上） |
-| FTB 任务 FTB Quests | 2001.4.22，以及 FTB Library 2001.2.13、FTB Teams 2001.3.2、Architectury 9.2.14 |
+| TACZ | 1.2.0 |
+| LR Tactical | 0.4.3 |
+| 拔刀剑 SlashBlade Resharped | 2.1.9 |
+| 铁魔法 Iron's Spells 'n Spellbooks | 3.16.3，以及 Iron's Lib 2.3.0、GeckoLib 4.9.3、playerAnimator 2.0.4、Curios 9.5.1 |
+| 新生魔艺 Ars Nouveau | 5.13.5 |
+| Iron的武备与巧械 Iron's Arms 'n Artifice | 1.1.1（要 Iron's Lib 和 GeckoLib） |
+| FTB 任务 FTB Quests | 2101.1.38，以及 FTB Library 2101.1.39、FTB Teams 2101.1.12、Architectury 13.0.11 |
 
-然后用 JDK 17 构建：
+然后用 JDK 21 构建：
 
 ```bash
 ./gradlew build
 ```
 
-产物在 `build/libs/`（不带 `-slim` 的那个才是发布用的，里面内嵌了 Cloth Config）。`clean` 和 `build` 不要放在同一次命令里跑：构建脚本在配置阶段从 `libs/` 复制依赖，`clean` 会把复制的那份删掉。
+产物在 `build/libs/`，里面内嵌了 Cloth Config。
 
 给服主和开发者的详细说明（配置、指令、各来源怎么接入）见 [`README-部署说明.md`](README-部署说明.md)。
 

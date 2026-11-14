@@ -5,7 +5,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
 import io.redspace.ironsspellbooks.player.ServerPlayerEvents;
-import net.minecraftforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
@@ -16,9 +16,9 @@ import org.spongepowered.asm.mixin.injection.At;
 public abstract class ServerPlayerEventsManaMixin {
 
     @WrapOperation(
-            method = "onUseItem",
+            method = "onUseItem(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent$RightClickItem;)V",
             at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/api/spells/AbstractSpell;getManaCost(I)I"),
-            require = 0
+            require = 0, expect = 1
     )
     private static int albionmastery$useItemCost(AbstractSpell spell, int level, Operation<Integer> original,
                                                  PlayerInteractEvent.RightClickItem event) {
