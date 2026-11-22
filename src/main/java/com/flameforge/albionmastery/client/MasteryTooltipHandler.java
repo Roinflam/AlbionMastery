@@ -99,57 +99,57 @@ public final class MasteryTooltipHandler {
         MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
         MasteryHelper.Bonus bonus = MasteryHelper.computeBonus(
                 ClientMasteryCache.data(), weapon, snapshot);
-        // 没练过的武器什么都不加，别挂一行全是 0 的字
-        if (bonus.total() <= 0.0D && bonus.weaponLevel() <= 0) {
-            return;
-        }
+        boolean trained = isTrained(bonus);
 
-        // 铁魔法的法术容器：一本书里几个法术就几行，每行「法术名 · Lv · 加成」，插在名字下面
+        // 铁魔法的法术容器：几个法术就几行「法术名 · Lv · 加成」；新生魔艺的施法物品：当前法术用到的每个符文一行
+        List<ResolvedWeapon> parts = List.of();
+        boolean ars = false;
         if (WeaponResolver.isIronsLoaded() && IronsSpellsSupport.isContainer(stack)) {
-            List<ResolvedWeapon> spells = IronsSpellsSupport.resolveAll(stack);
-            if (spells.isEmpty()) {
-                return;
+            parts = IronsSpellsSupport.resolveAll(stack);
+        } else if (WeaponResolver.isArsLoaded() && ArsNouveauSupport.isCaster(stack)) {
+            parts = ArsNouveauSupport.resolveAll(stack);
+            ars = true;
+        }
+        List<Component> spellBlock = new ArrayList<>(parts.size());
+        boolean spellTrained = false;
+        for (ResolvedWeapon part : parts) {
+            MasteryHelper.Bonus partBonus = MasteryClientBonus.bonusFor(part);
+            if (partBonus == null) {
+                continue;
             }
-            List<Component> spellBlock = new ArrayList<>(spells.size());
-            for (ResolvedWeapon spell : spells) {
-                MasteryHelper.Bonus spellBonus = MasteryClientBonus.bonusFor(spell);
-                if (spellBonus == null) {
-                    continue;
-                }
-                spellBlock.add(spellLine(spell, spellBonus, snapshot.maxLevel));
-            }
-            List<Component> lines = event.getToolTip();
-            lines.addAll(Math.min(1, lines.size()), spellBlock);
-            return;
+            spellTrained |= isTrained(partBonus);
+            spellBlock.add(ars ? partLine(part, partBonus, snapshot.maxLevel)
+                    : spellLine(part, partBonus, snapshot.maxLevel));
         }
 
-        // 新生魔艺的施法物品：当前选中法术用到的每个符文一行，插在名字下面
-        if (WeaponResolver.isArsLoaded() && ArsNouveauSupport.isCaster(stack)) {
-            List<ResolvedWeapon> parts = ArsNouveauSupport.resolveAll(stack);
-            if (parts.isEmpty()) {
-                return;
+        List<Component> lines = event.getToolTip();
+        if (isSpellProvider(weapon.providerId())) {
+            // 纯魔法书、卷轴、法杖：resolve 拿到的是第一个法术，它没练过就整块不显示
+            if (trained && !spellBlock.isEmpty()) {
+                lines.addAll(Math.min(1, lines.size()), spellBlock);
             }
-            List<Component> partBlock = new ArrayList<>(parts.size());
-            for (ResolvedWeapon part : parts) {
-                MasteryHelper.Bonus partBonus = MasteryClientBonus.bonusFor(part);
-                if (partBonus == null) {
-                    continue;
-                }
-                WeaponEntry entry = ClientWeaponRegistry.weaponByKey(part.weaponKey());
-                Component name = entry != null ? entry.displayName()
-                        : Component.literal(part.weaponId().toString());
-                partBlock.add(namedLine(name, partBonus, snapshot.maxLevel));
-            }
-            List<Component> lines = event.getToolTip();
-            lines.addAll(Math.min(1, lines.size()), partBlock);
             return;
         }
 
         // 先攒成一小块再整体插入：逐行 add(index) 要自己维护偏移量，容易插错位置
-        List<Component> block = new ArrayList<>(4);
+        List<Component> block = new ArrayList<>(4 + spellBlock.size());
+        // 没练过的武器什么都不加，别挂一行全是 0 的字
+        if (trained) {
+            addWeaponLines(block, bonus, snapshot.maxLevel);
+        }
+        // 奥术铁砧附过法术的剑、魔艺的附魔师之剑：击杀经验武器和法术两边都发，
+        // 武器自己那几行在前、法术行接在后面。只显示法术的话，玩家会以为武器不涨经验
+        if (spellTrained) {
+            block.addAll(spellBlock);
+        }
+        if (!block.isEmpty()) {
+            lines.addAll(insertIndex(lines, weapon.providerId()), block);
+        }
+    }
 
+    private static void addWeaponLines(List<Component> block, MasteryHelper.Bonus bonus, int maxLevel) {
         // 主行：专精 Lv.12/100 · +18.5%，满级特效（三圈各一段、全满彩虹）在 MasteryFlair 里
-        block.add(MasteryFlair.titleLine(bonus, snapshot.maxLevel));
+        block.add(MasteryFlair.titleLine(bonus, maxLevel));
 
         if (MasteryConfig.CLIENT.detailedTooltip.get()) {
             // 明细两行，每行两项。四项各占一行会把提示拉得老长，挤成一行又看不清
@@ -163,9 +163,22 @@ public final class MasteryTooltipHandler {
         if (bonus.capped()) {
             block.add(text("tooltip.albionmastery.capped", COLOR_WARN));
         }
+    }
 
-        List<Component> lines = event.getToolTip();
-        lines.addAll(insertIndex(lines, weapon.providerId()), block);
+    private static boolean isTrained(MasteryHelper.Bonus bonus) {
+        return bonus.total() > 0.0D || bonus.weaponLevel() > 0;
+    }
+
+    private static boolean isSpellProvider(String providerId) {
+        return WeaponKeys.PROVIDER_IRONS_SPELLS.equals(providerId)
+                || WeaponKeys.PROVIDER_ARS_NOUVEAU.equals(providerId);
+    }
+
+    private static Component partLine(ResolvedWeapon part, MasteryHelper.Bonus bonus, int maxLevel) {
+        WeaponEntry entry = ClientWeaponRegistry.weaponByKey(part.weaponKey());
+        Component name = entry != null ? entry.displayName()
+                : Component.literal(part.weaponId().toString());
+        return namedLine(name, bonus, maxLevel);
     }
 
     /**
