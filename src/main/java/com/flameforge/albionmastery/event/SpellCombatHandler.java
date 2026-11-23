@@ -38,6 +38,8 @@ import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import java.util.ArrayList;
 import java.util.List;
 import io.redspace.ironsspellbooks.damage.SpellDamageSource;
+import com.flameforge.albionmastery.weapon.compat.AddonSpellDamage;
+import net.minecraft.world.damagesource.DamageSource;
 import com.flameforge.albionmastery.event.damage.LivingHurtEvent;
 import com.flameforge.albionmastery.mastery.spec.SpecMoveSpeed;
 import io.redspace.ironsspellbooks.api.events.SpellPreCastEvent;
@@ -83,26 +85,28 @@ public final class SpellCombatHandler {
      * <p>挂在通用的受伤事件上、按伤害源是不是铁魔法的法术伤害来认，而不是铁魔法自己的法术伤害事件：
      * 地震、火山爆发、召唤出来的武器和生物是直接造成伤害的，不发那个事件，以前这几层对它们都不生效；
      * 那个事件又发在友伤判定之前，被挡掉的伤害也会叠连击、掷暴击。受伤事件只在伤害真的要结算时才来。
+     * 附属用自己伤害类型打的伤害没有法术信息，交给 {@code AddonSpellDamage} 去认。
      *
      * @param event 受伤事件
      */
     @SubscribeEvent(priority = EventPriority.HIGH)
     public static void onSpellHurt(LivingHurtEvent event) {
-        if (!(event.getSource() instanceof SpellDamageSource spellSource)) {
-            return;
-        }
         float amount = event.getAmount();
         if (amount <= 0.0F) {
             return;
         }
-        if (!(spellSource.getEntity() instanceof ServerPlayer player) || player.isSpectator()) {
+        DamageSource source = event.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer player) || player.isSpectator()) {
             return;
         }
         LivingEntity target = event.getEntity();
         if (target == player || !target.isAlive()) {
             return;
         }
-        ResolvedWeapon weapon = IronsSpellsSupport.resolveDamage(spellSource);
+        AbstractSpell spell = source instanceof SpellDamageSource spellSource
+                ? spellSource.spell()
+                : AddonSpellDamage.find(player, source);
+        ResolvedWeapon weapon = IronsSpellsSupport.ofSpell(spell);
         if (weapon == null) {
             return;
         }
@@ -119,8 +123,8 @@ public final class SpellCombatHandler {
         double multiplier = SpecializationEffects.conditionalMultiplier(spec, player, target, null)
                 * SpecializationEffects.critMultiplier(spec, player.getRandom())
                 * ComboTracker.hit(player, target, spec);
-        if (!IronsSpellsSupport.scalesSpellPower(spellSource.spell())) {
-            multiplier *= IronsSpellsSupport.powerMultiplier(player, spellSource.spell());
+        if (!IronsSpellsSupport.scalesSpellPower(spell)) {
+            multiplier *= IronsSpellsSupport.powerMultiplier(player, spell);
         }
         if (Math.abs(multiplier - 1.0D) > 1.0E-6D) {
             event.setAmount((float) (amount * multiplier));
@@ -174,6 +178,9 @@ public final class SpellCombatHandler {
             return;
         }
         AbstractSpell spell = SpellRegistry.getSpell(spellId);
+        if (event.getEntity() instanceof ServerPlayer caster) {
+            AddonSpellDamage.recordCast(caster, spell);
+        }
         ResolvedWeapon weapon = IronsSpellsSupport.ofSpell(spell);
         SpecializationValues spec = SpecializationEffects.forWeapon(event.getEntity(), weapon);
         if (MasteryConfig.COMMON.debugLogging.get()) {
@@ -220,6 +227,7 @@ public final class SpellCombatHandler {
     public static void onServerStopped(ServerStoppedEvent event) {
         PENDING_CASTS.clear();
         ECHO_COOLDOWN_SKIP.clear();
+        AddonSpellDamage.clear();
     }
 
     /**
