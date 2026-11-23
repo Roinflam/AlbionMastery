@@ -1,6 +1,10 @@
 package com.flameforge.albionmastery.mixin;
 
+import com.flameforge.albionmastery.weapon.compat.AddonSpellTooltip;
 import com.flameforge.albionmastery.weapon.compat.IronsSpellsSupport;
+import java.util.List;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.world.entity.LivingEntity;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
@@ -14,7 +18,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
 /**
- * 法术书、卷轴提示里的法力消耗和冷却秒数按实际值显示。
+ * 法术书、卷轴提示里的法力消耗、冷却秒数和附属法术的伤害按实际值显示。
  */
 @Mixin(value = TooltipsUtils.class, remap = false)
 public abstract class TooltipsManaMixin {
@@ -86,5 +90,15 @@ public abstract class TooltipsManaMixin {
     private static int albionmastery$scrollCost(AbstractSpell spell, int level, Operation<Integer> original,
                                                 ItemStack stack, Player player) {
         return IronsSpellsSupport.effectiveManaCost(player, spell, original.call(spell, level));
+    }
+
+    @WrapOperation(
+            method = {"formatActiveSpellTooltip", "formatScrollTooltip"},
+            at = @At(value = "INVOKE", target = "Lio/redspace/ironsspellbooks/api/spells/AbstractSpell;getUniqueInfo(ILnet/minecraft/world/entity/LivingEntity;)Ljava/util/List;"),
+            require = 0
+    )
+    private static List<MutableComponent> albionmastery$addonDamage(AbstractSpell spell, int level, LivingEntity caster,
+                                                                    Operation<List<MutableComponent>> original) {
+        return AddonSpellTooltip.scale(spell, caster, original.call(spell, level, caster));
     }
 }
