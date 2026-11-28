@@ -296,7 +296,7 @@ public class RankTrackScreen extends Screen {
             }
         }
 
-        guiGraphics.fill(0, 0, this.width, this.height, MasteryPalette.BG);
+        MasteryPalette.drawBackground(guiGraphics, this.width, this.height);
         drawHeader(guiGraphics, mouseX, mouseY);
         drawSummary(guiGraphics, shown);
 
@@ -323,7 +323,7 @@ public class RankTrackScreen extends Screen {
         int x = backX();
         int y = 2;
         int h = HEADER_HEIGHT - 4;
-        guiGraphics.fill(x, y, x + BACK_WIDTH, y + h, hover ? 0xF01E1810 : 0xC0130F09);
+        guiGraphics.fill(x, y, x + BACK_WIDTH, y + h, hover ? MasteryPalette.withAlpha(MasteryPalette.PANEL_HOVER, 0xF0) : MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xC0));
         int border = hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
         guiGraphics.fill(x, y, x + BACK_WIDTH, y + 1, border);
         guiGraphics.fill(x, y + h - 1, x + BACK_WIDTH, y + h, border);
@@ -642,7 +642,7 @@ public class RankTrackScreen extends Screen {
         int top = minimapTop();
         int bottom = top + MINIMAP_HEIGHT;
         boolean hover = isOnMinimap(mouseX, mouseY);
-        guiGraphics.fill(left, top, right, bottom, 0xFF17120A);
+        guiGraphics.fill(left, top, right, bottom, MasteryPalette.TRACK);
         float span = Math.max(1, this.endRank);
         int fill = left + Math.round((right - left) * Mth.clamp(shown / span, 0.0F, 1.0F));
         if (fill > left) {

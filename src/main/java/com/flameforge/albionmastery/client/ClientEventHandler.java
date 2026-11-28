@@ -3,7 +3,11 @@ package com.flameforge.albionmastery.client;
 import com.flameforge.albionmastery.AlbionMastery;
 import com.flameforge.albionmastery.client.rank.RankCeremony;
 import com.flameforge.albionmastery.client.rank.RankEmblem;
+import com.flameforge.albionmastery.client.screen.MasteryPalette;
 import com.flameforge.albionmastery.client.screen.MasteryScreen;
+import com.flameforge.albionmastery.config.MasteryConfig;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.config.ModConfigEvent;
 import com.flameforge.albionmastery.weapon.WeaponResolver;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -165,7 +169,24 @@ public final class ClientEventHandler {
          */
         @SubscribeEvent
         public static void onRegisterReloadListeners(RegisterClientReloadListenersEvent event) {
-            event.registerReloadListener((ResourceManagerReloadListener) manager -> RankEmblem.invalidateTextures());
+            event.registerReloadListener((ResourceManagerReloadListener) manager -> {
+                RankEmblem.invalidateTextures();
+                MasteryPalette.invalidateBackground();
+            });
+        }
+
+        @SubscribeEvent
+        public static void onConfigLoading(ModConfigEvent.Loading event) {
+            if (event.getConfig().getSpec() == MasteryConfig.CLIENT_SPEC) {
+                MasteryPalette.reload();
+            }
+        }
+
+        @SubscribeEvent
+        public static void onConfigReloading(ModConfigEvent.Reloading event) {
+            if (event.getConfig().getSpec() == MasteryConfig.CLIENT_SPEC) {
+                MasteryPalette.reload();
+            }
         }
     }
 }

@@ -982,7 +982,7 @@ public class MasteryScreen extends Screen {
      */
     private void drawFramedButton(GuiGraphics guiGraphics, int x, int y, Component label, boolean hover) {
         // 不透明，理由同面板：底下飘过的连线会从半透明的底色里透出来
-        guiGraphics.fill(x, y, x + BUTTON_WIDTH, y + BUTTON_HEIGHT, hover ? 0xFF1E1810 : 0xFF130F09);
+        guiGraphics.fill(x, y, x + BUTTON_WIDTH, y + BUTTON_HEIGHT, hover ? MasteryPalette.PANEL_HOVER : MasteryPalette.PANEL);
         int border = hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
         guiGraphics.fill(x, y, x + BUTTON_WIDTH, y + 1, border);
         guiGraphics.fill(x, y + BUTTON_HEIGHT - 1, x + BUTTON_WIDTH, y + BUTTON_HEIGHT, border);
@@ -1156,7 +1156,7 @@ public class MasteryScreen extends Screen {
         int primary = RankEmblem.primaryColor(rank);
 
         // 和左下角按钮同款的描边底板，左边一道金属色竖条
-        guiGraphics.fill(x, y, right, bottom, hover ? 0xFF1E1810 : 0xFF130F09);
+        guiGraphics.fill(x, y, right, bottom, hover ? MasteryPalette.PANEL_HOVER : MasteryPalette.PANEL);
         int border = hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
         guiGraphics.fill(x, y, right, y + 1, border);
         guiGraphics.fill(x, bottom - 1, right, bottom, border);
@@ -1188,7 +1188,7 @@ public class MasteryScreen extends Screen {
         guiGraphics.pose().popPose();
 
         int barTop = bottom - 5;
-        guiGraphics.fill(textX, barTop, textRight, barTop + 2, 0xFF17120A);
+        guiGraphics.fill(textX, barTop, textRight, barTop + 2, MasteryPalette.TRACK);
         int fillRight = textX + Math.round((textRight - textX) * progress);
         if (fillRight > textX) {
             guiGraphics.fill(textX, barTop, fillRight, barTop + 2, max ? MasteryPalette.GOLD_BRIGHT : primary);
@@ -1271,7 +1271,7 @@ public class MasteryScreen extends Screen {
         }
         float progress = max ? 1.0F : MasteryRank.progress(xp);
         int barTop = bottom - TOOLTIP_PAD_Y - BAR_HEIGHT;
-        guiGraphics.fill(x, barTop, x + width, barTop + BAR_HEIGHT, 0xFF17120A);
+        guiGraphics.fill(x, barTop, x + width, barTop + BAR_HEIGHT, MasteryPalette.TRACK);
         int fillRight = x + Math.round(width * progress);
         if (fillRight > x) {
             guiGraphics.fill(x, barTop, fillRight, barTop + BAR_HEIGHT, max ? MasteryPalette.GOLD_BRIGHT : primary);
@@ -1889,7 +1889,7 @@ public class MasteryScreen extends Screen {
         }
 
         updateRadiusFloors();
-        guiGraphics.fill(0, 0, this.width, this.height, MasteryPalette.BG);
+        MasteryPalette.drawBackground(guiGraphics, this.width, this.height);
         this.hovered = pickNode(mouseX, mouseY);
         for (MasteryNode node : this.nodes) {
             float target = node == this.hovered ? 1.0F : 0.0F;
@@ -2739,7 +2739,7 @@ public class MasteryScreen extends Screen {
 
         int left = -boxWidth / 2;
         guiGraphics.fill(left - 1, -1, left + boxWidth + 1, boxHeight + 1, 0xFF0A0806);
-        guiGraphics.fill(left, 0, left + boxWidth, boxHeight, 0xFF1E1810);
+        guiGraphics.fill(left, 0, left + boxWidth, boxHeight, MasteryPalette.PANEL_HOVER);
         guiGraphics.fill(left, 0, left + boxWidth, 1, MasteryPalette.GOLD);
         guiGraphics.fill(left, boxHeight - 1, left + boxWidth, boxHeight, MasteryPalette.GOLD_DARK);
         guiGraphics.drawCenteredString(this.font, text, 0, 2, MasteryPalette.GOLD_BRIGHT);
@@ -3072,7 +3072,7 @@ public class MasteryScreen extends Screen {
                 x, y, width);
         double ratio = progress.total() <= 0 ? 0.0D : (double) progress.unlocked() / progress.total();
         guiGraphics.fill(x - 1, cursor - 1, x + width + 1, cursor + 8, MasteryPalette.EDGE);
-        guiGraphics.fill(x, cursor, x + width, cursor + 7, 0xFF17120A);
+        guiGraphics.fill(x, cursor, x + width, cursor + 7, MasteryPalette.TRACK);
         int filled = (int) Math.round(width * Mth.clamp(ratio, 0.0D, 1.0D));
         if (filled > 0) {
             guiGraphics.fill(x, cursor, x + filled, cursor + 7, MasteryPalette.PROGRESS);
@@ -3381,7 +3381,7 @@ public class MasteryScreen extends Screen {
         double contentY = this.mouseYNow + this.panelScroll;
         boolean hover = isInPanel(this.mouseXNow, this.mouseYNow) && this.mouseXNow >= x && this.mouseXNow < x + width
                 && contentY >= y && contentY < y + height;
-        guiGraphics.fill(x, y, x + width, y + height, hover ? 0xF01E1810 : 0xC0130F09);
+        guiGraphics.fill(x, y, x + width, y + height, hover ? MasteryPalette.withAlpha(MasteryPalette.PANEL_HOVER, 0xF0) : MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xC0));
         int border = hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
         guiGraphics.fill(x, y, x + width, y + 1, border);
         guiGraphics.fill(x, y + height - 1, x + width, y + height, border);
@@ -3504,7 +3504,7 @@ public class MasteryScreen extends Screen {
             boolean hover = isInPanel(this.mouseXNow, this.mouseYNow) && this.mouseXNow >= left && this.mouseXNow < right
                     && contentY >= y && contentY < y + height;
             boolean armed = armKey(action).equals(this.armedAdmin) && now < this.armedUntilMs;
-            guiGraphics.fill(left, y, right, y + height, armed ? 0x60E08A3C : hover ? 0xF01E1810 : 0xC0130F09);
+            guiGraphics.fill(left, y, right, y + height, armed ? 0x60E08A3C : hover ? MasteryPalette.withAlpha(MasteryPalette.PANEL_HOVER, 0xF0) : MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xC0));
             int border = armed || (action.confirm() && hover) ? MasteryPalette.WARN
                     : hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
             guiGraphics.fill(left, y, right, y + 1, border);
@@ -3605,7 +3605,7 @@ public class MasteryScreen extends Screen {
                 Component.literal(level + " / " + max)
                         .withStyle(done ? ChatFormatting.GREEN : ChatFormatting.GRAY),
                 x, y, width);
-        guiGraphics.fill(x, cursor, x + width, cursor + 4, 0xFF17120A);
+        guiGraphics.fill(x, cursor, x + width, cursor + 4, MasteryPalette.TRACK);
         int filled = (int) Math.round(width * Mth.clamp((double) level / max, 0.0D, 1.0D));
         if (filled > 0) {
             guiGraphics.fill(x, cursor, x + filled, cursor + 4,
@@ -3940,7 +3940,7 @@ public class MasteryScreen extends Screen {
         double ratio = span > 0L ? (double) inLevel / (double) span : 1.0D;
 
         guiGraphics.fill(x - 1, cursor - 1, x + width + 1, cursor + 8, MasteryPalette.EDGE);
-        guiGraphics.fill(x, cursor, x + width, cursor + 7, 0xFF17120A);
+        guiGraphics.fill(x, cursor, x + width, cursor + 7, MasteryPalette.TRACK);
         int filled = (int) Math.round(width * Mth.clamp(ratio, 0.0D, 1.0D));
         if (filled > 0) {
             guiGraphics.fill(x, cursor, x + filled, cursor + 7, MasteryPalette.PROGRESS);
@@ -4049,7 +4049,7 @@ public class MasteryScreen extends Screen {
         if (bar) {
             double ratio = Mth.clamp((double) level / Math.max(1, snapshot.maxLevel), 0.0D, 1.0D);
             int barTop = bottom - TOOLTIP_PAD_Y - BAR_HEIGHT;
-            guiGraphics.fill(x, barTop, x + width, barTop + BAR_HEIGHT, 0xFF17120A);
+            guiGraphics.fill(x, barTop, x + width, barTop + BAR_HEIGHT, MasteryPalette.TRACK);
             guiGraphics.fill(x, barTop, x + (int) Math.round(width * ratio), barTop + BAR_HEIGHT,
                     ratio >= 1.0D ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.PROGRESS);
         }
