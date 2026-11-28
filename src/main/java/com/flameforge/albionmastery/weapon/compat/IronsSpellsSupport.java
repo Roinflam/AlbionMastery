@@ -7,6 +7,7 @@ import com.flameforge.albionmastery.mastery.spec.SpecializationEffects;
 import com.flameforge.albionmastery.weapon.ResolvedWeapon;
 import com.flameforge.albionmastery.weapon.WeaponCatalog;
 import com.flameforge.albionmastery.weapon.WeaponKeys;
+import io.redspace.ironsspellbooks.api.item.ISpellbook;
 import io.redspace.ironsspellbooks.api.magic.MagicData;
 import io.redspace.ironsspellbooks.api.magic.SpellSelectionManager;
 import io.redspace.ironsspellbooks.api.spells.SpellData;
@@ -58,7 +59,10 @@ public final class IronsSpellsSupport {
     }
 
     /**
-     * 这件物品是不是魔法书（带法术转盘的容器）。卷轴和附魔进武器里的法术不带转盘。
+     * 这件物品是不是魔法书：只有装进饰品栏才能施法的那种容器。
+     *
+     * <p>不能按「进不进法术转盘」认：铁魔法给附了法术的武器（奥术铁砧附的、MagicSwordItem
+     * 自带的）建的容器也进转盘，那样剑在手里会被当成书，剑和它自带的法术都拿不到手持经验。
      *
      * @param stack 物品
      * @return 是魔法书返回 true
@@ -67,9 +71,12 @@ public final class IronsSpellsSupport {
         if (!isContainer(stack)) {
             return false;
         }
+        if (stack.getItem() instanceof ISpellbook) {
+            return true;
+        }
         try {
             ISpellContainer container = ISpellContainer.get(stack);
-            return container != null && container.isSpellWheel();
+            return container != null && container.mustEquip();
         } catch (Exception exception) {
             return false;
         }
