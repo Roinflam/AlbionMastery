@@ -433,7 +433,7 @@ public class SpecializationScreen extends Screen {
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         computeRegions();
         MasteryConfig.Snapshot snapshot = ClientMasteryCache.snapshot();
-        guiGraphics.fill(0, 0, this.width, this.height, MasteryPalette.BG);
+        MasteryPalette.drawBackground(guiGraphics, this.width, this.height);
         this.hits.clear();
         this.pendingTooltip = null;
         this.hoveredSpec = null;
@@ -651,7 +651,7 @@ public class SpecializationScreen extends Screen {
      */
     private void drawButton(GuiGraphics guiGraphics, int x, int y, int width, int height, Component label,
                             boolean hover, boolean enabled, boolean primary) {
-        int background = !enabled ? 0x80130F09 : hover ? 0xF01E1810 : 0xC0130F09;
+        int background = !enabled ? MasteryPalette.withAlpha(MasteryPalette.PANEL, 0x80) : hover ? MasteryPalette.withAlpha(MasteryPalette.PANEL_HOVER, 0xF0) : MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xC0);
         guiGraphics.fill(x, y, x + width, y + height, background);
         int border = !enabled ? CHIP_EDGE : hover || primary ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
         frame(guiGraphics, x, y, width, height, border);
@@ -699,7 +699,7 @@ public class SpecializationScreen extends Screen {
             boolean active = family == null ? this.familyFilter == null : family.equals(this.familyFilter);
             boolean hover = inside(mouseX, mouseY, x, y, width, CHIP_HEIGHT);
             guiGraphics.fill(x, y, x + width, y + CHIP_HEIGHT,
-                    active ? 0x40E8C25A : hover ? 0x22FFFFFF : 0x80130F09);
+                    active ? 0x40E8C25A : hover ? 0x22FFFFFF : MasteryPalette.withAlpha(MasteryPalette.PANEL, 0x80));
             frame(guiGraphics, x, y, width, CHIP_HEIGHT,
                     active ? MasteryPalette.GOLD : hover ? MasteryPalette.GOLD_DARK : CHIP_EDGE);
             guiGraphics.drawString(this.font, label, x + 4, y + 2,
@@ -752,7 +752,7 @@ public class SpecializationScreen extends Screen {
     private void drawSlotTile(GuiGraphics guiGraphics, MasteryConfig.Snapshot snapshot, SlotView view, int x, int y,
                               int width, boolean hover) {
         boolean selected = view.slot() == this.selectedSlot;
-        guiGraphics.fill(x, y, x + width, y + SLOT_TILE_HEIGHT, 0xBF130F09);
+        guiGraphics.fill(x, y, x + width, y + SLOT_TILE_HEIGHT, MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xBF));
         if (selected) {
             guiGraphics.fill(x, y, x + width, y + SLOT_TILE_HEIGHT, 0x29E8C25A);
         } else if (hover) {
@@ -1203,7 +1203,7 @@ public class SpecializationScreen extends Screen {
      */
     private void drawPointsBox(GuiGraphics guiGraphics, int x, int y, int width, String label, String labelShort,
                                int available, int total, String source, String sourceShort, String next, int color) {
-        guiGraphics.fill(x, y, x + width, y + POINTS_BOX_HEIGHT, 0xB3130F09);
+        guiGraphics.fill(x, y, x + width, y + POINTS_BOX_HEIGHT, MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xB3));
         frame(guiGraphics, x, y, width, POINTS_BOX_HEIGHT, CARD_EDGE);
         int inner = width - PAD * 2;
         // 标签后面跟一个「?」小方块，提示鼠标停上来能看明细；整个标签都放不下时换短说法（Artifice pts）
@@ -1737,7 +1737,7 @@ public class SpecializationScreen extends Screen {
     private void drawCard(GuiGraphics guiGraphics, CardView card, int x, int y, int width, int height,
                           boolean hover, int mouseX, int mouseY, int clipTop, int clipBottom) {
         boolean equipped = card.inSlot() != 0;
-        guiGraphics.fill(x, y, x + width, y + height, 0xB3130F09);
+        guiGraphics.fill(x, y, x + width, y + height, MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xB3));
         if (equipped) {
             guiGraphics.fill(x, y, x + width, y + height, 0x24E8C25A);
         } else if (hover) {
@@ -2564,7 +2564,7 @@ public class SpecializationScreen extends Screen {
     }
 
     private void panel(GuiGraphics guiGraphics, int x, int y, int width, int height) {
-        guiGraphics.fill(x, y, x + width, y + height, 0xF5130F09);
+        guiGraphics.fill(x, y, x + width, y + height, MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xF5));
         frame(guiGraphics, x, y, width, height, MasteryPalette.EDGE);
     }
 
@@ -2962,7 +2962,7 @@ public class SpecializationScreen extends Screen {
         int x = MARGIN;
         int y = r.barTop();
         int w = this.width - MARGIN * 2;
-        guiGraphics.fill(x, y, x + w, y + BAR_HEIGHT, 0xBF130F09);
+        guiGraphics.fill(x, y, x + w, y + BAR_HEIGHT, MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xBF));
         frame(guiGraphics, x, y, w, BAR_HEIGHT, CARD_EDGE);
         // 字格竖直居中在框里：框内 14 高，字格 8 高，上下各空 3
         int row = y + (BAR_HEIGHT - 2 - 8) / 2 + 1;
@@ -3094,7 +3094,7 @@ public class SpecializationScreen extends Screen {
             }
             return;
         }
-        int color = kind == 2 ? 0xFF0B0906 : kind == 0 ? TEXT_FAINT : MasteryPalette.TEXT;
+        int color = kind == 2 ? (MasteryPalette.BG | 0xFF000000) : kind == 0 ? TEXT_FAINT : MasteryPalette.TEXT;
         drawAt(guiGraphics, Component.literal(label), x + (BADGE - (fw(label) - 1.0F)) / 2.0F, y, color);
     }
 
@@ -3334,7 +3334,7 @@ public class SpecializationScreen extends Screen {
             cx = (this.width - calloutWidth) / 2;
             cy = Math.max(4, (this.height - calloutHeight) / 2);
         }
-        guiGraphics.fill(cx, cy, cx + calloutWidth, cy + calloutHeight, 0xF5130F09);
+        guiGraphics.fill(cx, cy, cx + calloutWidth, cy + calloutHeight, MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xF5));
         frame(guiGraphics, cx, cy, calloutWidth, calloutHeight, MasteryPalette.GOLD);
         // 4 行的小三角，尖朝照亮的那块，尖离亮金框 2 像素
         if ("below".equals(place) || "above".equals(place)) {

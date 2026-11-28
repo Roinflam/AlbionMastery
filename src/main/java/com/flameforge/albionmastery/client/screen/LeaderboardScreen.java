@@ -826,7 +826,7 @@ public class LeaderboardScreen extends Screen {
             requestList(this.period, this.sort);
         }
 
-        guiGraphics.fill(0, 0, this.width, this.height, MasteryPalette.BG);
+        MasteryPalette.drawBackground(guiGraphics, this.width, this.height);
         drawHeader(guiGraphics, now);
         drawTabs(guiGraphics, mouseX, mouseY);
         drawList(guiGraphics, now);
@@ -919,7 +919,7 @@ public class LeaderboardScreen extends Screen {
         boolean focused = this.searchBox != null && this.searchBox.isFocused();
         boolean searching = !this.activeQuery.isEmpty();
         int border = focused || searching ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK;
-        drawFramedBox(guiGraphics, searchLeft(), searchTop(), searchWidth(), SEARCH_HEIGHT, 0xC0130F09, border);
+        drawFramedBox(guiGraphics, searchLeft(), searchTop(), searchWidth(), SEARCH_HEIGHT, MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xC0), border);
         if (this.searchBox != null && !this.searchBox.getValue().isEmpty()) {
             boolean hover = isOn(this.mouseXNow, this.mouseYNow, searchClearLeft(), searchTop(),
                     SEARCH_CLEAR_WIDTH, SEARCH_HEIGHT);
@@ -988,7 +988,7 @@ public class LeaderboardScreen extends Screen {
     private void drawTab(GuiGraphics guiGraphics, Component label, int left, int right, int top,
                          boolean active, int mouseX, int mouseY) {
         boolean hover = isOn(mouseX, mouseY, left, top, right - left, TAB_HEIGHT);
-        int fill = active ? 0x40E8C25A : (hover ? 0xF01E1810 : 0xC0130F09);
+        int fill = active ? 0x40E8C25A : (hover ? MasteryPalette.withAlpha(MasteryPalette.PANEL_HOVER, 0xF0) : MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xC0));
         int border = active ? MasteryPalette.GOLD_BRIGHT : (hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK);
         drawFramedBox(guiGraphics, left, top, right - left, TAB_HEIGHT, fill, border);
         guiGraphics.drawCenteredString(this.font, label, (left + right) / 2,
@@ -1417,7 +1417,7 @@ public class LeaderboardScreen extends Screen {
         int boxWidth = textWidth + 6;
         int boxHeight = 10;
         guiGraphics.fill(x - 1, y - 1, x + boxWidth + 1, y + boxHeight + 1, 0xFF0A0806);
-        guiGraphics.fill(x, y, x + boxWidth, y + boxHeight, 0xFF1E1810);
+        guiGraphics.fill(x, y, x + boxWidth, y + boxHeight, MasteryPalette.PANEL_HOVER);
         if (emphasized) {
             guiGraphics.fill(x, y, x + boxWidth, y + boxHeight, RenderUtil.withAlpha(color, 0.22F));
         }
@@ -1555,7 +1555,7 @@ public class LeaderboardScreen extends Screen {
      * @param disabled    是否置灰（冷却中）
      */
     private void drawButton(GuiGraphics guiGraphics, int x, int y, Component label, boolean hover, boolean disabled) {
-        int fill = hover ? 0xF01E1810 : 0xC0130F09;
+        int fill = hover ? MasteryPalette.withAlpha(MasteryPalette.PANEL_HOVER, 0xF0) : MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xC0);
         int border = disabled ? MasteryPalette.GOLD_DARK : (hover ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK);
         drawFramedBox(guiGraphics, x, y, BUTTON_WIDTH, BUTTON_HEIGHT, fill, border);
         guiGraphics.drawCenteredString(this.font, label, x + BUTTON_WIDTH / 2, y + (BUTTON_HEIGHT - 8) / 2 + 1,

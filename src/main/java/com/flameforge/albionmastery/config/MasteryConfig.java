@@ -1940,6 +1940,8 @@ public final class MasteryConfig {
         public final ForgeConfigSpec.BooleanValue specGuideBar;
         public final ForgeConfigSpec.IntValue specGuideVersion;
         public final ForgeConfigSpec.ConfigValue<String> screenScale;
+        public final ForgeConfigSpec.ConfigValue<String> backgroundImage;
+        public final Map<String, ForgeConfigSpec.ConfigValue<String>> paletteColors;
 
         Client(ForgeConfigSpec.Builder builder) {
             builder.comment("武器专精系统 · 客户端表现")
@@ -2013,8 +2015,68 @@ public final class MasteryConfig {
                     .define("screenScale", "auto",
                             v -> v instanceof String text && text.trim().matches("auto(?:[+-][1-8])?|[1-8]"));
 
+            builder.comment("专精界面（罗盘、特化页、段位之路、排行榜）的配色与背景，用于和整合包其他界面统一风格。",
+                            "颜色写作 #RRGGBB 或 #AARRGGBB（AA 为不透明度，00 全透明、FF 不透明），留空则使用默认颜色。",
+                            "保存后立即生效，无需重启。")
+                    .push("palette");
+
+            this.backgroundImage = builder
+                    .comment("背景图片的资源路径，图片按比例铺满屏幕，超出部分居中裁去。资源包提供此路径的图片即可替换背景；",
+                            "资源中没有这张图时使用下方的 background 纯色。留空则始终使用纯色。")
+                    .define("backgroundImage", "albionmastery:textures/gui/background.png",
+                            v -> v instanceof String text
+                                    && (text.isBlank() || net.minecraft.resources.ResourceLocation.isValidResourceLocation(text.trim())));
+
+            Map<String, ForgeConfigSpec.ConfigValue<String>> colors = new LinkedHashMap<>();
+            color(builder, colors, "background", "#F20B0906", "背景纯色（没有背景图时铺满全屏）");
+            color(builder, colors, "backgroundImageTint", "#80000000", "叠加在背景图上的颜色，用于压暗背景、保证文字清晰；设为 #00000000 则不叠加");
+            color(builder, colors, "panel", "#FF130F09", "面板、顶栏、按钮的底色");
+            color(builder, colors, "panelHover", "#FF1E1810", "按钮、卡片在鼠标悬停时的底色");
+            color(builder, colors, "barTrack", "#FF17120A", "进度条未填满部分的底色");
+            color(builder, colors, "edge", "#FF6B5223", "面板边框与分隔线");
+            color(builder, colors, "text", "#FFEFE3C8", "主要文字");
+            color(builder, colors, "textDim", "#FF9C8E70", "次要文字");
+            color(builder, colors, "gold", "#FFE8C25A", "主强调色（标题、已解锁描边）");
+            color(builder, colors, "goldBright", "#FFFFE9A8", "高亮强调色（选中、满级）");
+            color(builder, colors, "goldDark", "#FF5A4520", "暗强调色（未解锁的描边）");
+            color(builder, colors, "goldWhite", "#FFFFF7DE", "最高一档强调色（整条链路满级的节点）");
+            color(builder, colors, "nodeBackplate", "#FF070604", "节点外圈的底板");
+            color(builder, colors, "nodeFill", "#FF2E2617", "已解锁节点的填充");
+            color(builder, colors, "nodeFillLocked", "#FF191510", "未解锁节点的填充");
+            color(builder, colors, "progress", "#FFB98F28", "等级进度条的填充");
+            color(builder, colors, "line", "#FFA07C33", "已解锁的连线");
+            color(builder, colors, "lineLocked", "#FF453722", "未解锁的连线");
+            color(builder, colors, "warn", "#FFE08A3C", "警告与提示色");
+            this.paletteColors = Collections.unmodifiableMap(colors);
+
+            builder.pop();
             builder.pop();
         }
+
+        private static void color(ForgeConfigSpec.Builder builder, Map<String, ForgeConfigSpec.ConfigValue<String>> out,
+                                  String key, String fallback, String comment) {
+            out.put(key, builder.comment(comment + "，默认 " + fallback)
+                    .define(key, fallback, v -> v instanceof String text && (text.isBlank() || parseColor(text) != null)));
+        }
+    }
+
+    /**
+     * 解析 #RRGGBB / #AARRGGBB，六位的按不透明算；留空当作默认，返回 null 的只有写错的。
+     *
+     * @return 颜色；格式不对返回 null
+     */
+    public static Integer parseColor(String text) {
+        String hex = text.trim();
+        if (hex.startsWith("#")) {
+            hex = hex.substring(1);
+        } else if (hex.startsWith("0x") || hex.startsWith("0X")) {
+            hex = hex.substring(2);
+        }
+        if (!hex.matches("[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8}")) {
+            return null;
+        }
+        int value = (int) Long.parseLong(hex, 16);
+        return hex.length() == 6 ? 0xFF000000 | value : value;
     }
 
     /**

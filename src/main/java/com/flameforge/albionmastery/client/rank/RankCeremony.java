@@ -684,7 +684,7 @@ public final class RankCeremony {
         pose.pushPose();
         pose.translate(x, y, 0.0F);
         pose.scale(scale, scale, 1.0F);
-        guiGraphics.fill(-half, -6, half, 6, EmblemPainter.withAlpha(0xF0130F09, alpha));
+        guiGraphics.fill(-half, -6, half, 6, EmblemPainter.withAlpha(MasteryPalette.withAlpha(MasteryPalette.PANEL, 0xF0), alpha));
         guiGraphics.fill(-half + 1, -7, half - 1, -6, edge);
         guiGraphics.fill(-half + 1, 6, half - 1, 7, edge);
         guiGraphics.fill(-half - 1, -6, -half, 6, edge);

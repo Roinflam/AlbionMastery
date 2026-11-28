@@ -33,9 +33,6 @@ public final class ScaleKnob {
     private static final int P_MINUS = 1;
     private static final int P_PLUS = 2;
     private static final int P_AUTO = 3;
-    private static final int BUTTON_BG = 0xFF130F09;
-    private static final int BUTTON_BG_HOVER = 0xFF1E1810;
-    private static final int BUTTON_BG_SUNK = 0xFF0B0906;
     private static final int OFF_EDGE = 0xFF3A2E18;
     private static final int OFF_TEXT = 0xFF6F634C;
     private static final int BOX_BG = 0xFF080704;
@@ -179,7 +176,7 @@ public final class ScaleKnob {
         boolean hover = inKnob(mx, my);
         boolean sunk = this.open || (this.press == P_KNOB && hover);
         g.fill(this.x, this.y, this.x + this.size, this.y + this.size,
-                sunk ? BUTTON_BG_SUNK : hover ? BUTTON_BG_HOVER : BUTTON_BG);
+                sunk ? (MasteryPalette.BG | 0xFF000000) : hover ? MasteryPalette.PANEL_HOVER : MasteryPalette.PANEL);
         frame(g, this.x, this.y, this.size, this.size, hover || this.open ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK);
         String[] mag = this.size % 2 == 0 ? MAG_EVEN : MAG_ODD;
         int off = (this.size - mag.length) / 2;
@@ -240,7 +237,7 @@ public final class ScaleKnob {
         int bx = bx(c, k);
         int w = bw(c, k);
         boolean prs = hov && this.press == k;
-        g.fill(bx, ry, bx + w, ry + ROW_H, dis ? BUTTON_BG : prs ? BUTTON_BG_SUNK : hov ? BUTTON_BG_HOVER : BUTTON_BG);
+        g.fill(bx, ry, bx + w, ry + ROW_H, dis ? MasteryPalette.PANEL : prs ? (MasteryPalette.BG | 0xFF000000) : hov ? MasteryPalette.PANEL_HOVER : MasteryPalette.PANEL);
         frame(g, bx, ry, w, ROW_H, dis ? OFF_EDGE : hov ? MasteryPalette.GOLD : MasteryPalette.GOLD_DARK);
         int color = dis ? OFF_TEXT : hov ? MasteryPalette.GOLD_BRIGHT : MasteryPalette.TEXT;
         g.drawString(font, label, bx + (w - tw(font, label)) / 2, ry + (ROW_H - 8) / 2, color, false);
