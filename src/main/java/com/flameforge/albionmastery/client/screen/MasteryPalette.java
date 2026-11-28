@@ -96,10 +96,7 @@ public final class MasteryPalette {
      * 铺满整屏的背景：资源里有背景图就画图再盖一层 {@link #BG_IMAGE_TINT}，没有就是纯色 {@link #BG}。
      */
     public static void drawBackground(GuiGraphics guiGraphics, int width, int height) {
-        if (backgroundImage != null && backgroundWidth == 0) {
-            probeBackground();
-        }
-        if (backgroundImage == null || backgroundWidth <= 0) {
+        if (!hasBackgroundImage()) {
             guiGraphics.fill(0, 0, width, height, BG);
             return;
         }
@@ -110,6 +107,13 @@ public final class MasteryPalette {
         guiGraphics.blit(backgroundImage, 0, 0, width, height, u, v,
                 Math.round(width / scale), Math.round(height / scale), backgroundWidth, backgroundHeight);
         guiGraphics.fill(0, 0, width, height, BG_IMAGE_TINT);
+    }
+
+    public static boolean hasBackgroundImage() {
+        if (backgroundImage != null && backgroundWidth == 0) {
+            probeBackground();
+        }
+        return backgroundImage != null && backgroundWidth > 0;
     }
 
     /**

@@ -606,7 +606,8 @@ public class RankTrackScreen extends Screen {
      */
     private void drawEdgeFade(GuiGraphics guiGraphics) {
         float overflow = contentWidth() - viewWidth();
-        if (overflow <= 0.0F) {
+        // 渐隐是往纯色背景里淡出的，铺了背景图时只会变成两道黑边
+        if (overflow <= 0.0F || MasteryPalette.hasBackgroundImage()) {
             return;
         }
         Matrix4f matrix = guiGraphics.pose().last().pose();
